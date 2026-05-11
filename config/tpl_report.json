@@ -1,0 +1,48 @@
+{
+  "base_mva": 100000,
+
+  "voltage": {
+    "p0": {
+      "v_min": 0.95,
+      "v_max": 1.05,
+      "v_marginal_low": 0.98,
+      "v_marginal_high": 1.02
+    },
+    "p1_p7": {
+      "v_min": 0.90,
+      "v_max": 1.05
+    },
+    "bands": {
+      "severe_low": 0.90,
+      "violation_low": 0.95,
+      "marginal_low": 0.98,
+      "marginal_high": 1.02,
+      "violation_high": 1.05
+    },
+    "fp_tol": 0.001
+  },
+
+  "thermal": {
+    "overload_pct": 100,
+    "heavy_pct": 80,
+    "moderate_pct": 50,
+    "severe_pct": 120
+  },
+
+  "generator": {
+    "q_at_limit_margin": 0.015,
+    "q_fp_tol": 0.001,
+    "min_gen_output_mw": 0.01
+  },
+
+  "display": {
+    "max_violation_rows": -1,
+    "max_heavily_loaded": 10,
+    "max_moderate_loaded": 10,
+    "max_q_limit": 20,
+    "max_contingency_overloads": 20,
+    "max_critical_elements": 10,
+    "max_parallel_sample": 10,
+    "marginal_sample_count": 10
+  }
+}

@@ -1,0 +1,213 @@
+# InterPSS Python Runtime — Setup Guide
+
+This document describes how to set up and run the InterPSS Python runtime for power system simulations. 
+
+## Project Overview
+
+InterPSS is an open-source, Java-based power system simulation platform. This workspace bridges it to Python via [JPype](https://github.com/jpype-project/jpype), allowing you to run AC load flow and contingency analysis from Python scripts.
+
+**Project layout** — the runtime is spread across a parent directory where `wspace/` is the working directory for scripts, data, and results, while `src/`, `lib/`, and `config/` are shared infrastructure at the parent level. The tree below uses `temp/` as a placeholder for that **project root** (in this repo, the `ipss.agent/` directory).
+
+```
+temp/
+├── .venv/                     # Python virtual environment
+├── config/
+│   ├── config.json            # JVM path, classpath, logging config (often gitignored locally)
+│   └── aclf_run.json        # ACLF NR / limit-control settings (used by ipss_cmd.py)
+├── lib/
+│   ├── ipss_runnable.jar      # Main InterPSS runnable JAR
+│   └── deps/                  # Third-party JARs (22 total)
+│       ├── ipss.core.lib-1.0.16.jar
+│       ├── ieee.odm.schema-1.0.1.jar
+│       ├── ieee.odm_pss-1.0.1.jar
+│       ├── slf4j-api-1.7.36.jar / slf4j-simple-1.7.36.jar
+│       ├── org.eclipse.emf.common-2.28.0.jar / .ecore-2.38.0.jar
+│       ├── hazelcast-5.3.6.jar
+│       ├── jaxb-api-2.3.1.jar / jaxb-impl-2.3.1.jar
+│       ├── javax.activation-api-1.2.0.jar
+│       ├── commons-math3-3.6.1.jar
+│       ├── JKLU-1.0.0.jar / BTFJ-1.0.1.jar / AMDJ-1.0.1.jar / COLAMDJ-1.0.1.jar
+│       ├── csparsej-1.1.1.jar
+│       ├── dflib-2.0.0-M6.jar / dflib-csv-2.0.0-M6.jar / dflib-json-2.0.0-M6.jar
+│       ├── commons-csv-1.10.0.jar
+│       └── gson-2.11.0.jar
+
+├── src/
+│   ├── __init__.py
+│   ├── config.py              # ConfigManager + JvmManager
+│   ├── interpss.py            # Java class imports namespace
+│   └── adapter/
+│       ├── __init__.py
+│       └── input_adapter.py   # IeeeFileAdapter, PsseRawFileAdapter
+└── wspace/                    # <-- working directory
+    ├── ipss_cmd.py            # CLI for running simulations
+    ├── generate_nerc_tpl_report.py  # NERC TPL-001-5 report generator
+    ├── data/
+    │   └── ieee/
+    │       └── ieee118.ieee   # IEEE 118-bus test case
+```
+
+## Prerequisites
+
+- **Python 3.10+** with pip
+- **Java JDK 21** (or compatible version)
+- **macOS / Linux / Windows** (tested on macOS)
+
+Check your Java version:
+
+```bash
+java -version
+```
+
+The JVM shared library path is configured in `config/config.json`. On macOS with JDK 21 installed at the default location, this is:
+
+```
+/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home/lib/libjli.dylib
+```
+
+On Linux, use the `libjvm.so` path (e.g., `/usr/lib/jvm/java-21-openjdk/lib/server/libjvm.so`).
+
+## Step 1: Python Virtual Environment
+
+From the **project root** (the directory that contains `wspace/`, `src/`, `config/`, and `lib/`), create and activate a Python virtual environment:
+
+```bash
+python3 -m venv .venv
+
+# Activate it
+source .venv/bin/activate      # macOS / Linux
+# .venv\Scripts\activate       # Windows
+```
+
+### Required Python Packages
+
+```bash
+pip install jpype1 numpy
+```
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `jpype1` | ≥ 1.5.0 | Java-Python bridge |
+| `numpy` | ≥ 1.24 | Numerical operations used by `config.py` |
+
+## Step 2: JAR Dependencies
+
+The InterPSS runtime requires these JAR categories:
+
+### InterPSS Core JARs
+
+| JAR | Source | Purpose |
+|-----|--------|---------|
+| `ipss_runnable.jar` | InterPSS build | Plugin core, adapters, samples |
+| `ipss.core.lib-1.0.16.jar` | InterPSS build | ACLF engine, algorithms, EMF model |
+| `ipss.plugin.core-1.0.16.jar` | InterPSS build | Plugin framework |
+| `ieee.odm.schema-1.0.1.jar` | InterPSS build | IEEE ODM XML schema |
+| `ieee.odm_pss-1.0.1.jar` | InterPSS build | IEEE ODM PSS types |
+
+### Sparse Solver JARs
+
+| JAR | Purpose |
+|-----|---------|
+| `JKLU-1.0.0.jar` | KLU sparse LU solver |
+| `BTFJ-1.0.1.jar` | Block Triangular Form permutation |
+| `AMDJ-1.0.1.jar` | Approximate Minimum Degree ordering |
+| `COLAMDJ-1.0.1.jar` | Column AMD ordering |
+| `csparsej-1.1.1.jar` | CSPARSEJ — CSparse sparse matrix library |
+
+### DataFrame Export JARs (for CSV output)
+
+| JAR | Maven Central Coordinates | Purpose |
+|-----|---------------------------|---------|
+| `dflib-2.0.0-M6.jar` | `org.dflib:dflib:2.0.0-M6` | DataFrame library |
+| `dflib-csv-2.0.0-M6.jar` | `org.dflib:dflib-csv:2.0.0-M6` | CSV save support |
+| `dflib-json-2.0.0-M6.jar` | `org.dflib:dflib-json:2.0.0-M6` | JSON support |
+| `commons-csv-1.10.0.jar` | `org.apache.commons:commons-csv:1.10.0` | CSV parsing |
+
+> The Maven Central JARs can be downloaded from [Maven Central Repository](https://central.sonatype.com/) or any Maven mirror.
+
+### Third-Party Support JARs
+
+| JAR | Purpose |
+|-----|---------|
+| `slf4j-api-1.7.36.jar` / `slf4j-simple-1.7.36.jar` | Logging |
+| `org.eclipse.emf.common-2.28.0.jar` / `.ecore-2.38.0.jar` | Eclipse Modeling Framework |
+| `hazelcast-5.3.6.jar` | Distributed computing |
+| `jaxb-api-2.3.1.jar` / `jaxb-impl-2.3.1.jar` | XML binding |
+| `javax.activation-api-1.2.0.jar` | Java Activation Framework |
+| `commons-math3-3.6.1.jar` | Math utilities |
+
+All JARs must be placed in `lib/` (main JARs) and `lib/deps/` (dependency JARs).
+
+## Step 3: Configuration
+
+The file `config/config.json` tells the runtime where to find the JVM and which JARs to load:
+
+```json
+{
+  "jvm_path": "/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home/lib/libjli.dylib",
+  "jar_path": "lib/ipss_runnable.jar:lib/deps",
+  "log_config_path": "config/log4j2.xml"
+}
+```
+
+| Key | Description |
+|-----|-------------|
+| `jvm_path` | Full path to the JVM shared library. Supports `{HOME}` expansion. |
+| `jar_path` | Classpath entries separated by `:` (macOS/Linux) or `;` (Windows). Directories are expanded to include all `*.jar` files within them. |
+| `log_config_path` | Optional path to a Log4j2 XML configuration file. |
+
+The `ConfigManager` in `src/config.py` resolves relative paths against the project root (parent of `config/`).
+
+### ACLF run configuration
+
+`aclf_run.json` defines Newton–Raphson and related options (`maxIterations`, `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For ACLF, `wspace/ipss_cmd.py` resolves the file with a **two-tier lookup**:
+
+1. **Case-specific (preferred):** `<input_parent>/config/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/config/aclf_run.json` for input under that folder).
+2. **Project default (fallback):** `config/aclf_run.json` at the project root.
+
+The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied with `configAclfRun(algo, polarCoordinate, includeAdjustments, False)`. The script prints `Using config file: <path>` to stderr so you can confirm which file ran. Edit the JSON to tune convergence or solver behavior without editing Python.
+
+## Step 4: Running a Loadflow test
+
+The main entry point is `wspace/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated:
+
+```bash
+cd wspace
+source ../.venv/bin/activate
+python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+```
+
+### Command Syntax
+
+```
+python ipss_cmd.py <simutype> <format> <input>
+```
+
+| Argument | Values | Description |
+|----------|--------|-------------|
+| `simutype` | `aclf`, `ca` | Simulation type: load flow or contingency analysis |
+| `format` | `ieee`, `psse` | Input file format |
+| `input` | path | Input file path (relative to `wspace/`) |
+
+## Step 5: Generating NERC TPL-001-5 Reports
+
+The report generator (`wspace/generate_nerc_tpl_report.py`) reads CSV outputs from a previous simulation run and produces a NERC TPL-001-5 compliance report in Markdown. The CSV prefix is auto-discovered from the result directory, so you provide a display name and the result directory name:
+
+```bash
+cd wspace
+source ../.venv/bin/activate
+
+# <display_name> is a human-readable name for the report header
+# <result_dir> is the folder with CSVs: path relative to wspace/ (ipss_cmd output), or a name under wspace/result/
+python generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
+```
+
+The script writes `NERC_TPL_001_5_Report.md` into the same result directory. Alias-based discovery is also supported for single-argument backward compatibility:
+
+```bash
+python generate_nerc_tpl_report.py texas2k
+python generate_nerc_tpl_report.py ieee118
+```
+
+Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of the script.
