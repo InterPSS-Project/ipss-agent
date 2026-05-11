@@ -1,36 +1,38 @@
-# ipss.agent
+# iPSS Aagent
 
-**InterPSS Agent** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repo is set up for Agentic power system simulation automation in **Cursor**, **Claude Code**, **Gemini**and **OpenAI Codex** (skills/commands).
+**InterPSS Agentic Power System Simulation Agent** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repo is set up for Agentic power system simulation automation in **OpenAI Codex Desktop**, and **Claude Code**, **Gemini** CLI (skills/commands).
 
-## Quick setup
+## Env Setup
 
-From the **repository root** folder:
-
-**OpenAI Codex (Recommended)** 
-Add this folder as a Codex project, setp the **ipss-sim** skill/command, :
+**OpenAI Codex (Recommended)**   
+Add this folder as a Codex project, Then do following setup
 
 ```text
-    Setup ipss.agent environment
+    Setup ipss.agent env
     # test the setup by running the sample case in the wspace/data folder
     /ipss-sim <simu_case_directory> "<NERC Report Name>" 
 ```
 
-Then you can add your data forlder to as a project to the Codex, and ask the agent to run the power system simulation workflow.
+Then you can add your data forlder to as Codes project, and ask the agent to perfom power system simulation.
+
+
 
 **CLI Setup**
 
 ```text
     /init  # optional init step
     Setup ipss.agent env
-    Setup the Skills and command to run the workflow #
+    Setup the Skills and command to run the workflow
 ```
 
 ## Perform Simulation and Generate Report
 
+After the setup, you can perfom power system simulation using the agent
+
 **Skill-style Simulation**
 
 ```text
-    /ipss-sim <simu_case_file> in psse format, <contingency_file> <monitored_file> "<NERC Report Name>"
+    /ipss-sim <simu_case_file> <contingency_file> <monitored_file> "<NERC Report Name>"
 ```
 
 or directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency*.json`, `*monitor*.json`):
