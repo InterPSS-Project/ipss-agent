@@ -4,9 +4,11 @@
 
 ## Environment setup
 
+Git check out or download this repository and follow the setup instructions below.
+
 ### OpenAI Codex Desktop (recommended)
 
-1. Add this folder as a Codex project.
+1. Add the folder as a Codex project.
 2. Run the setup below, then test with a sample case (for example, under `wspace/data/Texas2K`).
 
 ```text
