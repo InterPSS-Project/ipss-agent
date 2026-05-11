@@ -1,0 +1,6 @@
+interface:
+  display_name: "InterPSS Simulation"
+  short_description: "Run power-flow simulations and reports"
+  default_prompt: "Use $ipss-sim to run AC load flow and generate a NERC TPL report for my case files."
+policy:
+  allow_implicit_invocation: true
