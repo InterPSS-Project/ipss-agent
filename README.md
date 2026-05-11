@@ -1,4 +1,4 @@
-# iPSS Aagent
+# iPSS Agent
 
 **InterPSS Agentic Power System Simulation Agent** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repo is set up for Agentic power system simulation automation in **OpenAI Codex Desktop**, and **Claude Code**, **Gemini** CLI (skills/commands).
 
