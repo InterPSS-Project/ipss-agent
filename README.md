@@ -1,64 +1,66 @@
 # iPSS Agent
 
-**InterPSS Agentic Power System Simulation Agent** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repo is set up for Agentic power system simulation automation in **OpenAI Codex Desktop**, and **Claude Code**, **Gemini** CLI (skills/commands).
+**InterPSS Agentic Power System Simulation Agent** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository is configured for agent-driven power-system simulation in **OpenAI Codex Desktop**, **Claude Code CLI**, and **Gemini CLI** (skills and commands).
 
-## Env Setup
+## Environment setup
 
-**OpenAI Codex Desktop (Recommended)**   
-Add this folder as a Codex project, Then do following setup
+### OpenAI Codex Desktop (recommended)
+
+1. Add this folder as a Codex project.
+2. Run the setup below, then test with a sample case (for example, under `wspace/data/Texas2K`).
 
 ```text
-    Setup ipss.agent env
-    # test the setup by running the sample case in the wspace/data folder
-    /ipss-sim <simu_case_directory> "<NERC Report Name>" 
+Setup ipss.agent env
+# Test the setup with a sample case directory
+/ipss-sim <simu_case_directory> "<NERC Report Name>"
 ```
 
-Then you can add your data forlder to as Codes project, and ask the agent to perfom power system simulation.
+1. Add your data folder as a Codex project and use the agent to do the simulations.
 
-
-
-**CLI Setup**
+### CLI setup
 
 ```text
-    /init  # optional init step
-    Setup ipss.agent env
-    Setup the Skills and command to run the workflow
+/init  # optional
+Setup ipss.agent env
+Setup the skills and commands to run the workflow
 ```
 
-## Perform Simulation and Generate Report
+## Run simulations and generate reports
 
-After the setup, you can perfom power system simulation using the agent
+After the setup, run power-system simulations through the agent.
 
-**Skill-style Simulation**
+### Skill-style simulation
+
+Single files:
 
 ```text
-    /ipss-sim <simu_case_file> <contingency_file> <monitored_file> "<NERC Report Name>"
+/ipss-sim <simu_case_file> <contingency_file> <monitored_file> "<NERC Report Name>"
 ```
 
-or directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency*.json`, `*monitor*.json`):
+Directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency*.json`, `*monitor*.json`):
 
 ```text
-    /ipss-sim <simu_case_directory> "<NERC Report Name>"
+/ipss-sim <simu_case_directory> "<NERC Report Name>"
 ```
 
-**Direct Prompt Simulation**
+### Direct prompt simulation
 
 ```text
-    Run ACLF format psse <case_file>
-    Run CA format psse <case_file> <contingency_file> <monitor_file>
-    Gen NERC TPL report <case_name> <result_dir>
+Run ACLF format psse <case_file>
+Run CA format psse <case_file> <contingency_file> <monitor_file>
+Gen NERC TPL report <case_name> <result_dir>
 ```
 
-## Explore Simulation Results
+## Explore simulation results
 
-The simulation results are stored in the `<case_directory>/result` folder. You can explore the results with the LLM:
+Results are written to `<case_directory>/result dir`. You can inspect them with the LLM, for example:
 
 ```text
-    # Loadflow results
-    Find the lowest voltage bus
-    Find the highest loading branch
-    # Contingency analysis results
-    Find the top N-1 loaded branches
+# Load flow
+Find the lowest voltage bus
+Find the highest loading branch
+# Contingency analysis
+Find the top N-1 loaded branches
 ```
 
 ## Reference
