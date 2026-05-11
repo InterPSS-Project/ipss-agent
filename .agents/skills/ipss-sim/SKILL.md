@@ -5,7 +5,7 @@
 description: Run AC load flow, contingency analysis, and generate NERC TPL-001-5 reports. Accepts a directory (auto-discovers case/contingency/monitored files) or individual file paths.
 disable-model-invocation: true
 
-# InterPSS Simulation
+# InterPSS Simulation 
 
 Run power system simulations (AC load flow, contingency analysis) and generate NERC TPL-001-5 compliance reports via the InterPSS Python runtime.
 
