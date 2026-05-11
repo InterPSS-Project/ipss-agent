@@ -10,6 +10,14 @@ InterPSS is an open-source, Java-based power system simulation platform. This wo
 
 ```
 temp/
+├── .agents/
+│   └── skills/
+│       └── ipss-sim/          # OpenAI Codex Desktop project skill
+├── .claude/
+│   ├── commands/
+│   │   └── ipss-sim.md        # Claude Code slash-command entry point
+│   └── skills/
+│       └── ipss-sim/          # Claude Code skill copy
 ├── .venv/                     # Python virtual environment
 ├── config/
 │   ├── config.json            # JVM path, classpath, logging config (often gitignored locally)
@@ -93,6 +101,19 @@ pip install jpype1 numpy
 ## Step 2: JAR Dependencies
 
 The InterPSS runtime requires these JAR categories:
+
+### Recommended: Maven Wrapper Setup (macOS / Linux)
+
+This repository includes a bash Maven wrapper (`mvnw`) and a version-controlled
+`pom.xml` dependency manifest. From the project root, run:
+
+```bash
+./mvnw -q dependency:copy-dependencies
+```
+
+The wrapper downloads the pinned Maven distribution on first use and copies the
+runtime dependency JARs into `lib/deps/`. The downloaded Maven distribution and
+copied JARs are local setup artifacts and are not committed.
 
 ### InterPSS Core JARs
 
@@ -211,3 +232,87 @@ python generate_nerc_tpl_report.py ieee118
 ```
 
 Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of the script.
+
+## Step 6: Registering the `ipss-sim` Agent Skill
+
+This repository includes agent-facing skill files so Codex and Claude can run the full simulation workflow from a natural-language prompt.
+
+### OpenAI Codex Desktop
+
+The Codex project skill is stored at:
+
+```text
+.agents/skills/ipss-sim/SKILL.md
+```
+
+UI metadata for the skill is stored at:
+
+```text
+.agents/skills/ipss-sim/agents/openai.yaml
+```
+
+To use it:
+
+1. Add or open this repository folder as a Codex Desktop project.
+2. Make sure Steps 1-3 above have been completed.
+3. Invoke the skill by name in a prompt:
+
+```text
+Use $ipss-sim to run data/ieee/ieee118.ieee "IEEE 118-Bus Test Case"
+```
+
+For a directory that contains a case file plus contingency and monitored-branch JSON files:
+
+```text
+Use $ipss-sim to run data/psse/Texas2K "Texas 2K-Bus System"
+```
+
+Codex should load the project skill from `.agents/skills/ipss-sim/` and then run the workflow from `wspace/`:
+
+1. ACLF with `python ipss_cmd.py aclf ...`
+2. CA with `python ipss_cmd.py ca ...` when contingency and monitored files are provided or auto-discovered
+3. Report generation with `python generate_nerc_tpl_report.py ...`
+
+### Claude Code CLI
+
+Claude skill and command registration files are stored at:
+
+```text
+.claude/skills/ipss-sim/SKILL.md
+.claude/commands/ipss-sim.md
+```
+
+Use the slash-command form:
+
+```text
+/ipss-sim data/ieee/ieee118.ieee "IEEE 118-Bus Test Case"
+```
+
+or directory mode:
+
+```text
+/ipss-sim data/psse/Texas2K "Texas 2K-Bus System"
+```
+
+### Version-Control Notes
+
+- `.agents/skills/ipss-sim/**`, `.claude/skills/ipss-sim/**`, and `.claude/commands/ipss-sim.md` should be committed.
+- `.venv/`, `config/config.json`, generated `lib/deps/*.jar`, `.mvn/wrapper/dists/`, and `wspace/**/result/` are local setup or output artifacts and should remain uncommitted.
+- If the skill instructions change, keep the Codex and Claude `SKILL.md` copies aligned.
+
+### Quick Verification
+
+From the project root, these commands should show the registered skill files:
+
+```bash
+find .agents/skills/ipss-sim .claude/skills/ipss-sim .claude/commands -maxdepth 3 -type f | sort
+```
+
+Expected entries include:
+
+```text
+.agents/skills/ipss-sim/SKILL.md
+.agents/skills/ipss-sim/agents/openai.yaml
+.claude/commands/ipss-sim.md
+.claude/skills/ipss-sim/SKILL.md
+```
