@@ -4,7 +4,7 @@
 
 ## Env Setup
 
-**OpenAI Codex (Recommended)**   
+**OpenAI Codex Desktop (Recommended)**   
 Add this folder as a Codex project, Then do following setup
 
 ```text
