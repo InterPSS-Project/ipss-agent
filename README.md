@@ -48,7 +48,7 @@ Directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency*.json
 ```text
 Run ACLF format psse <case_file>
 Run CA format psse <case_file> <contingency_file> <monitor_file>
-Gen NERC TPL report <case_name> <result_dir>
+Gen NERC TPL report "<NERC Report Name>" <result_dir>
 ```
 
 ## Explore simulation results
