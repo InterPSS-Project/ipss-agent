@@ -1,5 +1,7 @@
 /.project   
 /.settings
+/.venv/
+/.mvn/wrapper/dists/
 
 *.jar
 !lib/ipss_runnable.jar
@@ -18,3 +20,7 @@
 /CLAUDE.md
 /GEMINI.md
 /.agents/**/*.*
+!/.agents/
+!/.agents/skills/
+!/.agents/skills/ipss-sim/
+!/.agents/skills/ipss-sim/**
