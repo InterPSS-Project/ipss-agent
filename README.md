@@ -1,34 +1,15 @@
 # iPSS Agent
 
-[**InterPSS Agentic Power System Simulation Agent**](https://drive.google.com/file/d/1Nr_12QFfeEBpWhf8C34uYy8fYQt-j7zr/view?usp=drive_link) for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository is configured for agent-driven power-system simulation in **OpenAI Codex Desktop**, **Claude Code CLI**, and **Gemini CLI** (skills and commands).
+**[InterPSS Agentic Power System Simulation Agent](docs/The iPSS Agent - Redefining Power System Simulation through Agentic AI.pdf)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository is configured for agent-driven power-system simulation in **OpenAI Codex Desktop**, **Claude Code CLI**, and **Gemini CLI** (skills and commands).
 
 ## Environment setup
 
 Git check out or download this repository and follow the setup instructions below.
-For manual setup, see [Setup.md](Setup.md). The short version is:
-
-```bash
-# macOS / Linux
-python3 -m venv .venv
-source .venv/bin/activate
-pip install jpype1 numpy
-./mvnw -q dependency:copy-dependencies
-```
-
-```powershell
-# Windows PowerShell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install jpype1 numpy
-.\mvnw.cmd -q dependency:copy-dependencies
-```
 
 ### OpenAI Codex Desktop (recommended)
 
 1. Add the folder as a Codex project.
-2. Run the environment setup above.
-3. Verify the project skill files exist under `.agents/skills/ipss-sim/`.
-4. Test with a sample case (for example, under `wspace/data/Texas2K`).
+2. Run the setup below, then test with a sample case (for example, under `wspace/data/Texas2K`).
 
 ```text
 Setup ipss.agent env
@@ -36,7 +17,7 @@ Setup ipss.agent env
 /ipss-sim <simu_case_directory> "<NERC Report Name>"
 ```
 
-After the repo project is working, add your data folder as a Codex project and use the agent to do the simulations.
+1. Add your data folder as a Codex project and use the agent to do the simulations.
 
 ### Claude/Gemini CLI setup
 
