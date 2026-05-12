@@ -23,8 +23,9 @@ from pathlib import Path
 
 # --- Locations ---------------------------------------------------------------
 
-WSPACE = Path(__file__).resolve().parent
-PROJECT_ROOT = WSPACE.parent
+_REPORT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = _REPORT_DIR.parent.parent
+WSPACE = PROJECT_ROOT / "wspace"
 RESULT_DIR = WSPACE / "result"
 
 # --- Configuration -----------------------------------------------------------

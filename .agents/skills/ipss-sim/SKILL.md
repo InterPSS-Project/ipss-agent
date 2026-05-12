@@ -154,7 +154,7 @@ Use this when the user asks for an ACLF report only (no contingency/TPL sections
 ```
 cd wspace
 source ../.venv/bin/activate
-python generate_aclf_report.py "<display_name>" <result_dir> [csv_prefix]
+python ../src/report/generate_aclf_report.py "<display_name>" <result_dir> [csv_prefix]
 ```
 
 **Parameters:**
@@ -167,10 +167,10 @@ python generate_aclf_report.py "<display_name>" <result_dir> [csv_prefix]
 
 ```
 # Single-case result directory
-python generate_aclf_report.py "Texas 2000Bus System" data/psse/Texas2K/result
+python ../src/report/generate_aclf_report.py "Texas 2000Bus System" data/psse/Texas2K/result
 
 # Shared result directory (explicit prefix avoids picking another case)
-python generate_aclf_report.py "IEEE 14-Bus System" data/ieee/result ieee14
+python ../src/report/generate_aclf_report.py "IEEE 14-Bus System" data/ieee/result ieee14
 ```
 
 **Output:** `AC_Loadflow_Report.md` written next to the CSVs in the result directory.
@@ -180,7 +180,7 @@ python generate_aclf_report.py "IEEE 14-Bus System" data/ieee/result ieee14
 ```
 cd wspace
 source ../.venv/bin/activate
-python generate_nerc_tpl_report.py "<display_name>" <result_dir>
+python ../src/report/generate_nerc_tpl_report.py "<display_name>" <result_dir>
 ```
 
 **Parameters:**
@@ -200,11 +200,11 @@ python generate_nerc_tpl_report.py "<display_name>" <result_dir>
 **Examples:**
 
 ```
-python generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
-python generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
+python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ../src/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
 
-Single-argument **aliases** (`ieee118`, `texas2k`, plus short forms via `KNOWN_CASE_ALIASES` in the script) still work when results are under `wspace/result/` — see [Setup.md](../../../Setup.md).
+Single-argument **aliases** (`ieee118`, `texas2k`, plus short forms via `KNOWN_CASE_ALIASES` in `src/report/generate_nerc_tpl_report.py`) still work when results are under `wspace/result/` — see [Setup.md](../../../Setup.md).
 
 **Output:** `NERC_TPL_001_5_Report.md` written **next to the CSVs** (e.g. `wspace/data/psse/Texas2K/result/`).
 
@@ -217,7 +217,7 @@ The `src/ipss_cmd.py` CLI writes ACLF results based on the input file's parent d
 
 CA results are written to the same directory.
 
-Pass that same `.../result` path as `result_dir` to `generate_aclf_report.py` (Step 3) or `generate_nerc_tpl_report.py` (Step 4). Optional: keep copies or symlinks under `wspace/result/` only if you rely on single-argument alias discovery.
+Pass that same `.../result` path as `result_dir` to `../src/report/generate_aclf_report.py` (Step 3) or `../src/report/generate_nerc_tpl_report.py` (Step 4). Optional: keep copies or symlinks under `wspace/result/` only if you rely on single-argument alias discovery.
 
 ## Troubleshooting
 

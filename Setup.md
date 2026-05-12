@@ -45,13 +45,15 @@ temp/
 │   ├── config.py              # ConfigManager + JvmManager
 │   ├── interpss.py            # Java class imports namespace
 │   ├── ipss_cmd.py            # CLI for running simulations
-│   └── adapter/
+│   ├── adapter/
 │       ├── __init__.py
 │       └── input_adapter.py   # IeeeFileAdapter, PsseRawFileAdapter
+│   └── report/                # Markdown report generators + shared helpers
+│       ├── __init__.py
+│       ├── ipss_report_common.py
+│       ├── generate_aclf_report.py
+│       └── generate_nerc_tpl_report.py
 └── wspace/                    # <-- working directory
-    ├── generate_nerc_tpl_report.py  # NERC TPL-001-5 report generator
-    ├── generate_aclf_report.py      # AC load flow Markdown report generator
-    ├── ipss_report_common.py        # Shared analysis + Markdown helpers
     ├── data/
     │   └── ieee/
     │       └── ieee118.ieee   # IEEE 118-bus test case
@@ -296,7 +298,7 @@ python ../src/ipss_cmd.py <simutype> <format> <input>
 
 ## Step 5: Generating NERC TPL-001-5 Reports
 
-The report generator (`wspace/generate_nerc_tpl_report.py`) reads CSV outputs from a previous simulation run and produces a NERC TPL-001-5 compliance report in Markdown. The CSV prefix is auto-discovered from the result directory, so you provide a display name and the result directory name:
+The report generator (`src/report/generate_nerc_tpl_report.py`) reads CSV outputs from a previous simulation run and produces a NERC TPL-001-5 compliance report in Markdown. The CSV prefix is auto-discovered from the result directory, so you provide a display name and the result directory name:
 
 ```bash
 cd wspace
@@ -304,8 +306,8 @@ source ../.venv/bin/activate
 
 # <display_name> is a human-readable name for the report header
 # <result_dir> is the folder with CSVs: path relative to wspace/ (ACLF/CA CLI output), or a name under wspace/result/
-python generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
-python generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
+python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ../src/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
 
 Windows PowerShell:
@@ -313,30 +315,30 @@ Windows PowerShell:
 ```powershell
 cd wspace
 ..\.venv\Scripts\Activate.ps1
-python generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ..\src\report\generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
 ```
 
 The script writes `NERC_TPL_001_5_Report.md` into the same result directory. Alias-based discovery is also supported for single-argument backward compatibility:
 
 ```bash
-python generate_nerc_tpl_report.py texas2k
-python generate_nerc_tpl_report.py ieee118
+python ../src/report/generate_nerc_tpl_report.py texas2k
+python ../src/report/generate_nerc_tpl_report.py ieee118
 ```
 
-Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of the script.
+Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of `src/report/generate_nerc_tpl_report.py`.
 
 ### Generating AC Loadflow reports
 
-For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `wspace/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `../src/ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
+For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `src/report/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `../src/ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
 
 ```bash
 cd wspace
 source ../.venv/bin/activate
 python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
-python generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ../src/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/result
 ```
 
-The script shares analysis and Markdown helpers with the NERC generator through `wspace/ipss_report_common.py`, so voltage bands, thermal loading percentages, and generator Q-limit logic stay aligned between the two reports.
+The script shares analysis and Markdown helpers with the NERC generator through `src/report/ipss_report_common.py`, so voltage bands, thermal loading percentages, and generator Q-limit logic stay aligned between the two reports.
 
 ## Step 6: Verifying the `ipss-sim` Agent Skill
 
@@ -377,7 +379,7 @@ Codex should load the project skill from `.agents/skills/ipss-sim/` and then run
 
 1. ACLF with `python ../src/ipss_cmd.py aclf ...`
 2. CA with `python ../src/ipss_cmd.py ca ...` when contingency and monitored files are provided or auto-discovered
-3. Report generation with `python generate_nerc_tpl_report.py ...`
+3. Report generation with `python ../src/report/generate_nerc_tpl_report.py ...`
 
 ### Claude Code CLI
 
