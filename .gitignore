@@ -19,8 +19,4 @@
 
 /CLAUDE.md
 /GEMINI.md
-/.agents/**/*.*
-!/.agents/
-!/.agents/skills/
-!/.agents/skills/ipss-sim/
-!/.agents/skills/ipss-sim/**
+
