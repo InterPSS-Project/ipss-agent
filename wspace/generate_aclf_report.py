@@ -22,7 +22,7 @@ Usage:
   python generate_aclf_report.py 'IEEE 14-Bus System' data/ieee/result ieee14
   python generate_aclf_report.py 'Texas 2000-Bus System' data/psse/Texas2K/result
 
-The thresholds reused from ``config/tpl_report.json`` (P0 voltage limits and
+The thresholds reused from ``config/gen_report.json`` (P0 voltage limits and
 Rate A loading bands) are labelled as **planning-style** guidance only — this
 report does **not** assert NERC TPL-001-5 compliance. For TPL compliance,
 use ``generate_nerc_tpl_report.py`` against the same CSV set.
@@ -266,7 +266,7 @@ def generate_aclf_report(
     w("")
     w(
         f"Voltage compliance bands below use planning-style limits of "
-        f"**{v_min_limit:.2f}–{v_max_limit:.2f} pu** from `config/tpl_report.json` "
+        f"**{v_min_limit:.2f}–{v_max_limit:.2f} pu** from `config/gen_report.json` "
         "(same thresholds the NERC report uses for P0). They are reported here as "
         "*reference bands*, not as a NERC compliance verdict."
     )

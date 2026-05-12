@@ -42,6 +42,12 @@ python -m pip install jpype1 numpy
 
 The command supports two input modes:
 
+## Quick Decision Guide
+
+- **ACLF-only request** (base-case solve + loadflow report): run **Step 1** then **Step 3**
+- **Full TPL workflow** (ACLF + CA + NERC report): run **Step 1**, **Step 2**, then **Step 4**
+- **Contingency-only refresh** (ACLF already available): run **Step 2** then **Step 4**
+
 ### Single File Mode
 
 Provide individual file paths for the case file, contingency JSON, and monitored branches JSON:
@@ -141,7 +147,35 @@ python ipss_cmd.py ca psse \
 
 **Output:** `<case>_DF_contingency.csv` written alongside the ACLF CSVs, containing post-contingency branch loading results.
 
-## Step 3: Generate NERC TPL-001-5 Report
+## Step 3: Generate AC Load Flow (ACLF-Only) Report
+
+Use this when the user asks for an ACLF report only (no contingency/TPL sections).
+
+```
+cd wspace
+source ../.venv/bin/activate
+python generate_aclf_report.py "<display_name>" <result_dir> [csv_prefix]
+```
+
+**Parameters:**
+
+- `display_name` — Human-readable system name for the report header (e.g., `"IEEE 118-Bus System"`)
+- `result_dir` — Path **relative to `wspace/`** containing ACLF CSVs, e.g. `data/ieee/result`
+- `csv_prefix` — (optional but recommended when multiple cases share one `result_dir`) CSV stem such as `ieee14` or `ieee118`
+
+**Examples:**
+
+```
+# Single-case result directory
+python generate_aclf_report.py "Texas 2000Bus System" data/psse/Texas2K/result
+
+# Shared result directory (explicit prefix avoids picking another case)
+python generate_aclf_report.py "IEEE 14-Bus System" data/ieee/result ieee14
+```
+
+**Output:** `AC_Loadflow_Report.md` written next to the CSVs in the result directory.
+
+## Step 4: Generate NERC TPL-001-5 Report
 
 ```
 cd wspace
@@ -183,7 +217,7 @@ The `ipss_cmd.py` script writes ACLF results based on the input file's parent di
 
 CA results are written to the same directory.
 
-Pass that same `.../result` path as `result_dir` to `generate_nerc_tpl_report.py` (see Step 3). Optional: keep copies or symlinks under `wspace/result/` only if you rely on single-argument alias discovery.
+Pass that same `.../result` path as `result_dir` to `generate_aclf_report.py` (Step 3) or `generate_nerc_tpl_report.py` (Step 4). Optional: keep copies or symlinks under `wspace/result/` only if you rely on single-argument alias discovery.
 
 ## Troubleshooting
 

@@ -74,16 +74,19 @@ The JVM shared library path is configured in `config/config.json`.
 Common examples:
 
 macOS:
+
 ```
 /Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home/lib/libjli.dylib
 ```
 
 Linux:
+
 ```
 /usr/lib/jvm/java-21-openjdk/lib/server/libjvm.so
 ```
 
 Windows:
+
 ```text
 C:\Program Files\Eclipse Adoptium\jdk-21.0.6.7-hotspot\bin\server\jvm.dll
 ```
@@ -117,10 +120,12 @@ python -m pip install jpype1 numpy
 
 ### Required Python Packages
 
-| Package | Version | Purpose |
-|---------|---------|---------|
-| `jpype1` | ≥ 1.5.0 | Java-Python bridge |
-| `numpy` | ≥ 1.24 | Numerical operations used by `config.py` |
+
+| Package  | Version | Purpose                                  |
+| -------- | ------- | ---------------------------------------- |
+| `jpype1` | ≥ 1.5.0 | Java-Python bridge                       |
+| `numpy`  | ≥ 1.24  | Numerical operations used by `config.py` |
+
 
 ## Step 2: JAR Dependencies
 
@@ -161,45 +166,53 @@ mvn -N wrapper:wrapper '-Dmaven=3.9.11'
 
 ### InterPSS Core JARs
 
-| JAR | Source | Purpose |
-|-----|--------|---------|
-| `ipss_runnable.jar` | InterPSS build | Plugin core, adapters, samples |
-| `ipss.core.lib-1.0.16.jar` | InterPSS build | ACLF engine, algorithms, EMF model |
-| `ipss.plugin.core-1.0.16.jar` | InterPSS build | Plugin framework |
-| `ieee.odm.schema-1.0.1.jar` | InterPSS build | IEEE ODM XML schema |
-| `ieee.odm_pss-1.0.1.jar` | InterPSS build | IEEE ODM PSS types |
+
+| JAR                           | Source         | Purpose                            |
+| ----------------------------- | -------------- | ---------------------------------- |
+| `ipss_runnable.jar`           | InterPSS build | Plugin core, adapters, samples     |
+| `ipss.core.lib-1.0.16.jar`    | InterPSS build | ACLF engine, algorithms, EMF model |
+| `ipss.plugin.core-1.0.16.jar` | InterPSS build | Plugin framework                   |
+| `ieee.odm.schema-1.0.1.jar`   | InterPSS build | IEEE ODM XML schema                |
+| `ieee.odm_pss-1.0.1.jar`      | InterPSS build | IEEE ODM PSS types                 |
+
 
 ### Sparse Solver JARs
 
-| JAR | Purpose |
-|-----|---------|
-| `JKLU-1.0.0.jar` | KLU sparse LU solver |
-| `BTFJ-1.0.1.jar` | Block Triangular Form permutation |
-| `AMDJ-1.0.1.jar` | Approximate Minimum Degree ordering |
-| `COLAMDJ-1.0.1.jar` | Column AMD ordering |
+
+| JAR                  | Purpose                                  |
+| -------------------- | ---------------------------------------- |
+| `JKLU-1.0.0.jar`     | KLU sparse LU solver                     |
+| `BTFJ-1.0.1.jar`     | Block Triangular Form permutation        |
+| `AMDJ-1.0.1.jar`     | Approximate Minimum Degree ordering      |
+| `COLAMDJ-1.0.1.jar`  | Column AMD ordering                      |
 | `csparsej-1.1.1.jar` | CSPARSEJ — CSparse sparse matrix library |
+
 
 ### DataFrame Export JARs (for CSV output)
 
-| JAR | Maven Central Coordinates | Purpose |
-|-----|---------------------------|---------|
-| `dflib-2.0.0-M6.jar` | `org.dflib:dflib:2.0.0-M6` | DataFrame library |
-| `dflib-csv-2.0.0-M6.jar` | `org.dflib:dflib-csv:2.0.0-M6` | CSV save support |
-| `dflib-json-2.0.0-M6.jar` | `org.dflib:dflib-json:2.0.0-M6` | JSON support |
-| `commons-csv-1.10.0.jar` | `org.apache.commons:commons-csv:1.10.0` | CSV parsing |
+
+| JAR                       | Maven Central Coordinates               | Purpose           |
+| ------------------------- | --------------------------------------- | ----------------- |
+| `dflib-2.0.0-M6.jar`      | `org.dflib:dflib:2.0.0-M6`              | DataFrame library |
+| `dflib-csv-2.0.0-M6.jar`  | `org.dflib:dflib-csv:2.0.0-M6`          | CSV save support  |
+| `dflib-json-2.0.0-M6.jar` | `org.dflib:dflib-json:2.0.0-M6`         | JSON support      |
+| `commons-csv-1.10.0.jar`  | `org.apache.commons:commons-csv:1.10.0` | CSV parsing       |
+
 
 > The Maven Central JARs can be downloaded from [Maven Central Repository](https://central.sonatype.com/) or any Maven mirror.
 
 ### Third-Party Support JARs
 
-| JAR | Purpose |
-|-----|---------|
-| `slf4j-api-1.7.36.jar` / `slf4j-simple-1.7.36.jar` | Logging |
+
+| JAR                                                       | Purpose                    |
+| --------------------------------------------------------- | -------------------------- |
+| `slf4j-api-1.7.36.jar` / `slf4j-simple-1.7.36.jar`        | Logging                    |
 | `org.eclipse.emf.common-2.28.0.jar` / `.ecore-2.38.0.jar` | Eclipse Modeling Framework |
-| `hazelcast-5.3.6.jar` | Distributed computing |
-| `jaxb-api-2.3.1.jar` / `jaxb-impl-2.3.1.jar` | XML binding |
-| `javax.activation-api-1.2.0.jar` | Java Activation Framework |
-| `commons-math3-3.6.1.jar` | Math utilities |
+| `hazelcast-5.3.6.jar`                                     | Distributed computing      |
+| `jaxb-api-2.3.1.jar` / `jaxb-impl-2.3.1.jar`              | XML binding                |
+| `javax.activation-api-1.2.0.jar`                          | Java Activation Framework  |
+| `commons-math3-3.6.1.jar`                                 | Math utilities             |
+
 
 All JARs must be placed in `lib/` (main JARs) and `lib/deps/` (dependency JARs).
 
@@ -215,11 +228,13 @@ The file `config/config.json` tells the runtime where to find the JVM and which 
 }
 ```
 
-| Key | Description |
-|-----|-------------|
-| `jvm_path` | Full path to the JVM shared library. Supports `{HOME}` expansion. |
-| `jar_path` | Classpath entries separated by `:` (macOS/Linux) or `;` (Windows). Directories are expanded to include all `*.jar` files within them. |
-| `log_config_path` | Optional path to a Log4j2 XML configuration file. |
+
+| Key               | Description                                                                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `jvm_path`        | Full path to the JVM shared library. Supports `{HOME}` expansion.                                                                     |
+| `jar_path`        | Classpath entries separated by `:` (macOS/Linux) or `;` (Windows). Directories are expanded to include all `*.jar` files within them. |
+| `log_config_path` | Optional path to a Log4j2 XML configuration file.                                                                                     |
+
 
 The `ConfigManager` in `src/config.py` resolves relative paths against the project root (parent of `config/`).
 
@@ -271,11 +286,13 @@ python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
 python ipss_cmd.py <simutype> <format> <input>
 ```
 
-| Argument | Values | Description |
-|----------|--------|-------------|
-| `simutype` | `aclf`, `ca` | Simulation type: load flow or contingency analysis |
-| `format` | `ieee`, `psse` | Input file format |
-| `input` | path | Input file path (relative to `wspace/`) |
+
+| Argument   | Values         | Description                                        |
+| ---------- | -------------- | -------------------------------------------------- |
+| `simutype` | `aclf`, `ca`   | Simulation type: load flow or contingency analysis |
+| `format`   | `ieee`, `psse` | Input file format                                  |
+| `input`    | path           | Input file path (relative to `wspace/`)            |
+
 
 ## Step 5: Generating NERC TPL-001-5 Reports
 
@@ -308,7 +325,7 @@ python generate_nerc_tpl_report.py ieee118
 
 Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of the script.
 
-### Generating ACLF-only reports
+### Generating AC Loadflow reports
 
 For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `wspace/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
 
@@ -414,3 +431,4 @@ Expected entries include:
 .claude/commands/ipss-sim.md
 .claude/skills/ipss-sim/SKILL.md
 ```
+

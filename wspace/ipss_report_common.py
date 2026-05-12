@@ -56,12 +56,12 @@ def _deep_update(base, override):
 
 
 def load_tpl_config():
-    """Load TPL report thresholds from ``config/tpl_report.json``, with fallbacks.
+    """Load report thresholds from ``config/gen_report.json``, with fallbacks.
 
     Partial configs are merged on top of ``_DEFAULT_CFG`` so callers can override
     individual values without restating the entire schema.
     """
-    config_path = PROJECT_ROOT / "config" / "tpl_report.json"
+    config_path = PROJECT_ROOT / "config" / "gen_report.json"
     if config_path.exists():
         with open(config_path, 'r') as f:
             cfg = json.load(f)
