@@ -34,7 +34,8 @@ class ConfigManager:
         
         # Expand HOME environment variable
         if 'jvm_path' in config:
-            config['jvm_path'] = config['jvm_path'].replace("{HOME}", os.getenv('HOME'))
+            home = os.getenv('HOME') or os.getenv('USERPROFILE') or ""
+            config['jvm_path'] = config['jvm_path'].replace("{HOME}", home)
         
         # Resolve paths relative to project root (parent of config directory)
         project_root = Path(config_path).parent.parent

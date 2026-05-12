@@ -59,7 +59,7 @@ temp/
 
 - **Python 3.10+** with pip
 - **Java JDK 21** (or compatible version)
-- **macOS / Linux / Windows** (tested on macOS)
+- **macOS / Linux / Windows**
 
 Check your Java version:
 
@@ -67,31 +67,53 @@ Check your Java version:
 java -version
 ```
 
-The JVM shared library path is configured in `config/config.json`. On macOS with JDK 21 installed at the default location, this is:
+The JVM shared library path is configured in `config/config.json`.
 
+Common examples:
+
+macOS:
 ```
 /Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home/lib/libjli.dylib
 ```
 
-On Linux, use the `libjvm.so` path (e.g., `/usr/lib/jvm/java-21-openjdk/lib/server/libjvm.so`).
+Linux:
+```
+/usr/lib/jvm/java-21-openjdk/lib/server/libjvm.so
+```
+
+Windows:
+```text
+C:\Program Files\Eclipse Adoptium\jdk-21.0.6.7-hotspot\bin\server\jvm.dll
+```
+
+The exact Windows path depends on the JDK vendor and version. You can find it in
+PowerShell with:
+
+```powershell
+Get-ChildItem -Path 'C:\Program Files\Java','C:\Program Files\Eclipse Adoptium' -Recurse -Filter jvm.dll -ErrorAction SilentlyContinue
+```
 
 ## Step 1: Python Virtual Environment
 
 From the **project root** (the directory that contains `wspace/`, `src/`, `config/`, and `lib/`), create and activate a Python virtual environment:
 
+macOS / Linux:
+
 ```bash
 python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install jpype1 numpy
+```
 
-# Activate it
-source .venv/bin/activate      # macOS / Linux
-# .venv\Scripts\activate       # Windows
+Windows PowerShell:
+
+```powershell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install jpype1 numpy
 ```
 
 ### Required Python Packages
-
-```bash
-pip install jpype1 numpy
-```
 
 | Package | Version | Purpose |
 |---------|---------|---------|
@@ -102,18 +124,38 @@ pip install jpype1 numpy
 
 The InterPSS runtime requires these JAR categories:
 
-### Recommended: Maven Wrapper Setup (macOS / Linux)
+### Recommended: Maven Setup
 
 This repository includes a bash Maven wrapper (`mvnw`) and a version-controlled
-`pom.xml` dependency manifest. From the project root, run:
+`pom.xml` dependency manifest.
+
+macOS / Linux:
 
 ```bash
 ./mvnw -q dependency:copy-dependencies
 ```
 
+Windows PowerShell:
+
+```powershell
+.\mvnw.cmd -q dependency:copy-dependencies
+```
+
 The wrapper downloads the pinned Maven distribution on first use and copies the
 runtime dependency JARs into `lib/deps/`. The downloaded Maven distribution and
 copied JARs are local setup artifacts and are not committed.
+
+Maintainers can regenerate the wrapper scripts from the project root:
+
+```bash
+mvn -N wrapper:wrapper -Dmaven=3.9.11
+```
+
+In PowerShell, quote the Maven version property:
+
+```powershell
+mvn -N wrapper:wrapper '-Dmaven=3.9.11'
+```
 
 ### InterPSS Core JARs
 
@@ -179,6 +221,19 @@ The file `config/config.json` tells the runtime where to find the JVM and which 
 
 The `ConfigManager` in `src/config.py` resolves relative paths against the project root (parent of `config/`).
 
+Windows example:
+
+```json
+{
+  "jvm_path": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.6.7-hotspot\\bin\\server\\jvm.dll",
+  "jar_path": "lib/ipss_runnable.jar;lib/deps",
+  "log_config_path": "config/log4j2.xml"
+}
+```
+
+`config/config.json` is intentionally ignored by git because the JVM path is
+machine-specific.
+
 ### ACLF run configuration
 
 `aclf_run.json` defines Newton–Raphson and related options (`maxIterations`, `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For ACLF, `wspace/ipss_cmd.py` resolves the file with a **two-tier lookup**:
@@ -192,9 +247,19 @@ The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied w
 
 The main entry point is `wspace/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated:
 
+macOS / Linux:
+
 ```bash
 cd wspace
 source ../.venv/bin/activate
+python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+```
+
+Windows PowerShell:
+
+```powershell
+cd wspace
+..\.venv\Scripts\Activate.ps1
 python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
 ```
 
@@ -222,6 +287,14 @@ source ../.venv/bin/activate
 # <result_dir> is the folder with CSVs: path relative to wspace/ (ipss_cmd output), or a name under wspace/result/
 python generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
 python generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
+```
+
+Windows PowerShell:
+
+```powershell
+cd wspace
+..\.venv\Scripts\Activate.ps1
+python generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
 ```
 
 The script writes `NERC_TPL_001_5_Report.md` into the same result directory. Alias-based discovery is also supported for single-argument backward compatibility:

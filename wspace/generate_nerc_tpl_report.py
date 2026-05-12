@@ -28,6 +28,9 @@ import os
 import sys
 from collections import Counter
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 from datetime import datetime
 from math import sqrt
 
@@ -1557,6 +1560,6 @@ if __name__ == "__main__":
     # Write to Markdown file alongside the CSV outputs
     case_base.mkdir(parents=True, exist_ok=True)
     output_file = case_base / "NERC_TPL_001_5_Report.md"
-    with open(output_file, 'w') as f:
+    with open(output_file, 'w', encoding='utf-8') as f:
         f.write(report)
     print(f"\nReport saved to: {output_file}")

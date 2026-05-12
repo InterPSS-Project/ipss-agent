@@ -6,60 +6,60 @@ class ipss:
     #
     # Commons Classes
     #
-    from org.apache.commons.math3.complex import Complex
-    from java.io import File as JavaFile
-    from java.util import HashSet as JavaHashSet
+    Complex = jpype.JClass("org.apache.commons.math3.complex.Complex")
+    JavaFile = jpype.JClass("java.io.File")
+    JavaHashSet = jpype.JClass("java.util.HashSet")
 
     #
     # InterPSS Core Classes
     #
-    from com.interpss.core import CoreObjectFactory
+    CoreObjectFactory = jpype.JClass("com.interpss.core.CoreObjectFactory")
 
-    from org.interpss.numeric.datatype.Unit import UnitType
+    UnitType = jpype.JClass("org.interpss.numeric.datatype.Unit$UnitType")
 
-    from com.interpss.core.algo import AclfMethodType
-    from com.interpss.core.funcImpl import AclfAdjCtrlFunction
-    from com.interpss.core.aclf.hvdc import HvdcLine2T
+    AclfMethodType = jpype.JClass("com.interpss.core.algo.AclfMethodType")
+    AclfAdjCtrlFunction = jpype.JClass("com.interpss.core.funcImpl.AclfAdjCtrlFunction")
+    HvdcLine2T = jpype.JClass("com.interpss.core.aclf.hvdc.HvdcLine2T")
       
-    from com.interpss.core.aclf import AclfGenCode
-    from com.interpss.core.aclf import AclfLoadCode
-    from com.interpss.core.aclf import AclfBranchCode
+    AclfGenCode = jpype.JClass("com.interpss.core.aclf.AclfGenCode")
+    AclfLoadCode = jpype.JClass("com.interpss.core.aclf.AclfLoadCode")
+    AclfBranchCode = jpype.JClass("com.interpss.core.aclf.AclfBranchCode")
    
-    from com.interpss.core import LoadflowAlgoObjectFactory
+    LoadflowAlgoObjectFactory = jpype.JClass("com.interpss.core.LoadflowAlgoObjectFactory")
 
-    from com.interpss.core import DclfAlgoObjectFactory
-    from com.interpss.core.algo.dclf import DclfMethod
-    from org.interpss.plugin.contingency.util import DclfContingencyHelper
-    from org.interpss.plugin.contingency.util import ContingencyFileUtil
-    from org.interpss.plugin.contingency.definition import MonitoredBranchRecord
-    from org.interpss.plugin.contingency.definition import BranchContingencyRecord
+    DclfAlgoObjectFactory = jpype.JClass("com.interpss.core.DclfAlgoObjectFactory")
+    DclfMethod = jpype.JClass("com.interpss.core.algo.dclf.DclfMethod")
+    DclfContingencyHelper = jpype.JClass("org.interpss.plugin.contingency.util.DclfContingencyHelper")
+    ContingencyFileUtil = jpype.JClass("org.interpss.plugin.contingency.util.ContingencyFileUtil")
+    MonitoredBranchRecord = jpype.JClass("org.interpss.plugin.contingency.definition.MonitoredBranchRecord")
+    BranchContingencyRecord = jpype.JClass("org.interpss.plugin.contingency.definition.BranchContingencyRecord")
 
-    from org.interpss.plugin.contingency import DclfContingencyConfig
-    from org.interpss.plugin.contingency import ParallelDclfContingencyAnalyzer
-    from org.interpss.plugin.result.dframe.ca import DclfContingencyDFrameAdapter
+    DclfContingencyConfig = jpype.JClass("org.interpss.plugin.contingency.DclfContingencyConfig")
+    ParallelDclfContingencyAnalyzer = jpype.JClass("org.interpss.plugin.contingency.ParallelDclfContingencyAnalyzer")
+    DclfContingencyDFrameAdapter = jpype.JClass("org.interpss.plugin.result.dframe.ca.DclfContingencyDFrameAdapter")
   
     #
     # InterPSS Plugin Classes
     #
-    from org.interpss.plugin.aclf.config import AclfRunConfigRec
+    AclfRunConfigRec = jpype.JClass("org.interpss.plugin.aclf.config.AclfRunConfigRec")
 
-    from org.interpss.display import AclfOutFunc
+    AclfOutFunc = jpype.JClass("org.interpss.display.AclfOutFunc")
     
-    from org.interpss.display.impl import AclfOut_PSSE
-    from org.interpss.display.impl.AclfOut_PSSE import Format as PSSEOutFormat
+    AclfOut_PSSE = jpype.JClass("org.interpss.display.impl.AclfOut_PSSE")
+    PSSEOutFormat = jpype.JClass("org.interpss.display.impl.AclfOut_PSSE$Format")
 
-    from org.interpss.plugin.exchange import AclfResultExchangeAdapter
-    from org.interpss.plugin.exchange import ContingencyResultAdapter
-    from org.interpss.plugin.exchange import ContingencyResultExContainer
+    AclfResultExchangeAdapter = jpype.JClass("org.interpss.plugin.exchange.AclfResultExchangeAdapter")
+    ContingencyResultAdapter = jpype.JClass("org.interpss.plugin.exchange.ContingencyResultAdapter")
+    ContingencyResultExContainer = jpype.JClass("org.interpss.plugin.exchange.ContingencyResultExContainer")
 
-    from org.interpss.plugin.result.dframe import AclfNetDFrameAdapter
+    AclfNetDFrameAdapter = jpype.JClass("org.interpss.plugin.result.dframe.AclfNetDFrameAdapter")
 
-    from org.dflib.csv import Csv as DFrameCsv
+    DFrameCsv = jpype.JClass("org.dflib.csv.Csv")
     
     #
     # InterPSS Utility Classes
     #
-    from org.interpss.numeric.util import PerformanceTimer
+    PerformanceTimer = jpype.JClass("org.interpss.numeric.util.PerformanceTimer")
     
     #
     # InterPSS Py lib classes

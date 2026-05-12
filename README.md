@@ -5,6 +5,23 @@
 ## Environment setup
 
 Git check out or download this repository and follow the setup instructions below.
+For manual setup, see [Setup.md](Setup.md). The short version is:
+
+```bash
+# macOS / Linux
+python3 -m venv .venv
+source .venv/bin/activate
+pip install jpype1 numpy
+./mvnw -q dependency:copy-dependencies
+```
+
+```powershell
+# Windows PowerShell
+py -3 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install jpype1 numpy
+.\mvnw.cmd -q dependency:copy-dependencies
+```
 
 ### OpenAI Codex Desktop (recommended)
 

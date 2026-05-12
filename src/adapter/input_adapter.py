@@ -1,8 +1,9 @@
 # Description: This module provides classes to create AclfNet objects from IEEE CDF and PSSE RAW files using ODM mappers.
+import jpype
 
 class IeeeFileAdapter:
     # IEEECDFVersion enum
-    from org.ieee.odm.adapter.ieeecdf.IeeeCDFAdapter import  IEEECDFVersion
+    IEEECDFVersion = jpype.JClass("org.ieee.odm.adapter.ieeecdf.IeeeCDFAdapter$IEEECDFVersion")
     version = IEEECDFVersion
 
     # Create AclfNet from IEEE CDF file
@@ -13,10 +14,10 @@ class IeeeFileAdapter:
     @staticmethod
     def createAclfNet(file_path=None, version=IEEECDFVersion.Default):
          # ODM related classes
-        from org.interpss.odm.mapper import ODMAclfParserMapper
+        ODMAclfParserMapper = jpype.JClass("org.interpss.odm.mapper.ODMAclfParserMapper")
 
         # IEEE CDF related classes
-        from org.ieee.odm.adapter.ieeecdf import IeeeCDFAdapter
+        IeeeCDFAdapter = jpype.JClass("org.ieee.odm.adapter.ieeecdf.IeeeCDFAdapter")
 
         # create the file adapter and parse the input file
         fileAdapter = IeeeCDFAdapter(version)
@@ -30,7 +31,7 @@ class IeeeFileAdapter:
 # Deprecated class
 class PsseRawFileAdapterOld:
     # PsseVersion enum
-    from org.ieee.odm.adapter.psse.PSSEAdapter import PsseVersion
+    PsseVersion = jpype.JClass("org.ieee.odm.adapter.psse.PSSEAdapter$PsseVersion")
     version = PsseVersion
 
     # Create AclfNet from PSSE RAW file
@@ -41,10 +42,10 @@ class PsseRawFileAdapterOld:
     @staticmethod
     def createAclfNet(file_path=None, version=None):
          # ODM related classes
-        from org.interpss.odm.mapper import ODMAclfParserMapper
+        ODMAclfParserMapper = jpype.JClass("org.interpss.odm.mapper.ODMAclfParserMapper")
 
         # PSSE RAW related classes
-        from org.ieee.odm.adapter.psse.raw import PSSERawAdapter
+        PSSERawAdapter = jpype.JClass("org.ieee.odm.adapter.psse.raw.PSSERawAdapter")
 
         # create the file adapter and parse the input file
         fileAdapter = PSSERawAdapter(version)
@@ -62,7 +63,7 @@ class PsseRawFileAdapter:
     # return AclfNet object
     @staticmethod
     def createAclfNet(file_path=None):
-        from org.interpss.plugin.pssl.plugin import IpssAdapter
+        IpssAdapter = jpype.JClass("org.interpss.plugin.pssl.plugin.IpssAdapter")
 
         # Automatically determine PSSE version by parsing the file
         psseVersion = IpssAdapter.parsePsseVersion(file_path)
