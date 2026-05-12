@@ -19,7 +19,7 @@ Setup ipss.agent env
 
 1. Add your data folder as a Codex project and use the agent to do the simulations.
 
-### CLI setup
+### Claude/Gemini CLI setup
 
 ```text
 /init  # optional
@@ -33,13 +33,13 @@ After the setup, run power-system simulations through the agent.
 
 ### Skill-style simulation
 
-Single files:
+Input file mode:
 
 ```text
 /ipss-sim <simu_case_file> <contingency_file> <monitored_file> "<NERC Report Name>"
 ```
 
-Directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency*.json`, `*monitor*.json`):
+Input directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency*.json`, `*monitor*.json`):
 
 ```text
 /ipss-sim <simu_case_directory> "<NERC Report Name>"
