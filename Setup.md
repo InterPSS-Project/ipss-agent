@@ -50,6 +50,8 @@ temp/
 └── wspace/                    # <-- working directory
     ├── ipss_cmd.py            # CLI for running simulations
     ├── generate_nerc_tpl_report.py  # NERC TPL-001-5 report generator
+    ├── generate_aclf_report.py      # AC load flow Markdown report generator
+    ├── ipss_report_common.py        # Shared analysis + Markdown helpers
     ├── data/
     │   └── ieee/
     │       └── ieee118.ieee   # IEEE 118-bus test case
@@ -305,6 +307,19 @@ python generate_nerc_tpl_report.py ieee118
 ```
 
 Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of the script.
+
+### Generating ACLF-only reports
+
+For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `wspace/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
+
+```bash
+cd wspace
+source ../.venv/bin/activate
+python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/result
+```
+
+The script shares analysis and Markdown helpers with the NERC generator through `wspace/ipss_report_common.py`, so voltage bands, thermal loading percentages, and generator Q-limit logic stay aligned between the two reports.
 
 ## Step 6: Verifying the `ipss-sim` Agent Skill
 
