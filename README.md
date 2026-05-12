@@ -26,7 +26,9 @@ python -m pip install jpype1 numpy
 ### OpenAI Codex Desktop (recommended)
 
 1. Add the folder as a Codex project.
-2. Run the setup below, then test with a sample case (for example, under `wspace/data/Texas2K`).
+2. Run the environment setup above.
+3. Verify the project skill files exist under `.agents/skills/ipss-sim/`.
+4. Test with a sample case (for example, under `wspace/data/Texas2K`).
 
 ```text
 Setup ipss.agent env
@@ -34,7 +36,7 @@ Setup ipss.agent env
 /ipss-sim <simu_case_directory> "<NERC Report Name>"
 ```
 
-1. Add your data folder as a Codex project and use the agent to do the simulations.
+After the repo project is working, add your data folder as a Codex project and use the agent to do the simulations.
 
 ### Claude/Gemini CLI setup
 

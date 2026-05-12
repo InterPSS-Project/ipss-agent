@@ -13,18 +13,29 @@ Run power system simulations (AC load flow, contingency analysis) and generate N
 
 - Python 3.10+, Java JDK 21
 - Virtual environment at project root `.venv` with `jpype1` and `numpy` installed
-- Runtime JAR dependencies copied with `./mvnw -q dependency:copy-dependencies`
+- Runtime JAR dependencies copied with `./mvnw -q dependency:copy-dependencies` on macOS/Linux or `.\mvnw.cmd -q dependency:copy-dependencies` on Windows
 - `config/config.json` configured with JVM path, JAR classpath, and log config
 - `config/aclf_run.json` present for ACLF solver options (checked into the repo)
 - All commands run from `wspace/` with venv activated
 
-If dependencies are missing, run this from the project root first:
+If dependencies are missing, run this from the project root first.
+
+macOS / Linux:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install jpype1==1.5.2 numpy
+python -m pip install jpype1 numpy
 ./mvnw -q dependency:copy-dependencies
+```
+
+Windows PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install jpype1 numpy
+.\mvnw.cmd -q dependency:copy-dependencies
 ```
 
 ## Input Modes

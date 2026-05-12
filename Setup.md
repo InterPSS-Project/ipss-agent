@@ -306,9 +306,9 @@ python generate_nerc_tpl_report.py ieee118
 
 Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of the script.
 
-## Step 6: Registering the `ipss-sim` Agent Skill
+## Step 6: Verifying the `ipss-sim` Agent Skill
 
-This repository includes agent-facing skill files so Codex and Claude can run the full simulation workflow from a natural-language prompt.
+This repository already includes agent-facing skill files so Codex and Claude can run the full simulation workflow from a natural-language prompt. No copy step is required when the repository is opened as a project; setup means verifying the files are present and then invoking the skill from the supported agent.
 
 ### OpenAI Codex Desktop
 
@@ -328,7 +328,8 @@ To use it:
 
 1. Add or open this repository folder as a Codex Desktop project.
 2. Make sure Steps 1-3 above have been completed.
-3. Invoke the skill by name in a prompt:
+3. Verify the files below are present.
+4. Invoke the skill by name in a prompt:
 
 ```text
 Use $ipss-sim to run data/ieee/ieee118.ieee "IEEE 118-Bus Test Case"
@@ -377,8 +378,17 @@ or directory mode:
 
 From the project root, these commands should show the registered skill files:
 
+macOS / Linux:
+
 ```bash
 find .agents/skills/ipss-sim .claude/skills/ipss-sim .claude/commands -maxdepth 3 -type f | sort
+```
+
+Windows PowerShell:
+
+```powershell
+Get-ChildItem .agents\skills\ipss-sim, .claude\skills\ipss-sim, .claude\commands -Recurse -File |
+  ForEach-Object { Resolve-Path -Relative $_.FullName }
 ```
 
 Expected entries include:
