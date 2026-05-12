@@ -828,12 +828,12 @@ def generate_report(case_name, result_dir=None):
     w(_md_table_row("Total Buses", f"{len(buses)} ({len(pq_buses)} PQ, {len(pv_buses)} PV, {len(swing_buses)} Swing)"))
     w(_md_table_row("Total Branches", f"{len(branches)} ({branch_load['branches_with_ratings']} with MVA ratings)"))
     w(_md_table_row("Total Generators", gen_q['total_gens']))
-    w(_md_table_row("Total Load", f"{total_load_p:.2f} pu MW / {total_load_q:.2f} pu MVAr"))
-    w(_md_table_row("Total Generation", f"{total_gen_p:.2f} pu MW / {total_gen_q:.2f} pu MVAr"))
-    w(_md_table_row("System Losses", f"{losses_p:.2f} pu MW / {losses_q:.2f} pu MVAr"))
+    w(_md_table_row("Total Load", f"{total_load_p:.2f} pu P / {total_load_q:.2f} pu Q"))
+    w(_md_table_row("Total Generation", f"{total_gen_p:.2f} pu P / {total_gen_q:.2f} pu Q"))
+    w(_md_table_row("System Losses", f"{losses_p:.2f} pu P / {losses_q:.2f} pu Q"))
     if swing_bus_num:
         w(_md_table_row("Swing Bus", f"Bus{swing_bus_num} ({swing_bus_name}) at {swing_vsched:.4f} pu"))
-        w(_md_table_row("Swing Output", f"{swing_p:.2f} pu MW / {swing_q:.2f} pu MVAr"))
+        w(_md_table_row("Swing Output", f"{swing_p:.2f} pu P / {swing_q:.2f} pu Q"))
     w("")
 
     w("### Compliance Summary")
@@ -895,7 +895,7 @@ def generate_report(case_name, result_dir=None):
     w("")
 
     base_mva_val = BASE_KVA / 1000
-    w(f"> **Note:** Values are reported in per-unit on a {base_mva_val:.0f} MVA base unless otherwise noted.")
+    w(f"> **Note:** Summary P/Q values are reported in per-unit on a {base_mva_val:.0f} MVA base unless otherwise noted.")
     w("")
 
     # ===================================================================
