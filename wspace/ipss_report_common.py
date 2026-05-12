@@ -116,7 +116,7 @@ def load_csv_optional(filename, case_base: Path):
 def parse_network_info(case_base: Path, prefix: str) -> dict | None:
     """Parse ``<prefix>_network_info.txt`` into a structured dictionary.
 
-    The file produced by ``ipss_cmd.py`` has two sections:
+    The file produced by ``../src/ipss_cmd.py`` (run from ``wspace/``) has two sections:
 
         =====Aclf Network Information:=====
         Number of Active Buses: 2000

@@ -31,6 +31,7 @@ args = parser.parse_args()
 # Get script directory for reliable path resolution
 script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent
+wspace_dir = project_root / "wspace"
 if str(project_root) not in sys.path:
     sys.path.append(str(project_root))
 
@@ -51,7 +52,7 @@ JvmManager.initialize_jvm(config)
 from src.interpss import ipss
 from src.util.ipss_func import network_info
 
-file_path = str(script_dir / args.input)
+file_path = str(wspace_dir / args.input)
 if args.format == "ieee":
     net = ipss.IeeeFileAdapter.createAclfNet(file_path)
 elif args.format == "psse":
@@ -71,7 +72,7 @@ out_file_prefix = out_file_prefix.split(".")[0]
 
 # get the parent directory name, "data/ieee/ieee118.ieee" -> "data/ieee"
 input_dir = str(Path(args.input).parent)
-results_dir = script_dir / input_dir / "result"
+results_dir = wspace_dir / input_dir / "result"
 results_dir.mkdir(parents=True, exist_ok=True)
 
 if args.simutype == "aclf":
@@ -79,8 +80,9 @@ if args.simutype == "aclf":
     algo = ipss.LoadflowAlgoObjectFactory.createLoadflowAlgorithm(net)
 
     # if input_dir/"config"/"aclf_run.json" exists, use it, otherwise use the default config file in the project root
-    configFilename = str(Path(input_dir) / "config" / "aclf_run.json")
-    if not os.path.exists(configFilename):
+    case_aclf = wspace_dir / input_dir / "config" / "aclf_run.json"
+    configFilename = str(case_aclf)
+    if not case_aclf.is_file():
         configFilename = str(project_root / "config" / "aclf_run.json")
     print(f"Using config file: {configFilename}")
     aclfRunConfig = ipss.AclfRunConfigRec.loadAclfRunConfig(configFilename)
@@ -118,14 +120,14 @@ elif args.simutype == "ca":
     algo.calculateDclf(ipss.DclfMethod.INC_LOSS)
 
     # Import contingency definitions from the JSON file.
-    cont_path = str(script_dir / args.cont_file)
+    cont_path = str(wspace_dir / args.cont_file)
     contingencRecs = ipss.ContingencyFileUtil.importContingenciesFromJson(ipss.JavaFile(cont_path))
 
     # Create the DCLF contingency list.
     dclfContList = ipss.DclfContingencyHelper(algo).createDclfContList(contingencRecs)
 
     # Import monitored branches from JSON.
-    mon_path = str(script_dir / args.monitor_file)
+    mon_path = str(wspace_dir / args.monitor_file)
     monitoredBranches = ipss.ContingencyFileUtil.importMonitoredBranchRecordsFromJson(ipss.JavaFile(mon_path))
 
     # Extract branch IDs and pass them as a Java Set<String>.

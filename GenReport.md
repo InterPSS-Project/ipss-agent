@@ -1,6 +1,6 @@
 # Markdown report generation (InterPSS CSVs)
 
-After you run `ipss_cmd.py aclf` (and optionally `ipss_cmd.py ca`), CSVs land under `<input_parent>/result/` relative to `wspace/`. Two Python generators turn those files into Markdown reports:
+After you run `python ../src/ipss_cmd.py aclf` (and optionally `python ../src/ipss_cmd.py ca`) from `wspace/`, CSVs land under `<input_parent>/result/` relative to `wspace/`. Two Python generators turn those files into Markdown reports:
 
 | Script | Report | Scope |
 |--------|--------|--------|
@@ -23,15 +23,15 @@ source ../.venv/bin/activate
 python generate_aclf_report.py <display_name> <result_dir> [csv_prefix]
 ```
 
-`display_name` is the title in the report header. `result_dir` is the folder that contains the CSVs: a path **relative to `wspace/`** (the directory `ipss_cmd.py` writes to under `<input_parent>/result/`), or a legacy subdirectory under `wspace/result/`.
+`display_name` is the title in the report header. `result_dir` is the folder that contains the CSVs: a path **relative to `wspace/`** (under `<input_parent>/result/` where `python ../src/ipss_cmd.py` writes), or a legacy subdirectory under `wspace/result/`.
 
 **Examples** (match [Setup.md](Setup.md)):
 
 ```
-python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
 python generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/result
 
-python ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
+python ../src/ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
 python generate_aclf_report.py "Texas 2000-Bus System" data/psse/Texas2K/result
 ```
 
@@ -69,7 +69,7 @@ source ../.venv/bin/activate
 python generate_nerc_tpl_report.py <display_name> <result_dir>
 ```
 
-`display_name` is the title for the report header. `result_dir` is the folder that contains the CSVs: a path **relative to `wspace/`** (the same directory `ipss_cmd.py` writes to under `<input_parent>/result/`), or a legacy subdirectory name under `wspace/result/`.
+`display_name` is the title for the report header. `result_dir` is the folder that contains the CSVs: a path **relative to `wspace/`** (under `<input_parent>/result/` where `python ../src/ipss_cmd.py` writes), or a legacy subdirectory name under `wspace/result/`.
 
 **Examples** (match [Setup.md](Setup.md)):
 

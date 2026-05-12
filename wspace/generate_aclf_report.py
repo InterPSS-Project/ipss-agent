@@ -2,7 +2,7 @@
 """
 AC Load Flow (ACLF) Report Generator
 
-Reads CSV output from ``ipss_cmd.py aclf`` and produces a neutral
+Reads CSV output from ``../src/ipss_cmd.py aclf`` (run from ``wspace/``) and produces a neutral
 AC load flow results report in Markdown format. The report focuses on
 solved base-case quantities only — no NERC TPL contingency criteria,
 no contingency CSV consumption, no compliance wording.
@@ -69,7 +69,7 @@ def _resolve_prefix(case_base: Path, csv_prefix: str | None = None) -> str:
         bus_path = case_base / f"{prefix}_DF_bus.csv"
         if not bus_path.exists():
             raise FileNotFoundError(
-                f"No {prefix}_DF_bus.csv under {case_base}. Run `ipss_cmd.py aclf` first."
+                f"No {prefix}_DF_bus.csv under {case_base}. Run `python ../src/ipss_cmd.py aclf` first."
             )
         missing = [s for s in required if not (case_base / f"{prefix}{s}").exists()]
         if missing:
@@ -82,7 +82,7 @@ def _resolve_prefix(case_base: Path, csv_prefix: str | None = None) -> str:
     bus_files = sorted(case_base.glob("*_DF_bus.csv"))
     if not bus_files:
         raise FileNotFoundError(
-            f"No *_DF_bus.csv files found under {case_base}. Run `ipss_cmd.py aclf` first."
+            f"No *_DF_bus.csv files found under {case_base}. Run `python ../src/ipss_cmd.py aclf` first."
         )
     prefix = bus_files[0].name.removesuffix("_DF_bus.csv")
 
@@ -107,7 +107,7 @@ def generate_aclf_report(
             ``data/ieee/result``), or a subdirectory name under
             ``wspace/result/`` (legacy layout, resolved by
             :func:`resolve_case_base`).
-        csv_prefix: Optional CSV stem matching ``ipss_cmd.py`` output (e.g.
+        csv_prefix: Optional CSV stem matching ``../src/ipss_cmd.py`` output (e.g.
             ``ieee14`` for ``ieee14_DF_bus.csv``). Use when multiple cases
             write to the same ``result_dir``.
 
@@ -403,7 +403,7 @@ def generate_aclf_report(
             f"> **Note:** Branch MVA ratings (`LimMvaA`) are not populated for any of the "
             f"**{branch_load['total_branches']} branches** in this dataset. Thermal loading "
             "percentages cannot be computed. Populate `LimMvaA` in the source case and rerun "
-            "`ipss_cmd.py aclf` to enable this section."
+            "`python ../src/ipss_cmd.py aclf` to enable this section."
         )
         w("")
     else:

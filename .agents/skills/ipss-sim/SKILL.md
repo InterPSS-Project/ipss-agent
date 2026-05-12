@@ -88,7 +88,7 @@ When a directory is provided, the format is auto-detected from the case file ext
 ```
 cd wspace
 source ../.venv/bin/activate
-python ipss_cmd.py aclf <format> <input_path>
+python ../src/ipss_cmd.py aclf <format> <input_path>
 ```
 
 **Formats:**
@@ -100,10 +100,10 @@ python ipss_cmd.py aclf <format> <input_path>
 
 ```
 # IEEE 118 bus
-python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
 
 # PSS/E Texas 2K bus
-python ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
+python ../src/ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
 ```
 
 **Output:** CSV files written to `<input_parent>/result/`:
@@ -114,7 +114,7 @@ python ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summer
 - `<case>_DF_load.csv` — load data
 - `<case>_network_info.txt` — AclfNetwork summary and loadflow run information (included in NERC report)
 
-**ACLF solver settings:** `wspace/ipss_cmd.py` resolves `aclf_run.json` with a two-tier lookup:
+**ACLF solver settings:** `src/ipss_cmd.py` resolves `aclf_run.json` with a two-tier lookup:
 
 1. **Case-specific config** (preferred): `<input_parent>/config/aclf_run.json` — e.g. `data/psse/OpenEInterconnect/config/aclf_run.json`. Place a per-case config here when a particular model needs different NR settings (more iterations, tighter tolerance, etc.).
 2. **Project default** (fallback): `config/aclf_run.json` at the repo root.
@@ -126,7 +126,7 @@ The resolved config is loaded via `AclfRunConfigRec.loadAclfRunConfig` and appli
 ```
 cd wspace
 source ../.venv/bin/activate
-python ipss_cmd.py ca <format> <input_path> <contingency_json> <monitored_branches_json>
+python ../src/ipss_cmd.py ca <format> <input_path> <contingency_json> <monitored_branches_json>
 ```
 
 **Format:** Use `psse` (PSS/E RAW input).
@@ -139,7 +139,7 @@ python ipss_cmd.py ca <format> <input_path> <contingency_json> <monitored_branch
 **Example:**
 
 ```
-python ipss_cmd.py ca psse \
+python ../src/ipss_cmd.py ca psse \
   data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW \
   data/psse/Texas2K/2k_contingencies_115kVAbove.json \
   data/psse/Texas2K/2k_monitored_branches.json
@@ -186,7 +186,7 @@ python generate_nerc_tpl_report.py "<display_name>" <result_dir>
 **Parameters:**
 
 - `display_name` — Human-readable system name for the report header (e.g., `"Texas 2000Bus System"`)
-- `result_dir` — Path **relative to `wspace/`** to the folder that contains the ACLF/CA CSVs (same folder `ipss_cmd.py` writes to), e.g. `data/ieee/result` or `data/psse/Texas2K/result`. A subdirectory name under `wspace/result/` still works for older layouts.
+- `result_dir` — Path **relative to `wspace/`** to the folder that contains the ACLF/CA CSVs (same folder the ACLF/CA CLI writes to), e.g. `data/ieee/result` or `data/psse/Texas2K/result`. A subdirectory name under `wspace/result/` still works for older layouts.
 
 **CSV requirements in that folder:**
 
@@ -210,7 +210,7 @@ Single-argument **aliases** (`ieee118`, `texas2k`, plus short forms via `KNOWN_C
 
 ## Result Directory Convention
 
-The `ipss_cmd.py` script writes ACLF results based on the input file's parent directory:
+The `src/ipss_cmd.py` CLI writes ACLF results based on the input file's parent directory:
 
 - `data/ieee/ieee118.ieee` → `wspace/data/ieee/result/`
 - `data/psse/Texas2K/ieee9_v36.raw` → `wspace/data/psse/Texas2K/result/`

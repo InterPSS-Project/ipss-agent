@@ -2,7 +2,7 @@
 """
 NERC TPL-001-5 Compliance Assessment Report Generator
 
-Reads CSV output from ipss_cmd.py and produces a TPL-001-5
+Reads CSV output from ``../src/ipss_cmd.py`` (run from ``wspace/``) and produces a TPL-001-5
 steady-state compliance report in Markdown format.
 
 NERC TPL-001-5 Transmission System Planning Performance Requirements:
@@ -123,7 +123,7 @@ def _default_case_name():
             return unique_dirs[0]
     raise ValueError(
         f"No result cases discovered under '{RESULT_DIR}'. "
-        "Run `ipss_cmd.py` first to generate CSV outputs."
+        "Run `python ../src/ipss_cmd.py` first to generate CSV outputs."
     )
 
 
@@ -891,7 +891,7 @@ def generate_report(case_name, result_dir=None):
         w("> Run contingency analysis using:")
         w(">")
         w("> ```bash")
-        w("> python ipss_cmd.py ca <format> <input>")
+        w("> python ../src/ipss_cmd.py ca <format> <input>")
         w("> ```")
         w("")
 
@@ -1100,7 +1100,7 @@ def generate_report(case_name, result_dir=None):
     if contingency_results:
         w(_md_table_row("Contingency Data", "**PRESENT**", f"{contingency_results['total_contingencies']} contingencies evaluated."))
     else:
-        w(_md_table_row("Contingency Data", "MISSING", "Run `ipss_cmd.py ca` to generate contingency analysis."))
+        w(_md_table_row("Contingency Data", "MISSING", "Run `python ../src/ipss_cmd.py ca` to generate contingency analysis."))
     w("")
 
     # ===================================================================

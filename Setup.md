@@ -21,7 +21,7 @@ temp/
 ├── .venv/                     # Python virtual environment
 ├── config/
 │   ├── config.json            # JVM path, classpath, logging config (often gitignored locally)
-│   └── aclf_run.json        # ACLF NR / limit-control settings (used by ipss_cmd.py)
+│   └── aclf_run.json        # ACLF NR / limit-control settings (used by src/ipss_cmd.py)
 ├── lib/
 │   ├── ipss_runnable.jar      # Main InterPSS runnable JAR
 │   └── deps/                  # Third-party JARs (22 total)
@@ -44,11 +44,11 @@ temp/
 │   ├── __init__.py
 │   ├── config.py              # ConfigManager + JvmManager
 │   ├── interpss.py            # Java class imports namespace
+│   ├── ipss_cmd.py            # CLI for running simulations
 │   └── adapter/
 │       ├── __init__.py
 │       └── input_adapter.py   # IeeeFileAdapter, PsseRawFileAdapter
 └── wspace/                    # <-- working directory
-    ├── ipss_cmd.py            # CLI for running simulations
     ├── generate_nerc_tpl_report.py  # NERC TPL-001-5 report generator
     ├── generate_aclf_report.py      # AC load flow Markdown report generator
     ├── ipss_report_common.py        # Shared analysis + Markdown helpers
@@ -253,7 +253,7 @@ machine-specific.
 
 ### ACLF run configuration
 
-`aclf_run.json` defines Newton–Raphson and related options (`maxIterations`, `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For ACLF, `wspace/ipss_cmd.py` resolves the file with a **two-tier lookup**:
+`aclf_run.json` defines Newton–Raphson and related options (`maxIterations`, `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For ACLF, `src/ipss_cmd.py` resolves the file with a **two-tier lookup**:
 
 1. **Case-specific (preferred):** `<input_parent>/config/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/config/aclf_run.json` for input under that folder).
 2. **Project default (fallback):** `config/aclf_run.json` at the project root.
@@ -262,14 +262,14 @@ The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied w
 
 ## Step 4: Running a Loadflow test
 
-The main entry point is `wspace/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated:
+The main entry point is `src/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated (paths below are relative to `wspace/`):
 
 macOS / Linux:
 
 ```bash
 cd wspace
 source ../.venv/bin/activate
-python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
 ```
 
 Windows PowerShell:
@@ -277,13 +277,13 @@ Windows PowerShell:
 ```powershell
 cd wspace
 ..\.venv\Scripts\Activate.ps1
-python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ..\src\ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
 ```
 
 ### Command Syntax
 
 ```
-python ipss_cmd.py <simutype> <format> <input>
+python ../src/ipss_cmd.py <simutype> <format> <input>
 ```
 
 
@@ -303,7 +303,7 @@ cd wspace
 source ../.venv/bin/activate
 
 # <display_name> is a human-readable name for the report header
-# <result_dir> is the folder with CSVs: path relative to wspace/ (ipss_cmd output), or a name under wspace/result/
+# <result_dir> is the folder with CSVs: path relative to wspace/ (ACLF/CA CLI output), or a name under wspace/result/
 python generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
 python generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
@@ -327,12 +327,12 @@ Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOW
 
 ### Generating AC Loadflow reports
 
-For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `wspace/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
+For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `wspace/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `../src/ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
 
 ```bash
 cd wspace
 source ../.venv/bin/activate
-python ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
 python generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/result
 ```
 
@@ -375,8 +375,8 @@ Use $ipss-sim to run data/psse/Texas2K "Texas 2K-Bus System"
 
 Codex should load the project skill from `.agents/skills/ipss-sim/` and then run the workflow from `wspace/`:
 
-1. ACLF with `python ipss_cmd.py aclf ...`
-2. CA with `python ipss_cmd.py ca ...` when contingency and monitored files are provided or auto-discovered
+1. ACLF with `python ../src/ipss_cmd.py aclf ...`
+2. CA with `python ../src/ipss_cmd.py ca ...` when contingency and monitored files are provided or auto-discovered
 3. Report generation with `python generate_nerc_tpl_report.py ...`
 
 ### Claude Code CLI
