@@ -1,6 +1,6 @@
 # iPSS Agent
 
-**[InterPSS Agentic Power System Simulation Agent](./docs/The iPSS Agent - Redefining Power System Simulation through Agentic AI.pdf)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository is configured for agent-driven power-system simulation in **OpenAI Codex Desktop**, **Claude Code CLI**, and **Gemini CLI** (skills and commands).
+[**InterPSS Agentic Power System Simulation Agent**](docs/The%20iPSS%20Agent%20-%20Redefining%20Power%20System%20Simulation%20through%20Agentic%20AI.pdf) for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository is configured for agent-driven power-system simulation in **OpenAI Codex Desktop**, **Claude Code CLI**, and **Gemini CLI** (skills and commands).
 
 ## Environment setup
 
