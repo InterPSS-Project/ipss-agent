@@ -18,8 +18,8 @@ Sections produced:
 
 Usage (from ``wspace/`` with venv activated):
   python ../src/report/generate_aclf_report.py <case_display_name> <result_dir> [csv_prefix]
-  python ../src/report/generate_aclf_report.py 'IEEE 118-Bus Test Case' data/ieee/result
-  python ../src/report/generate_aclf_report.py 'IEEE 14-Bus System' data/ieee/result ieee14
+  python ../src/report/generate_aclf_report.py 'IEEE 118-Bus Test Case' data/ieee/Ieee118Bus/result
+  python ../src/report/generate_aclf_report.py 'IEEE 14-Bus System' data/ieee/Ieee14Bus/result ieee14
   python ../src/report/generate_aclf_report.py 'Texas 2000-Bus System' data/psse/Texas2K/result
 
 The thresholds reused from ``config/gen_report.json`` (P0 voltage limits and
@@ -108,7 +108,7 @@ def generate_aclf_report(
         display_name: Human-readable case name shown in the report header.
         result_dir: Directory containing the ACLF CSV outputs. Accepts an
             absolute path, a path relative to ``wspace/`` (e.g.
-            ``data/ieee/result``), or a subdirectory name under
+            ``data/ieee/Ieee118Bus/result``), or a subdirectory name under
             ``wspace/result/`` (legacy layout, resolved by
             :func:`resolve_case_base`).
         csv_prefix: Optional CSV stem matching ``../src/ipss_cmd.py`` output (e.g.
@@ -609,10 +609,10 @@ if __name__ == "__main__":
     if len(sys.argv) < 3:
         print("Usage: python ../src/report/generate_aclf_report.py <case_display_name> <result_dir> [csv_prefix]")
         print(
-            "Example: python ../src/report/generate_aclf_report.py 'IEEE 118-Bus Test Case' data/ieee/result"
+            "Example: python ../src/report/generate_aclf_report.py 'IEEE 118-Bus Test Case' data/ieee/Ieee118Bus/result"
         )
         print(
-            "Example: python ../src/report/generate_aclf_report.py 'IEEE 14-Bus System' data/ieee/result ieee14"
+            "Example: python ../src/report/generate_aclf_report.py 'IEEE 14-Bus System' data/ieee/Ieee14Bus/result ieee14"
         )
         print(
             "Example: python ../src/report/generate_aclf_report.py 'Texas 2000-Bus System' data/psse/Texas2K/result"

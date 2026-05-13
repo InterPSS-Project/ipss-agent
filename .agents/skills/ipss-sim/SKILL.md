@@ -12,7 +12,7 @@ Run power system simulations (AC load flow, contingency analysis) and generate N
 ## Prerequisites
 
 - Python 3.10+, Java JDK 21
-- Virtual environment at project root `.venv` with `jpype1` and `numpy` installed
+- Virtual environment at project root `.venv` with dependencies from `requirements.txt` (`jpype1`, `numpy`)
 - Runtime JAR dependencies copied with `./mvnw -q dependency:copy-dependencies` on macOS/Linux or `.\mvnw.cmd -q dependency:copy-dependencies` on Windows
 - `config/config.json` configured with JVM path, JAR classpath, and log config
 - `config/aclf_run.json` present for ACLF solver options (checked into the repo)
@@ -25,7 +25,7 @@ macOS / Linux:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install jpype1 numpy
+python -m pip install -r requirements.txt
 ./mvnw -q dependency:copy-dependencies
 ```
 
@@ -34,7 +34,7 @@ Windows PowerShell:
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install jpype1 numpy
+python -m pip install -r requirements.txt
 .\mvnw.cmd -q dependency:copy-dependencies
 ```
 
@@ -100,7 +100,7 @@ python ../src/ipss_cmd.py aclf <format> <input_path>
 
 ```
 # IEEE 118 bus
-python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ../src/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
 
 # PSS/E Texas 2K bus
 python ../src/ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
@@ -160,17 +160,17 @@ python ../src/report/generate_aclf_report.py "<display_name>" <result_dir> [csv_
 **Parameters:**
 
 - `display_name` — Human-readable system name for the report header (e.g., `"IEEE 118-Bus System"`)
-- `result_dir` — Path **relative to `wspace/`** containing ACLF CSVs, e.g. `data/ieee/result`
+- `result_dir` — Path **relative to `wspace/`** containing ACLF CSVs, e.g. `data/ieee/Ieee118Bus/result`
 - `csv_prefix` — (optional but recommended when multiple cases share one `result_dir`) CSV stem such as `ieee14` or `ieee118`
 
 **Examples:**
 
 ```
 # Single-case result directory
-python ../src/report/generate_aclf_report.py "Texas 2000Bus System" data/psse/Texas2K/result
+python ../src/report/generate_aclf_report.py "Texas 2000-Bus System" data/psse/Texas2K/result
 
 # Shared result directory (explicit prefix avoids picking another case)
-python ../src/report/generate_aclf_report.py "IEEE 14-Bus System" data/ieee/result ieee14
+python ../src/report/generate_aclf_report.py "IEEE 14-Bus System" data/ieee/Ieee14Bus/result ieee14
 ```
 
 **Output:** `AC_Loadflow_Report.md` written next to the CSVs in the result directory.
@@ -185,8 +185,8 @@ python ../src/report/generate_nerc_tpl_report.py "<display_name>" <result_dir>
 
 **Parameters:**
 
-- `display_name` — Human-readable system name for the report header (e.g., `"Texas 2000Bus System"`)
-- `result_dir` — Path **relative to `wspace/`** to the folder that contains the ACLF/CA CSVs (same folder the ACLF/CA CLI writes to), e.g. `data/ieee/result` or `data/psse/Texas2K/result`. A subdirectory name under `wspace/result/` still works for older layouts.
+- `display_name` — Human-readable system name for the report header (e.g., `"Texas 2000-Bus System"`)
+- `result_dir` — Path **relative to `wspace/`** to the folder that contains the ACLF/CA CSVs (same folder the ACLF/CA CLI writes to), e.g. `data/ieee/Ieee118Bus/result` or `data/psse/Texas2K/result`. A subdirectory name under `wspace/result/` still works for older layouts.
 
 **CSV requirements in that folder:**
 
@@ -200,7 +200,7 @@ python ../src/report/generate_nerc_tpl_report.py "<display_name>" <result_dir>
 **Examples:**
 
 ```
-python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
 python ../src/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
 
@@ -212,7 +212,7 @@ Single-argument **aliases** (`ieee118`, `texas2k`, plus short forms via `KNOWN_C
 
 The `src/ipss_cmd.py` CLI writes ACLF results based on the input file's parent directory:
 
-- `data/ieee/ieee118.ieee` → `wspace/data/ieee/result/`
+- `data/ieee/Ieee118Bus/ieee118.ieee` → `wspace/data/ieee/Ieee118Bus/result/`
 - `data/psse/Texas2K/ieee9_v36.raw` → `wspace/data/psse/Texas2K/result/`
 
 CA results are written to the same directory.
@@ -222,7 +222,7 @@ Pass that same `.../result` path as `result_dir` to `../src/report/generate_aclf
 ## Troubleshooting
 
 - **NR load flow does not converge**: Raise `maxIterations` (and adjust `tolerance` if needed) in `config/aclf_run.json`; large systems often need 100+ iterations
-- **No module named 'jpype'**: Run `pip install jpype1 numpy` in the venv
+- **No module named 'jpype'**: Run `pip install -r requirements.txt` in the venv
 - **Bad interpreter / no such file**: Recreate venv with `python3 -m venv .venv` then reinstall dependencies
 - **Results not found by report generator**: Pass the correct `result_dir` relative to `wspace/` (e.g. `data/psse/Texas2K/result`), or symlink the case under `wspace/result/` for alias-only usage
 - **OutOfMemoryError / JVM heap exhaustion for large cases (>50K buses)**: Increase the JVM max heap size in `config/config.json` via `jvm_options`. Add or update the field:

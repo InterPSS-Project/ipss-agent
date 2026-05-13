@@ -1,6 +1,6 @@
 # iPSS Agent
 
-**[InterPSS Agentic Power System Simulation Agent](docs/The iPSS Agent - Redefining Power System Simulation through Agentic AI.pdf)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository is configured for agent-driven power-system simulation in **OpenAI Codex Desktop**, **Claude Code CLI**, and **Gemini CLI** (skills and commands).
+**[InterPSS Agentic Power System Simulation Agent](docs/The iPSS Agent - Redefining Power System Simulation through Agentic AI.pdf)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop** and **Claude Code CLI** (see [Setup.md](Setup.md)). Other agent CLIs can reuse the same workflow by copying the skill content from `.agents/skills/ipss-sim/` or `.claude/skills/ipss-sim/`.
 
 ## Environment setup
 
@@ -9,7 +9,7 @@ Git check out or download this repository and follow the setup instructions belo
 ### OpenAI Codex Desktop (recommended)
 
 1. Add the folder as a Codex project.
-2. Run the setup below, then test with a sample case (for example, under `wspace/data/Texas2K`).
+2. Run the setup below, then test with a sample case (for example, under `wspace/data/psse/Texas2K`).
 
 ```text
 Setup ipss.agent env
@@ -19,7 +19,7 @@ Setup ipss.agent env
 
 1. Add your data folder as a Codex project and use the agent to do the simulations.
 
-### Claude/Gemini CLI setup
+### Claude Code CLI setup
 
 ```text
 /init  # optional
@@ -43,6 +43,7 @@ Input directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency
 
 ```text
 /ipss-sim <simu_case_directory> "<NERC Report Name>"
+/ipss-sim Aclf only <simu_case_directory> "<Loadflow Report Name>"
 ```
 
 ### Direct prompt simulation
@@ -55,7 +56,7 @@ Gen NERC TPL report "<NERC Report Name>" <result_dir>
 
 ## Explore simulation results
 
-Results are written to `<case_directory>/result dir`. You can inspect them with the LLM, for example:
+Results are written under `wspace/<parent_of_case_file>/result/` (the directory that contains your case file, plus a `result` subfolder). You can inspect them with the LLM, for example:
 
 ```text
 # Load flow

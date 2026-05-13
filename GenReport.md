@@ -28,8 +28,8 @@ python ../src/report/generate_aclf_report.py <display_name> <result_dir> [csv_pr
 **Examples** (match [Setup.md](Setup.md)):
 
 ```
-python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
-python ../src/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ../src/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
+python ../src/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
 
 python ../src/ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
 python ../src/report/generate_aclf_report.py "Texas 2000-Bus System" data/psse/Texas2K/result
@@ -74,7 +74,7 @@ python ../src/report/generate_nerc_tpl_report.py <display_name> <result_dir>
 **Examples** (match [Setup.md](Setup.md)):
 
 ```
-python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
 python ../src/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
 

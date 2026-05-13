@@ -70,7 +70,7 @@ out_file_prefix = args.input.split("/")[-1]
 out_file_prefix = out_file_prefix.split(".")[0]
 #out_file_prefix = args.format + "_" + out_file_prefix
 
-# get the parent directory name, "data/ieee/ieee118.ieee" -> "data/ieee"
+# get the parent directory name, "data/ieee/Ieee118Bus/ieee118.ieee" -> "data/ieee/Ieee118Bus"
 input_dir = str(Path(args.input).parent)
 results_dir = wspace_dir / input_dir / "result"
 results_dir.mkdir(parents=True, exist_ok=True)

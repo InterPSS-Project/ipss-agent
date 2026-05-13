@@ -19,7 +19,7 @@ It loads the file with `AclfRunConfigRec.loadAclfRunConfig` and applies it with 
 * Run ACLF for the IEEE CDF format
 
 ```
-python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ../src/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
 ```
 
 * Run ACLF for the PSS/E RAW format

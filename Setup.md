@@ -19,6 +19,7 @@ temp/
 │   └── skills/
 │       └── ipss-sim/          # Claude Code skill copy
 ├── .venv/                     # Python virtual environment
+├── requirements.txt           # Python dependencies (jpype1, numpy)
 ├── config/
 │   ├── config.json            # JVM path, classpath, logging config (often gitignored locally)
 │   └── aclf_run.json        # ACLF NR / limit-control settings (used by src/ipss_cmd.py)
@@ -56,8 +57,11 @@ temp/
 └── wspace/                    # <-- working directory
     ├── data/
     │   └── ieee/
-    │       └── ieee118.ieee   # IEEE 118-bus test case
+    │       └── Ieee118Bus/
+    │           └── ieee118.ieee   # IEEE 118-bus test case
 ```
+
+JAR file names and versions under `lib/deps/` follow [`pom.xml`](pom.xml) and whatever `./mvnw dependency:copy-dependencies` resolves; the `lib/deps` fragment in the tree above is illustrative.
 
 ## Prerequisites
 
@@ -109,7 +113,7 @@ macOS / Linux:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install jpype1 numpy
+python -m pip install -r requirements.txt
 ```
 
 Windows PowerShell:
@@ -117,7 +121,7 @@ Windows PowerShell:
 ```powershell
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install jpype1 numpy
+python -m pip install -r requirements.txt
 ```
 
 ### Required Python Packages
@@ -125,8 +129,8 @@ python -m pip install jpype1 numpy
 
 | Package  | Version | Purpose                                  |
 | -------- | ------- | ---------------------------------------- |
-| `jpype1` | ≥ 1.5.0 | Java-Python bridge                       |
-| `numpy`  | ≥ 1.24  | Numerical operations used by `config.py` |
+| `jpype1` | ≥ 1.5.0 | Java-Python bridge (see `requirements.txt`)                       |
+| `numpy`  | ≥ 1.24  | Numerical operations used by `config.py` (see `requirements.txt`) |
 
 
 ## Step 2: JAR Dependencies
@@ -271,7 +275,7 @@ macOS / Linux:
 ```bash
 cd wspace
 source ../.venv/bin/activate
-python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ../src/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
 ```
 
 Windows PowerShell:
@@ -279,7 +283,7 @@ Windows PowerShell:
 ```powershell
 cd wspace
 ..\.venv\Scripts\Activate.ps1
-python ..\src\ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
+python ..\src\ipss_cmd.py aclf ieee data\ieee\Ieee118Bus\ieee118.ieee
 ```
 
 ### Command Syntax
@@ -306,7 +310,7 @@ source ../.venv/bin/activate
 
 # <display_name> is a human-readable name for the report header
 # <result_dir> is the folder with CSVs: path relative to wspace/ (ACLF/CA CLI output), or a name under wspace/result/
-python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
 python ../src/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
 
@@ -315,7 +319,7 @@ Windows PowerShell:
 ```powershell
 cd wspace
 ..\.venv\Scripts\Activate.ps1
-python ..\src\report\generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ..\src\report\generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data\ieee\Ieee118Bus\result
 ```
 
 The script writes `NERC_TPL_001_5_Report.md` into the same result directory. Alias-based discovery is also supported for single-argument backward compatibility:
@@ -334,8 +338,8 @@ For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_co
 ```bash
 cd wspace
 source ../.venv/bin/activate
-python ../src/ipss_cmd.py aclf ieee data/ieee/ieee118.ieee
-python ../src/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/result
+python ../src/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
+python ../src/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
 ```
 
 The script shares analysis and Markdown helpers with the NERC generator through `src/report/ipss_report_common.py`, so voltage bands, thermal loading percentages, and generator Q-limit logic stay aligned between the two reports.
@@ -366,7 +370,7 @@ To use it:
 4. Invoke the skill by name in a prompt:
 
 ```text
-Use $ipss-sim to run data/ieee/ieee118.ieee "IEEE 118-Bus Test Case"
+Use $ipss-sim to run data/ieee/Ieee118Bus/ieee118.ieee "IEEE 118-Bus Test Case"
 ```
 
 For a directory that contains a case file plus contingency and monitored-branch JSON files:
@@ -393,7 +397,7 @@ Claude skill and command registration files are stored at:
 Use the slash-command form:
 
 ```text
-/ipss-sim data/ieee/ieee118.ieee "IEEE 118-Bus Test Case"
+/ipss-sim data/ieee/Ieee118Bus/ieee118.ieee "IEEE 118-Bus Test Case"
 ```
 
 or directory mode:
@@ -406,7 +410,7 @@ or directory mode:
 
 - `.agents/skills/ipss-sim/**`, `.claude/skills/ipss-sim/**`, and `.claude/commands/ipss-sim.md` should be committed.
 - `.venv/`, `config/config.json`, generated `lib/deps/*.jar`, `.mvn/wrapper/dists/`, and `wspace/**/result/` are local setup or output artifacts and should remain uncommitted.
-- If the skill instructions change, keep the Codex and Claude `SKILL.md` copies aligned.
+- If the skill instructions change, edit `.agents/skills/ipss-sim/SKILL.md` first, then run `./scripts/sync_ipss_skills.sh` from the project root to copy it to `.claude/skills/ipss-sim/SKILL.md` (or copy the file manually on Windows).
 
 ### Quick Verification
 

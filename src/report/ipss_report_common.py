@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Shared helpers for ipss-agent Markdown report generators.
+"""Shared helpers for ipss.agent Markdown report generators.
 
 This module centralises the pieces that the NERC TPL-001-5 report and the
 ACLF report both need:
@@ -82,7 +82,7 @@ def resolve_case_base(result_dir: str) -> Path:
     """Directory containing ``*_DF_bus.csv``.
 
     Accepts an absolute path, a path relative to ``wspace/`` (e.g.
-    ``data/ieee/result``), or a subfolder name under ``wspace/result/``
+    ``data/ieee/Ieee118Bus/result``), or a subfolder name under ``wspace/result/``
     (legacy layout).
     """
     p = Path(result_dir)

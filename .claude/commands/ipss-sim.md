@@ -12,7 +12,7 @@ Invoke the `ipss-sim` skill to run the three-step workflow using the provided in
 - `contingency_json` — (optional) contingency definitions for CA
 - `monitored_branches_json` — (optional) monitored branches for CA
 - `format` — `psse` (.raw/.RAW) or `ieee` (.ieee), automatically inferred if not specified
-- `"<NERC Report Name>"` — (optional) display name for the report header (e.g., `"Texas 2000Bus System"`); defaults to a descriptive name derived from the case
+- `"<NERC Report Name>"` — (optional) display name for the report header (e.g., `"Texas 2000-Bus System"`); defaults to a descriptive name derived from the case
 
 ### Directory Mode
 

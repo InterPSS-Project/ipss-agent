@@ -17,7 +17,7 @@ NERC TPL-001-5 Transmission System Planning Performance Requirements:
 
 Usage (from ``wspace/`` with venv activated):
   python ../src/report/generate_nerc_tpl_report.py <case_display_name> <result_dir>
-  python ../src/report/generate_nerc_tpl_report.py 'IEEE 118-Bus Test Case' data/ieee/result
+  python ../src/report/generate_nerc_tpl_report.py 'IEEE 118-Bus Test Case' data/ieee/Ieee118Bus/result
   python ../src/report/generate_nerc_tpl_report.py 'Texas 2000-Bus System' data/psse/Texas2K/result
   # Legacy: subfolder under wspace/result/ still works, e.g. ieee_ieee118
 """
@@ -252,7 +252,7 @@ def generate_report(case_name, result_dir=None):
 
     Args:
         case_name: Human-readable case name for the report header (from CLI).
-        result_dir: Directory with CSV outputs: path relative to `wspace/` (e.g. `data/ieee/result`),
+        result_dir: Directory with CSV outputs: path relative to `wspace/` (e.g. `data/ieee/Ieee118Bus/result`),
             or a subdirectory name under `wspace/result/` (legacy). If omitted, uses discovery under
             `wspace/result/` only.
 
@@ -1142,7 +1142,7 @@ if __name__ == "__main__":
         report, case_base = generate_report(case_name)
     else:
         print("Usage: python ../src/report/generate_nerc_tpl_report.py <case_name> <result_dir>")
-        print("Example: python ../src/report/generate_nerc_tpl_report.py 'IEEE 118-Bus' data/ieee/result")
+        print("Example: python ../src/report/generate_nerc_tpl_report.py 'IEEE 118-Bus' data/ieee/Ieee118Bus/result")
         print("Example: python ../src/report/generate_nerc_tpl_report.py 'Texas 2K' data/psse/Texas2K/result")
         print("\nBackward-compatible mode also supported:")
         print("  python ../src/report/generate_nerc_tpl_report.py <discovered_alias_or_case_dir>")
