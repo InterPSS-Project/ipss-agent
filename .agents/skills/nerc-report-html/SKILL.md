@@ -21,13 +21,13 @@ The script auto-detects companion CSV files in the same directory by suffix, so 
 ## Quick Start
 
 ```bash
-python3 /Users/ipssdev/.codex/skills/nerc-report-html/scripts/generate_nerc_html.py <report-or-result-dir>
+python3 .agents/skills/nerc-report-html/scripts/generate_nerc_html.py <report-or-result-dir>
 ```
 
 Optional:
 
 ```bash
-python3 /Users/ipssdev/.codex/skills/nerc-report-html/scripts/generate_nerc_html.py <report-or-result-dir> --out <dashboard.html>
+python3 .agents/skills/nerc-report-html/scripts/generate_nerc_html.py <report-or-result-dir> --out <dashboard.html>
 ```
 
 By default the output is saved beside the report as:
