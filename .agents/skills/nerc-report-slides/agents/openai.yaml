@@ -1,0 +1,4 @@
+interface:
+  display_name: "NERC Report Slides"
+  short_description: "Turn TPL reports into utility decks"
+  default_prompt: "Use $nerc-report-slides to convert this NERC TPL report into a professional utility/ISO slide deck."

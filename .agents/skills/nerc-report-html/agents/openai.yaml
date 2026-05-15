@@ -1,0 +1,4 @@
+interface:
+  display_name: "NERC Report HTML"
+  short_description: "Build interactive TPL dashboards"
+  default_prompt: "Use $nerc-report-html to generate an interactive HTML dashboard from this NERC TPL report/result folder."

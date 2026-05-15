@@ -24,7 +24,7 @@ class ConfigManager:
         """
         if config_path is None:
             # Default to config/config.json in project root
-            config_path = Path(__file__).resolve().parents[2] / "config" / "config.json"
+            config_path = Path(__file__).resolve().parents[1] / "config" / "config.json"
         
         if not os.path.exists(config_path):
             raise FileNotFoundError(f"Config file not found at: {config_path}")
