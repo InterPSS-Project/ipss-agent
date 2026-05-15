@@ -44,6 +44,9 @@ Input directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency
 ```text
 /ipss-sim <simu_case_directory> "<NERC Report Name>"
 /ipss-sim Aclf only <simu_case_directory> "<Loadflow Report Name>"
+
+/NERC Report HTML         # generate Html report
+/NERC Report Slides       # generate PPT report
 ```
 
 ### Direct prompt simulation
@@ -72,7 +75,7 @@ Find the top N-1 loaded branches
 | Topic                            | Document                     |
 | -------------------------------- | ---------------------------- |
 | Layout, JARs, `config.json`, JVM | [Setup.md](Setup.md)         |
-| `src/ipss_cmd.py` usage            | [IpssCmd.md](IpssCmd.md)     |
+| `src/ipss_cmd.py` usage          | [IpssCmd.md](IpssCmd.md)     |
 | Report generator                 | [GenReport.md](GenReport.md) |
 
 
