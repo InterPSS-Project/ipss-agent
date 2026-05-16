@@ -17,7 +17,9 @@ Setup ipss.agent env
 /ipss-sim <simu_case_directory> "<NERC Report Name>"
 ```
 
-1. Add your data folder as a Codex project and use the agent to do the simulations.
+After completing the env setup, add your data folder as a Codex project and use the agent to do the simulations.
+
+**Data Security**: If you are concenred about your simulation data security, you can run your Codex with a local Ollama LLM. Use a latest LLM model, such as Qwen3.6, is recommended. Also, use a machine with 32GB or more memory to run Codex with the local LLM setup.
 
 ### Claude Code CLI setup
 
