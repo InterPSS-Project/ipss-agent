@@ -1,6 +1,6 @@
 # iPSS Agent
 
-**[InterPSS Agentic Power System Simulation Agent](https://drive.google.com/file/d/1Nr_12QFfeEBpWhf8C34uYy8fYQt-j7zr)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop** and **Claude Code CLI** (see [Setup.md](Setup.md)). Other agent CLIs can reuse the same workflow by copying the skill content from `.agents/skills/ipss-sim/` or `.claude/skills/ipss-sim/`.
+**[InterPSS Agentic Power System Simulation Agent](bit.ly/49L3joo)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop** and **Claude Code CLI** (see [Setup.md](Setup.md)). Other agent CLIs can reuse the same workflow by copying the skill content from `.agents/skills/ipss-sim/` or `.claude/skills/ipss-sim/`.
 
 ## Environment setup
 
