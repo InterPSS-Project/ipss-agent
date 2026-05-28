@@ -54,12 +54,20 @@ ipss-agent/
 │       └── gson-2.11.0.jar
 
 ├── src/
+│   ├── assembly/
+│   │   └── uber.xml               # Fat JAR assembly descriptor
 │   └── main/
+│       ├── java/
+│       │   └── org/interpss/agent/
+│       │       ├── IpssCmd.java   # Native Java CLI (ACLF / CA)
+│       │       ├── ProjectPaths.java
+│       │       ├── input/         # IEEE / PSS/E adapters
+│       │       └── util/          # Network summary text
 │       └── py/                    # Python root — add this dir to sys.path
 │           ├── paths.py           # project_root() / py_root() helpers
 │           ├── config.py          # ConfigManager + JvmManager (JPype)
 │           ├── interpss.py        # Java class imports namespace
-│           ├── ipss_cmd.py        # CLI: ACLF and contingency analysis
+│           ├── ipss_cmd.py        # Python CLI: ACLF and contingency analysis
 │           ├── adapter/
 │           │   └── input_adapter.py
 │           ├── util/
@@ -304,7 +312,26 @@ The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied w
 
 ## Step 4: Running a Loadflow test
 
-The main entry point is `src/main/py/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated (paths below are relative to `wspace/`):
+### Java `IpssCmd` (optional native CLI)
+
+Build the fat JAR at the project root (unpacks `lib/ipss_runnable.jar` and `lib/deps/*.jar` into one runnable artifact):
+
+```bash
+./mvnw package
+```
+
+Run from `wspace/` (paths below are relative to `wspace/`):
+
+```bash
+cd wspace
+java -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
+```
+
+Same command syntax as the Python CLI: `<simutype> <format> <input> [<cont_file> <monitor_file>]`.
+
+### Python `ipss_cmd.py`
+
+The Python entry point is `src/main/py/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated (paths below are relative to `wspace/`):
 
 macOS / Linux:
 

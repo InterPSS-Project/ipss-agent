@@ -1,6 +1,45 @@
-## Activate Python Virtual Environment
+## CLI options
 
-Run commands from `wspace/` with the venv created at the **project root** (parent of `wspace/`). The simulation CLI is `src/main/py/ipss_cmd.py` at the project root; invoke it as `python ../src/main/py/ipss_cmd.py ...` after `cd wspace`. See [Setup.md](Setup.md) for full layout, JARs, and `config/config.json`.
+Two entry points share the same arguments and write results to the same `wspace/<input_parent>/result/` folder:
+
+| CLI | Build / run |
+| --- | --- |
+| **Java** `IpssCmd` | `./mvnw package` at project root, then `java -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar ...` from `wspace/` |
+| **Python** `ipss_cmd.py` | Activate `.venv`, then `python ../src/main/py/ipss_cmd.py ...` from `wspace/` |
+
+```
+<simutype> <format> <input> [<cont_file> <monitor_file>]
+```
+
+See [Setup.md](Setup.md) for layout, JARs, and `config/config.json`.
+
+## Java `IpssCmd` (native)
+
+Build the fat JAR once at the project root (requires `lib/ipss_runnable.jar` and `lib/deps/*.jar`):
+
+```bash
+./mvnw package
+```
+
+Run from `wspace/` (paths relative to `wspace/`):
+
+```bash
+cd wspace
+java -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
+```
+
+```bash
+java -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar ca psse \
+  data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW \
+  data/psse/Texas2K/2k_contingencies_115kVAbove.json \
+  data/psse/Texas2K/2k_monitored_branches.json
+```
+
+## Python `ipss_cmd.py`
+
+### Activate Python Virtual Environment
+
+Run commands from `wspace/` with the venv created at the **project root** (parent of `wspace/`). Invoke as `python ../src/main/py/ipss_cmd.py ...` after `cd wspace`.
 
 ```bash
 cd wspace

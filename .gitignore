@@ -3,13 +3,16 @@
 /.venv/
 /.mvn/wrapper/dists/
 
+/target/**/*.*
+/target/**/*
+
 *.jar
 !lib/ipss_runnable.jar
 !lib/deps/ipss.core.lib-1.0.16.jar
 !lib/deps/ieee.odm.schema-1.0.1.jar
 !lib/deps/ieee.odm_pss-1.0.1.jar
 
-*.log
+*.log/
 .DS_Store
 
 /wspace/**/result/
@@ -20,3 +23,4 @@
 /CLAUDE.md
 /GEMINI.md
 
+src/assembly/uber.xml
