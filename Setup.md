@@ -40,9 +40,8 @@ ipss-agent/
 │       └── java/
 │           └── org/interpss/agent/
 │               ├── IpssCmd.java
-│               ├── ProjectPaths.java
 │               ├── input/         # IEEE / PSS/E adapters
-│               └── util/
+│               └── util/          # ProjectPaths, IpssNetworkInfo
 └── wspace/                    # <-- cd here before running IpssCmd
     └── data/
         └── ieee/

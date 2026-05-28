@@ -17,9 +17,6 @@
 
 /wspace/**/result/
 /config/config.json
-*.pyc
-/.pytest_cache/
-
 /CLAUDE.md
 /GEMINI.md
 

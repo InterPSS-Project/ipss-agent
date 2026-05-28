@@ -38,7 +38,7 @@ import com.interpss.core.contingency.dclf.DclfBranchOutage;
 
 /**
  * InterPSS command-line tool: AC load flow and DC contingency analysis.
- * Mirrors {@code src/main/py/ipss_cmd.py}.
+ * Native Java entry point for ACLF and DC contingency analysis.
  */
 public final class IpssCmd {
 

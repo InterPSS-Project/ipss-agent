@@ -8,7 +8,7 @@ import com.interpss.core.algo.AclfMethodType;
 import com.interpss.core.funcImpl.AclfAdjCtrlFunction;
 
 /**
- * Network summary text matching {@code util/ipss_func.network_info} in the Python CLI.
+ * Network summary text for ACLF result files ({@code *_network_info.txt}).
  */
 public final class IpssNetworkInfo {
 
