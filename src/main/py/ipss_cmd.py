@@ -1,10 +1,20 @@
+import sys
+from pathlib import Path
+
+# Locate src/main/py (Python root) before local imports.
+for _p in Path(__file__).resolve().parents:
+    if (_p / "paths.py").is_file() and (_p / "config.py").is_file():
+        if str(_p) not in sys.path:
+            sys.path.insert(0, str(_p))
+        break
+else:
+    raise RuntimeError("Could not find ipss-agent Python root (src/main/py)")
+
 import jpype
 import jpype.imports
 from jpype.types import *
 
-import sys
 import os
-from pathlib import Path
 import argparse
 
 import numpy as np
@@ -28,18 +38,16 @@ args = parser.parse_args()
 # Configure and Start the JVM
 #
 
-# Get script directory for reliable path resolution
-script_dir = Path(__file__).resolve().parent
-project_root = script_dir.parent
-wspace_dir = project_root / "wspace"
-if str(project_root) not in sys.path:
-    sys.path.append(str(project_root))
+from paths import project_root
+
+_repo_root = project_root()
+wspace_dir = _repo_root / "wspace"
 
 #  Configure and Start the JVM
-from src.config import ConfigManager, JvmManager
+from config import ConfigManager, JvmManager
 
 # Load configuration file
-config_path=str(project_root / "config" / "config.json")
+config_path = str(_repo_root / "config" / "config.json")
 config = ConfigManager.load_config(config_path)
 # Initialize and start the JVM
 JvmManager.initialize_jvm(config)
@@ -49,8 +57,8 @@ JvmManager.initialize_jvm(config)
 #
 
 # import InterPSS modules
-from src.interpss import ipss
-from src.util.ipss_func import network_info
+from interpss import ipss
+from util.ipss_func import network_info
 
 file_path = str(wspace_dir / args.input)
 if args.format == "ieee":
@@ -83,7 +91,7 @@ if args.simutype == "aclf":
     case_aclf = wspace_dir / input_dir / "config" / "aclf_run.json"
     configFilename = str(case_aclf)
     if not case_aclf.is_file():
-        configFilename = str(project_root / "config" / "aclf_run.json")
+        configFilename = str(_repo_root / "config" / "aclf_run.json")
     print(f"Using config file: {configFilename}")
     aclfRunConfig = ipss.AclfRunConfigRec.loadAclfRunConfig(configFilename)
 

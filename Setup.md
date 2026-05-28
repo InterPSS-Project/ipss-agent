@@ -6,10 +6,20 @@ This document describes how to set up and run the InterPSS Python runtime for po
 
 InterPSS is an open-source, Java-based power system simulation platform. This workspace bridges it to Python via [JPype](https://github.com/jpype-project/jpype), allowing you to run AC load flow and contingency analysis from Python scripts.
 
-**Project layout** — the runtime is spread across a parent directory where `wspace/` is the working directory for scripts, data, and results, while `src/`, `lib/`, and `config/` are shared infrastructure at the parent level. The tree below uses `temp/` as a placeholder for that **project root** (in this repo, the `ipss.agent/` directory).
+**Project layout** — two directory roles matter at runtime:
+
+| Role | Path | Purpose |
+|------|------|---------|
+| **Project root** | Repository top level | `config/`, `lib/`, `.venv/`, and `wspace/` |
+| **Python root** | `src/main/py/` | All Python modules; added to `sys.path` by CLI entry scripts |
+| **Working directory** | `wspace/` | Run simulations here; case paths are relative to `wspace/` |
+
+Entry scripts (`ipss_cmd.py`, report generators) locate `src/main/py` automatically and import modules with flat names (`from config import …`, `from report.ipss_report_common import …`). Shared path helpers live in `src/main/py/paths.py` (`project_root()`, `py_root()`).
+
+The tree below uses `ipss-agent/` as the **project root** (replace with your clone path).
 
 ```
-temp/
+ipss-agent/
 ├── .agents/
 │   └── skills/
 │       └── ipss-sim/          # OpenAI Codex Desktop project skill
@@ -21,8 +31,10 @@ temp/
 ├── .venv/                     # Python virtual environment
 ├── requirements.txt           # Python dependencies (jpype1, numpy)
 ├── config/
-│   ├── config.json            # JVM path, classpath, logging config (often gitignored locally)
-│   └── aclf_run.json        # ACLF NR / limit-control settings (used by src/ipss_cmd.py)
+│   ├── config.json            # JVM path, classpath, logging (often gitignored locally)
+│   ├── aclf_run.json          # Default ACLF NR / limit-control settings
+│   ├── gen_report.json        # Voltage / loading thresholds for Markdown reports
+│   └── log4j2.xml             # Log4j2 configuration for the JVM
 ├── lib/
 │   ├── ipss_runnable.jar      # Main InterPSS runnable JAR
 │   └── deps/                  # Third-party JARs (22 total)
@@ -42,19 +54,21 @@ temp/
 │       └── gson-2.11.0.jar
 
 ├── src/
-│   ├── __init__.py
-│   ├── config.py              # ConfigManager + JvmManager
-│   ├── interpss.py            # Java class imports namespace
-│   ├── ipss_cmd.py            # CLI for running simulations
-│   ├── adapter/
-│       ├── __init__.py
-│       └── input_adapter.py   # IeeeFileAdapter, PsseRawFileAdapter
-│   └── report/                # Markdown report generators + shared helpers
-│       ├── __init__.py
-│       ├── ipss_report_common.py
-│       ├── generate_aclf_report.py
-│       └── generate_nerc_tpl_report.py
-└── wspace/                    # <-- working directory
+│   └── main/
+│       └── py/                    # Python root — add this dir to sys.path
+│           ├── paths.py           # project_root() / py_root() helpers
+│           ├── config.py          # ConfigManager + JvmManager (JPype)
+│           ├── interpss.py        # Java class imports namespace
+│           ├── ipss_cmd.py        # CLI: ACLF and contingency analysis
+│           ├── adapter/
+│           │   └── input_adapter.py
+│           ├── util/
+│           │   └── ipss_func.py
+│           └── report/
+│               ├── ipss_report_common.py
+│               ├── generate_aclf_report.py
+│               └── generate_nerc_tpl_report.py
+└── wspace/                    # <-- cd here before running CLI commands
     ├── data/
     │   └── ieee/
     │       └── Ieee118Bus/
@@ -62,6 +76,18 @@ temp/
 ```
 
 JAR file names and versions under `lib/deps/` follow [`pom.xml`](pom.xml) and whatever `./mvnw dependency:copy-dependencies` resolves; the `lib/deps` fragment in the tree above is illustrative.
+
+### Simulation outputs
+
+When you run `ipss_cmd.py` from `wspace/`, CSV and text results are written under:
+
+```text
+wspace/<input_parent>/result/
+```
+
+For example, input `data/ieee/Ieee118Bus/ieee118.ieee` produces files such as `ieee118_DF_bus.csv` and `ieee118_network_info.txt` in `wspace/data/ieee/Ieee118Bus/result/`. Pass that same `result` folder to the report scripts in Step 5.
+
+Further CLI detail: [IpssCmd.md](IpssCmd.md). Report options: [GenReport.md](GenReport.md).
 
 ## Prerequisites
 
@@ -106,7 +132,7 @@ Get-ChildItem -Path 'C:\Program Files\Java','C:\Program Files\Eclipse Adoptium' 
 
 ## Step 1: Python Virtual Environment
 
-From the **project root** (the directory that contains `wspace/`, `src/`, `config/`, and `lib/`), create and activate a Python virtual environment:
+From the **project root** (the directory that contains `wspace/`, `src/main/py/`, `config/`, and `lib/`), create and activate a Python virtual environment:
 
 macOS / Linux:
 
@@ -242,7 +268,13 @@ The file `config/config.json` tells the runtime where to find the JVM and which 
 | `log_config_path` | Optional path to a Log4j2 XML configuration file.                                                                                     |
 
 
-The `ConfigManager` in `src/config.py` resolves relative paths against the project root (parent of `config/`).
+The `ConfigManager` in `src/main/py/config.py` resolves relative paths against the **project root** (the directory that contains `config/`, not `src/main/py`).
+
+Optional JVM tuning — add a `jvm_options` array to `config/config.json` (passed to `jpype.startJVM()`), for example:
+
+```json
+"jvm_options": ["-Xmx4g"]
+```
 
 Windows example:
 
@@ -257,9 +289,13 @@ Windows example:
 `config/config.json` is intentionally ignored by git because the JVM path is
 machine-specific.
 
+### Report thresholds
+
+`config/gen_report.json` supplies voltage bands and branch loading limits used by `src/main/py/report/generate_aclf_report.py` and `generate_nerc_tpl_report.py`. Edit this file to align report wording with your planning criteria without changing Python code.
+
 ### ACLF run configuration
 
-`aclf_run.json` defines Newton–Raphson and related options (`maxIterations`, `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For ACLF, `src/ipss_cmd.py` resolves the file with a **two-tier lookup**:
+`aclf_run.json` defines Newton–Raphson and related options (`maxIterations`, `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For ACLF, `src/main/py/ipss_cmd.py` resolves the file with a **two-tier lookup**:
 
 1. **Case-specific (preferred):** `<input_parent>/config/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/config/aclf_run.json` for input under that folder).
 2. **Project default (fallback):** `config/aclf_run.json` at the project root.
@@ -268,14 +304,14 @@ The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied w
 
 ## Step 4: Running a Loadflow test
 
-The main entry point is `src/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated (paths below are relative to `wspace/`):
+The main entry point is `src/main/py/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated (paths below are relative to `wspace/`):
 
 macOS / Linux:
 
 ```bash
 cd wspace
 source ../.venv/bin/activate
-python ../src/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
+python ../src/main/py/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
 ```
 
 Windows PowerShell:
@@ -283,26 +319,38 @@ Windows PowerShell:
 ```powershell
 cd wspace
 ..\.venv\Scripts\Activate.ps1
-python ..\src\ipss_cmd.py aclf ieee data\ieee\Ieee118Bus\ieee118.ieee
+python ..\src\main\py\ipss_cmd.py aclf ieee data\ieee\Ieee118Bus\ieee118.ieee
 ```
 
 ### Command Syntax
 
 ```
-python ../src/ipss_cmd.py <simutype> <format> <input>
+python ../src/main/py/ipss_cmd.py <simutype> <format> <input> [<cont_file> <monitor_file>]
 ```
 
 
-| Argument   | Values         | Description                                        |
-| ---------- | -------------- | -------------------------------------------------- |
-| `simutype` | `aclf`, `ca`   | Simulation type: load flow or contingency analysis |
-| `format`   | `ieee`, `psse` | Input file format                                  |
-| `input`    | path           | Input file path (relative to `wspace/`)            |
+| Argument        | Values         | Description                                                                 |
+| --------------- | -------------- | --------------------------------------------------------------------------- |
+| `simutype`      | `aclf`, `ca`   | Simulation type: load flow or contingency analysis                          |
+| `format`        | `ieee`, `psse` | Input file format                                                           |
+| `input`         | path           | Case file path (relative to `wspace/`)                                       |
+| `cont_file`     | path           | Contingency JSON (required for `ca`; relative to `wspace/`)                 |
+| `monitor_file`  | path           | Monitored-branches JSON (required for `ca`; relative to `wspace/`)          |
 
+### Contingency analysis example
+
+```bash
+cd wspace
+source ../.venv/bin/activate
+python ../src/main/py/ipss_cmd.py ca psse \
+  data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW \
+  data/psse/Texas2K/2k_contingencies_115kVAbove.json \
+  data/psse/Texas2K/2k_monitored_branches.json
+```
 
 ## Step 5: Generating NERC TPL-001-5 Reports
 
-The report generator (`src/report/generate_nerc_tpl_report.py`) reads CSV outputs from a previous simulation run and produces a NERC TPL-001-5 compliance report in Markdown. The CSV prefix is auto-discovered from the result directory, so you provide a display name and the result directory name:
+The report generator (`src/main/py/report/generate_nerc_tpl_report.py`) reads CSV outputs from a previous simulation run and produces a NERC TPL-001-5 compliance report in Markdown. The CSV prefix is auto-discovered from the result directory, so you provide a display name and the result directory name:
 
 ```bash
 cd wspace
@@ -310,8 +358,8 @@ source ../.venv/bin/activate
 
 # <display_name> is a human-readable name for the report header
 # <result_dir> is the folder with CSVs: path relative to wspace/ (ACLF/CA CLI output), or a name under wspace/result/
-python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
-python ../src/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
+python ../src/main/py/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
+python ../src/main/py/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
 
 Windows PowerShell:
@@ -319,30 +367,30 @@ Windows PowerShell:
 ```powershell
 cd wspace
 ..\.venv\Scripts\Activate.ps1
-python ..\src\report\generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data\ieee\Ieee118Bus\result
+python ..\src\main\py\report\generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data\ieee\Ieee118Bus\result
 ```
 
 The script writes `NERC_TPL_001_5_Report.md` into the same result directory. Alias-based discovery is also supported for single-argument backward compatibility:
 
 ```bash
-python ../src/report/generate_nerc_tpl_report.py texas2k
-python ../src/report/generate_nerc_tpl_report.py ieee118
+python ../src/main/py/report/generate_nerc_tpl_report.py texas2k
+python ../src/main/py/report/generate_nerc_tpl_report.py ieee118
 ```
 
-Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of `src/report/generate_nerc_tpl_report.py`.
+Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of `src/main/py/report/generate_nerc_tpl_report.py`.
 
 ### Generating AC Loadflow reports
 
-For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `src/report/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `../src/ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
+For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `src/main/py/report/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `../src/main/py/ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
 
 ```bash
 cd wspace
 source ../.venv/bin/activate
-python ../src/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
-python ../src/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
+python ../src/main/py/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
+python ../src/main/py/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
 ```
 
-The script shares analysis and Markdown helpers with the NERC generator through `src/report/ipss_report_common.py`, so voltage bands, thermal loading percentages, and generator Q-limit logic stay aligned between the two reports.
+The script shares analysis and Markdown helpers with the NERC generator through `src/main/py/report/ipss_report_common.py`, so voltage bands, thermal loading percentages, and generator Q-limit logic stay aligned between the two reports.
 
 ## Step 6: Verifying the `ipss-sim` Agent Skill
 
@@ -381,9 +429,9 @@ Use $ipss-sim to run data/psse/Texas2K "Texas 2K-Bus System"
 
 Codex should load the project skill from `.agents/skills/ipss-sim/` and then run the workflow from `wspace/`:
 
-1. ACLF with `python ../src/ipss_cmd.py aclf ...`
-2. CA with `python ../src/ipss_cmd.py ca ...` when contingency and monitored files are provided or auto-discovered
-3. Report generation with `python ../src/report/generate_nerc_tpl_report.py ...`
+1. ACLF with `python ../src/main/py/ipss_cmd.py aclf ...`
+2. CA with `python ../src/main/py/ipss_cmd.py ca ...` when contingency and monitored files are provided or auto-discovered
+3. Report generation with `python ../src/main/py/report/generate_nerc_tpl_report.py ...`
 
 ### Claude Code CLI
 
@@ -437,4 +485,15 @@ Expected entries include:
 .claude/commands/ipss-sim.md
 .claude/skills/ipss-sim/SKILL.md
 ```
+
+## Troubleshooting
+
+| Symptom | What to check |
+| ------- | ------------- |
+| `ModuleNotFoundError: No module named 'config'` (or `report`, `interpss`) | Run CLI scripts from `wspace/` using paths like `python ../src/main/py/ipss_cmd.py`, not from inside `src/main/py/`. Entry scripts must bootstrap `src/main/py` onto `sys.path` first. |
+| `Could not find ipss-agent Python root` | Ensure `src/main/py/paths.py` and `src/main/py/config.py` exist; do not rename the `src/main/py` directory. |
+| `Config file not found` | Create `config/config.json` from the examples in Step 3; paths in that file are relative to the **project root**. |
+| `Failed to start JVM` | Verify `jvm_path` in `config/config.json` matches your JDK install (see Prerequisites). |
+| JVM runs out of memory on large cases | Add `"jvm_options": ["-Xmx8g"]` (or higher) to `config/config.json`. |
+| Report script cannot find CSVs | Pass the `result` directory that contains `*_DF_bus.csv` (same folder `ipss_cmd.py aclf` wrote to). |
 

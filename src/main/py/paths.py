@@ -1,6 +1,11 @@
-"""Project root discovery for ipss-agent."""
+"""Project and Python-root path discovery for ipss-agent."""
 
 from pathlib import Path
+
+
+def py_root() -> Path:
+    """Return ``src/main/py`` (this directory)."""
+    return Path(__file__).resolve().parent
 
 
 def project_root() -> Path:
@@ -11,12 +16,24 @@ def project_root() -> Path:
     raise RuntimeError("Could not find ipss-agent project root")
 
 
-def ensure_repo_on_sys_path() -> Path:
-    """Insert project root on ``sys.path`` if missing; return the root path."""
+def ensure_py_root_on_sys_path() -> Path:
+    """Insert ``src/main/py`` on ``sys.path`` if missing; return that path."""
     import sys
 
-    root = project_root()
+    root = py_root()
     root_s = str(root)
     if root_s not in sys.path:
         sys.path.insert(0, root_s)
     return root
+
+
+def bootstrap_py_root(caller_file: str | Path) -> Path:
+    """Add ``src/main/py`` to ``sys.path`` for a script under or below that tree."""
+    import sys
+
+    for p in Path(caller_file).resolve().parents:
+        if (p / "paths.py").is_file() and (p / "config.py").is_file():
+            if str(p) not in sys.path:
+                sys.path.insert(0, str(p))
+            return p
+    raise RuntimeError("Could not find ipss-agent Python root (src/main/py)")

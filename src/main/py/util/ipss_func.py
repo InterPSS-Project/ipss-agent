@@ -1,6 +1,6 @@
 import jpype
 
-from src.interpss import ipss
+from interpss import ipss
 
 
 def network_info(net):

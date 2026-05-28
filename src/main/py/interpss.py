@@ -64,6 +64,6 @@ class ipss:
     #
     # InterPSS Py lib classes
     #
-    from src.adapter.input_adapter import PsseRawFileAdapterOld
-    from src.adapter.input_adapter import PsseRawFileAdapter
-    from src.adapter.input_adapter import IeeeFileAdapter
+    from adapter.input_adapter import PsseRawFileAdapterOld
+    from adapter.input_adapter import PsseRawFileAdapter
+    from adapter.input_adapter import IeeeFileAdapter

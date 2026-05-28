@@ -21,10 +21,11 @@ import json
 from math import sqrt
 from pathlib import Path
 
+from paths import project_root
+
 # --- Locations ---------------------------------------------------------------
 
-_REPORT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = _REPORT_DIR.parent.parent
+PROJECT_ROOT = project_root()
 WSPACE = PROJECT_ROOT / "wspace"
 RESULT_DIR = WSPACE / "result"
 
@@ -117,7 +118,7 @@ def load_csv_optional(filename, case_base: Path):
 def parse_network_info(case_base: Path, prefix: str) -> dict | None:
     """Parse ``<prefix>_network_info.txt`` into a structured dictionary.
 
-    The file produced by ``../src/ipss_cmd.py`` (run from ``wspace/``) has two sections:
+    The file produced by ``../src/main/py/ipss_cmd.py`` (run from ``wspace/``) has two sections:
 
         =====Aclf Network Information:=====
         Number of Active Buses: 2000

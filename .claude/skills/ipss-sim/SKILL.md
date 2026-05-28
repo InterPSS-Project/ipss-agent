@@ -88,7 +88,7 @@ When a directory is provided, the format is auto-detected from the case file ext
 ```
 cd wspace
 source ../.venv/bin/activate
-python ../src/ipss_cmd.py aclf <format> <input_path>
+python ../src/main/py/ipss_cmd.py aclf <format> <input_path>
 ```
 
 **Formats:**
@@ -100,10 +100,10 @@ python ../src/ipss_cmd.py aclf <format> <input_path>
 
 ```
 # IEEE 118 bus
-python ../src/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
+python ../src/main/py/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
 
 # PSS/E Texas 2K bus
-python ../src/ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
+python ../src/main/py/ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
 ```
 
 **Output:** CSV files written to `<input_parent>/result/`:
@@ -114,7 +114,7 @@ python ../src/ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_201
 - `<case>_DF_load.csv` — load data
 - `<case>_network_info.txt` — AclfNetwork summary and loadflow run information (included in NERC report)
 
-**ACLF solver settings:** `src/ipss_cmd.py` resolves `aclf_run.json` with a two-tier lookup:
+**ACLF solver settings:** `src/main/py/ipss_cmd.py` resolves `aclf_run.json` with a two-tier lookup:
 
 1. **Case-specific config** (preferred): `<input_parent>/config/aclf_run.json` — e.g. `data/psse/OpenEInterconnect/config/aclf_run.json`. Place a per-case config here when a particular model needs different NR settings (more iterations, tighter tolerance, etc.).
 2. **Project default** (fallback): `config/aclf_run.json` at the repo root.
@@ -126,7 +126,7 @@ The resolved config is loaded via `AclfRunConfigRec.loadAclfRunConfig` and appli
 ```
 cd wspace
 source ../.venv/bin/activate
-python ../src/ipss_cmd.py ca <format> <input_path> <contingency_json> <monitored_branches_json>
+python ../src/main/py/ipss_cmd.py ca <format> <input_path> <contingency_json> <monitored_branches_json>
 ```
 
 **Format:** Use `psse` (PSS/E RAW input).
@@ -139,7 +139,7 @@ python ../src/ipss_cmd.py ca <format> <input_path> <contingency_json> <monitored
 **Example:**
 
 ```
-python ../src/ipss_cmd.py ca psse \
+python ../src/main/py/ipss_cmd.py ca psse \
   data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW \
   data/psse/Texas2K/2k_contingencies_115kVAbove.json \
   data/psse/Texas2K/2k_monitored_branches.json
@@ -154,7 +154,7 @@ Use this when the user asks for an ACLF report only (no contingency/TPL sections
 ```
 cd wspace
 source ../.venv/bin/activate
-python ../src/report/generate_aclf_report.py "<display_name>" <result_dir> [csv_prefix]
+python ../src/main/py/report/generate_aclf_report.py "<display_name>" <result_dir> [csv_prefix]
 ```
 
 **Parameters:**
@@ -167,10 +167,10 @@ python ../src/report/generate_aclf_report.py "<display_name>" <result_dir> [csv_
 
 ```
 # Single-case result directory
-python ../src/report/generate_aclf_report.py "Texas 2000-Bus System" data/psse/Texas2K/result
+python ../src/main/py/report/generate_aclf_report.py "Texas 2000-Bus System" data/psse/Texas2K/result
 
 # Shared result directory (explicit prefix avoids picking another case)
-python ../src/report/generate_aclf_report.py "IEEE 14-Bus System" data/ieee/Ieee14Bus/result ieee14
+python ../src/main/py/report/generate_aclf_report.py "IEEE 14-Bus System" data/ieee/Ieee14Bus/result ieee14
 ```
 
 **Output:** `AC_Loadflow_Report.md` written next to the CSVs in the result directory.
@@ -180,7 +180,7 @@ python ../src/report/generate_aclf_report.py "IEEE 14-Bus System" data/ieee/Ieee
 ```
 cd wspace
 source ../.venv/bin/activate
-python ../src/report/generate_nerc_tpl_report.py "<display_name>" <result_dir>
+python ../src/main/py/report/generate_nerc_tpl_report.py "<display_name>" <result_dir>
 ```
 
 **Parameters:**
@@ -200,24 +200,24 @@ python ../src/report/generate_nerc_tpl_report.py "<display_name>" <result_dir>
 **Examples:**
 
 ```
-python ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
-python ../src/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
+python ../src/main/py/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
+python ../src/main/py/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
 
-Single-argument **aliases** (`ieee118`, `texas2k`, plus short forms via `KNOWN_CASE_ALIASES` in `src/report/generate_nerc_tpl_report.py`) still work when results are under `wspace/result/` — see [Setup.md](../../../Setup.md).
+Single-argument **aliases** (`ieee118`, `texas2k`, plus short forms via `KNOWN_CASE_ALIASES` in `src/main/py/report/generate_nerc_tpl_report.py`) still work when results are under `wspace/result/` — see [Setup.md](../../../Setup.md).
 
 **Output:** `NERC_TPL_001_5_Report.md` written **next to the CSVs** (e.g. `wspace/data/psse/Texas2K/result/`).
 
 ## Result Directory Convention
 
-The `src/ipss_cmd.py` CLI writes ACLF results based on the input file's parent directory:
+The `src/main/py/ipss_cmd.py` CLI writes ACLF results based on the input file's parent directory:
 
 - `data/ieee/Ieee118Bus/ieee118.ieee` → `wspace/data/ieee/Ieee118Bus/result/`
 - `data/psse/Texas2K/ieee9_v36.raw` → `wspace/data/psse/Texas2K/result/`
 
 CA results are written to the same directory.
 
-Pass that same `.../result` path as `result_dir` to `../src/report/generate_aclf_report.py` (Step 3) or `../src/report/generate_nerc_tpl_report.py` (Step 4). Optional: keep copies or symlinks under `wspace/result/` only if you rely on single-argument alias discovery.
+Pass that same `.../result` path as `result_dir` to `../src/main/py/report/generate_aclf_report.py` (Step 3) or `../src/main/py/report/generate_nerc_tpl_report.py` (Step 4). Optional: keep copies or symlinks under `wspace/result/` only if you rely on single-argument alias discovery.
 
 ## Troubleshooting
 
@@ -229,4 +229,4 @@ Pass that same `.../result` path as `result_dir` to `../src/report/generate_aclf
   ```json
   "jvm_options": ["-Xmx4g"]
   ```
-  Example above sets a **4 GB** max heap; scale up (e.g. `-Xmx8g`) for very large cases. Options are passed to `jpype.startJVM()` in `src/config.py` and can be combined (e.g. `["-Xmx8g", "-Xms2g"]`). See [Setup.md](../../../Setup.md) for JVM path and classpath.
+  Example above sets a **4 GB** max heap; scale up (e.g. `-Xmx8g`) for very large cases. Options are passed to `jpype.startJVM()` in `src/main/py/config.py` and can be combined (e.g. `["-Xmx8g", "-Xms2g"]`). See [Setup.md](../../../Setup.md) for JVM path and classpath.
