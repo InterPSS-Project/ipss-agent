@@ -1,20 +1,17 @@
-# InterPSS Python Runtime — Setup Guide
+# InterPSS Agent — Setup Guide
 
-This document describes how to set up and run the InterPSS Python runtime for power system simulations. 
+This document describes how to set up and run the InterPSS Agent workspace for power system simulations using the native Java `IpssCmd` CLI.
 
 ## Project Overview
 
-InterPSS is an open-source, Java-based power system simulation platform. This workspace bridges it to Python via [JPype](https://github.com/jpype-project/jpype), allowing you to run AC load flow and contingency analysis from Python scripts.
+InterPSS is an open-source, Java-based power system simulation platform. This repository provides a fat-JAR command-line tool for AC load flow and DC contingency analysis, plus agent skills for reporting and exploration.
 
-**Project layout** — two directory roles matter at runtime:
+**Project layout** — roles at runtime:
 
 | Role | Path | Purpose |
 |------|------|---------|
-| **Project root** | Repository top level | `config/`, `lib/`, `.venv/`, and `wspace/` |
-| **Python root** | `src/main/py/` | All Python modules; added to `sys.path` by CLI entry scripts |
-| **Working directory** | `wspace/` | Run simulations here; case paths are relative to `wspace/` |
-
-Entry scripts (`ipss_cmd.py`, report generators) locate `src/main/py` automatically and import modules with flat names (`from config import …`, `from report.ipss_report_common import …`). Shared path helpers live in `src/main/py/paths.py` (`project_root()`, `py_root()`).
+| **Project root** | Repository top level | `config/`, `lib/`, `target/`, `wspace/` |
+| **Working directory** | `wspace/` | Run `IpssCmd` here; case paths are relative to `wspace/` |
 
 The tree below uses `ipss-agent/` as the **project root** (replace with your clone path).
 
@@ -28,78 +25,47 @@ ipss-agent/
 │   │   └── ipss-sim.md        # Claude Code slash-command entry point
 │   └── skills/
 │       └── ipss-sim/          # Claude Code skill copy
-├── .venv/                     # Python virtual environment
-├── requirements.txt           # Python dependencies (jpype1, numpy)
 ├── config/
-│   ├── config.json            # JVM path, classpath, logging (often gitignored locally)
 │   ├── aclf_run.json          # Default ACLF NR / limit-control settings
-│   ├── gen_report.json        # Voltage / loading thresholds for Markdown reports
-│   └── log4j2.xml             # Log4j2 configuration for the JVM
+│   ├── gen_report.json        # Voltage / loading thresholds for reports
+│   └── log4j2.xml             # Log4j2 configuration (optional JVM flag)
 ├── lib/
-│   ├── ipss_runnable.jar      # Main InterPSS runnable JAR
-│   └── deps/                  # Third-party JARs (22 total)
-│       ├── ipss.core.lib-1.0.16.jar
-│       ├── ieee.odm.schema-1.0.1.jar
-│       ├── ieee.odm_pss-1.0.1.jar
-│       ├── slf4j-api-1.7.36.jar / slf4j-simple-1.7.36.jar
-│       ├── org.eclipse.emf.common-2.28.0.jar / .ecore-2.38.0.jar
-│       ├── hazelcast-5.3.6.jar
-│       ├── jaxb-api-2.3.1.jar / jaxb-impl-2.3.1.jar
-│       ├── javax.activation-api-1.2.0.jar
-│       ├── commons-math3-3.6.1.jar
-│       ├── JKLU-1.0.0.jar / BTFJ-1.0.1.jar / AMDJ-1.0.1.jar / COLAMDJ-1.0.1.jar
-│       ├── csparsej-1.1.1.jar
-│       ├── dflib-2.0.0-M6.jar / dflib-csv-2.0.0-M6.jar / dflib-json-2.0.0-M6.jar
-│       ├── commons-csv-1.10.0.jar
-│       └── gson-2.11.0.jar
-
+│   ├── ipss_runnable.jar      # InterPSS plugin / adapters
+│   └── deps/                  # Third-party and core JARs
+├── pom.xml                    # Builds ipss-agent-cmd shaded JAR
 ├── src/
 │   ├── assembly/
-│   │   └── uber.xml               # Fat JAR assembly descriptor
+│   │   └── uber.xml           # Fat JAR assembly descriptor
 │   └── main/
-│       ├── java/
-│       │   └── org/interpss/agent/
-│       │       ├── IpssCmd.java   # Native Java CLI (ACLF / CA)
-│       │       ├── ProjectPaths.java
-│       │       ├── input/         # IEEE / PSS/E adapters
-│       │       └── util/          # Network summary text
-│       └── py/                    # Python root — add this dir to sys.path
-│           ├── paths.py           # project_root() / py_root() helpers
-│           ├── config.py          # ConfigManager + JvmManager (JPype)
-│           ├── interpss.py        # Java class imports namespace
-│           ├── ipss_cmd.py        # Python CLI: ACLF and contingency analysis
-│           ├── adapter/
-│           │   └── input_adapter.py
-│           ├── util/
-│           │   └── ipss_func.py
-│           └── report/
-│               ├── ipss_report_common.py
-│               ├── generate_aclf_report.py
-│               └── generate_nerc_tpl_report.py
-└── wspace/                    # <-- cd here before running CLI commands
-    ├── data/
-    │   └── ieee/
-    │       └── Ieee118Bus/
-    │           └── ieee118.ieee   # IEEE 118-bus test case
+│       └── java/
+│           └── org/interpss/agent/
+│               ├── IpssCmd.java
+│               ├── ProjectPaths.java
+│               ├── input/         # IEEE / PSS/E adapters
+│               └── util/
+└── wspace/                    # <-- cd here before running IpssCmd
+    └── data/
+        └── ieee/
+            └── Ieee118Bus/
+                └── ieee118.ieee
 ```
 
-JAR file names and versions under `lib/deps/` follow [`pom.xml`](pom.xml) and whatever `./mvnw dependency:copy-dependencies` resolves; the `lib/deps` fragment in the tree above is illustrative.
+JAR file names and versions under `lib/deps/` follow [`pom.xml`](pom.xml) and `./mvnw dependency:copy-dependencies`. The listing above is illustrative.
 
 ### Simulation outputs
 
-When you run `ipss_cmd.py` from `wspace/`, CSV and text results are written under:
+When you run `IpssCmd` from `wspace/`, CSV and text results are written under:
 
 ```text
 wspace/<input_parent>/result/
 ```
 
-For example, input `data/ieee/Ieee118Bus/ieee118.ieee` produces files such as `ieee118_DF_bus.csv` and `ieee118_network_info.txt` in `wspace/data/ieee/Ieee118Bus/result/`. Pass that same `result` folder to the report scripts in Step 5.
+For example, input `data/ieee/Ieee118Bus/ieee118.ieee` produces `ieee118_DF_bus.csv` and `ieee118_network_info.txt` in `wspace/data/ieee/Ieee118Bus/result/`.
 
-Further CLI detail: [IpssCmd.md](IpssCmd.md). Report options: [GenReport.md](GenReport.md).
+Further CLI detail: [IpssCmd.md](IpssCmd.md). Report workflow: [GenReport.md](GenReport.md).
 
 ## Prerequisites
 
-- **Python 3.10+** with pip
 - **Java JDK 21** (or compatible version)
 - **macOS / Linux / Windows**
 
@@ -109,74 +75,11 @@ Check your Java version:
 java -version
 ```
 
-The JVM shared library path is configured in `config/config.json`.
+## Step 1: JAR Dependencies
 
-Common examples:
+The InterPSS runtime requires JARs under `lib/` and `lib/deps/`.
 
-macOS:
-
-```
-/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home/lib/libjli.dylib
-```
-
-Linux:
-
-```
-/usr/lib/jvm/java-21-openjdk/lib/server/libjvm.so
-```
-
-Windows:
-
-```text
-C:\Program Files\Eclipse Adoptium\jdk-21.0.6.7-hotspot\bin\server\jvm.dll
-```
-
-The exact Windows path depends on the JDK vendor and version. You can find it in
-PowerShell with:
-
-```powershell
-Get-ChildItem -Path 'C:\Program Files\Java','C:\Program Files\Eclipse Adoptium' -Recurse -Filter jvm.dll -ErrorAction SilentlyContinue
-```
-
-## Step 1: Python Virtual Environment
-
-From the **project root** (the directory that contains `wspace/`, `src/main/py/`, `config/`, and `lib/`), create and activate a Python virtual environment:
-
-macOS / Linux:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-```
-
-Windows PowerShell:
-
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
-
-### Required Python Packages
-
-
-| Package  | Version | Purpose                                  |
-| -------- | ------- | ---------------------------------------- |
-| `jpype1` | ≥ 1.5.0 | Java-Python bridge (see `requirements.txt`)                       |
-| `numpy`  | ≥ 1.24  | Numerical operations used by `config.py` (see `requirements.txt`) |
-
-
-## Step 2: JAR Dependencies
-
-The InterPSS runtime requires these JAR categories:
-
-### Recommended: Maven Setup
-
-This repository includes a bash Maven wrapper (`mvnw`) and a version-controlled
-`pom.xml` dependency manifest.
-
-macOS / Linux:
+### Recommended: Maven dependency copy
 
 ```bash
 ./mvnw -q dependency:copy-dependencies
@@ -188,339 +91,162 @@ Windows PowerShell:
 .\mvnw.cmd -q dependency:copy-dependencies
 ```
 
-The wrapper downloads the pinned Maven distribution on first use and copies the
-runtime dependency JARs into `lib/deps/`. The downloaded Maven distribution and
-copied JARs are local setup artifacts and are not committed.
+The wrapper downloads Maven on first use and copies runtime JARs into `lib/deps/`. Ensure `lib/ipss_runnable.jar` and the InterPSS core JARs listed in [.gitignore](.gitignore) are present (they are version-controlled in this repo).
 
-Maintainers can regenerate the wrapper scripts from the project root:
-
-```bash
-mvn -N wrapper:wrapper -Dmaven=3.9.11
-```
-
-In PowerShell, quote the Maven version property:
-
-```powershell
-mvn -N wrapper:wrapper '-Dmaven=3.9.11'
-```
-
-### InterPSS Core JARs
+### InterPSS core JARs (required)
 
 
-| JAR                           | Source         | Purpose                            |
-| ----------------------------- | -------------- | ---------------------------------- |
-| `ipss_runnable.jar`           | InterPSS build | Plugin core, adapters, samples     |
-| `ipss.core.lib-1.0.16.jar`    | InterPSS build | ACLF engine, algorithms, EMF model |
-| `ipss.plugin.core-1.0.16.jar` | InterPSS build | Plugin framework                   |
-| `ieee.odm.schema-1.0.1.jar`   | InterPSS build | IEEE ODM XML schema                |
-| `ieee.odm_pss-1.0.1.jar`      | InterPSS build | IEEE ODM PSS types                 |
+| JAR | Purpose |
+| --- | ------- |
+| `ipss_runnable.jar` | Plugin core, adapters, DFrame exporters |
+| `ipss.core.lib-1.0.16.jar` | ACLF engine, algorithms |
+| `ieee.odm.schema-1.0.1.jar` | IEEE ODM schema |
+| `ieee.odm_pss-1.0.1.jar` | IEEE ODM PSS types |
 
+### Other dependencies
 
-### Sparse Solver JARs
+Sparse solvers (`JKLU`, `BTFJ`, `AMDJ`, `COLAMDJ`, `csparsej`), DataFrame export (`dflib`, `dflib-csv`), logging (`slf4j`), EMF, Hazelcast, JAXB, Gson, and related JARs are copied into `lib/deps/` by the Maven step above.
 
+## Step 2: Build `IpssCmd`
 
-| JAR                  | Purpose                                  |
-| -------------------- | ---------------------------------------- |
-| `JKLU-1.0.0.jar`     | KLU sparse LU solver                     |
-| `BTFJ-1.0.1.jar`     | Block Triangular Form permutation        |
-| `AMDJ-1.0.1.jar`     | Approximate Minimum Degree ordering      |
-| `COLAMDJ-1.0.1.jar`  | Column AMD ordering                      |
-| `csparsej-1.1.1.jar` | CSPARSEJ — CSparse sparse matrix library |
-
-
-### DataFrame Export JARs (for CSV output)
-
-
-| JAR                       | Maven Central Coordinates               | Purpose           |
-| ------------------------- | --------------------------------------- | ----------------- |
-| `dflib-2.0.0-M6.jar`      | `org.dflib:dflib:2.0.0-M6`              | DataFrame library |
-| `dflib-csv-2.0.0-M6.jar`  | `org.dflib:dflib-csv:2.0.0-M6`          | CSV save support  |
-| `dflib-json-2.0.0-M6.jar` | `org.dflib:dflib-json:2.0.0-M6`         | JSON support      |
-| `commons-csv-1.10.0.jar`  | `org.apache.commons:commons-csv:1.10.0` | CSV parsing       |
-
-
-> The Maven Central JARs can be downloaded from [Maven Central Repository](https://central.sonatype.com/) or any Maven mirror.
-
-### Third-Party Support JARs
-
-
-| JAR                                                       | Purpose                    |
-| --------------------------------------------------------- | -------------------------- |
-| `slf4j-api-1.7.36.jar` / `slf4j-simple-1.7.36.jar`        | Logging                    |
-| `org.eclipse.emf.common-2.28.0.jar` / `.ecore-2.38.0.jar` | Eclipse Modeling Framework |
-| `hazelcast-5.3.6.jar`                                     | Distributed computing      |
-| `jaxb-api-2.3.1.jar` / `jaxb-impl-2.3.1.jar`              | XML binding                |
-| `javax.activation-api-1.2.0.jar`                          | Java Activation Framework  |
-| `commons-math3-3.6.1.jar`                                 | Math utilities             |
-
-
-All JARs must be placed in `lib/` (main JARs) and `lib/deps/` (dependency JARs).
-
-## Step 3: Configuration
-
-The file `config/config.json` tells the runtime where to find the JVM and which JARs to load:
-
-```json
-{
-  "jvm_path": "/Library/Java/JavaVirtualMachines/jdk-21.jdk/Contents/Home/lib/libjli.dylib",
-  "jar_path": "lib/ipss_runnable.jar:lib/deps",
-  "log_config_path": "config/log4j2.xml"
-}
-```
-
-
-| Key               | Description                                                                                                                           |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `jvm_path`        | Full path to the JVM shared library. Supports `{HOME}` expansion.                                                                     |
-| `jar_path`        | Classpath entries separated by `:` (macOS/Linux) or `;` (Windows). Directories are expanded to include all `*.jar` files within them. |
-| `log_config_path` | Optional path to a Log4j2 XML configuration file.                                                                                     |
-
-
-The `ConfigManager` in `src/main/py/config.py` resolves relative paths against the **project root** (the directory that contains `config/`, not `src/main/py`).
-
-Optional JVM tuning — add a `jvm_options` array to `config/config.json` (passed to `jpype.startJVM()`), for example:
-
-```json
-"jvm_options": ["-Xmx4g"]
-```
-
-Windows example:
-
-```json
-{
-  "jvm_path": "C:\\Program Files\\Eclipse Adoptium\\jdk-21.0.6.7-hotspot\\bin\\server\\jvm.dll",
-  "jar_path": "lib/ipss_runnable.jar;lib/deps",
-  "log_config_path": "config/log4j2.xml"
-}
-```
-
-`config/config.json` is intentionally ignored by git because the JVM path is
-machine-specific.
-
-### Report thresholds
-
-`config/gen_report.json` supplies voltage bands and branch loading limits used by `src/main/py/report/generate_aclf_report.py` and `generate_nerc_tpl_report.py`. Edit this file to align report wording with your planning criteria without changing Python code.
-
-### ACLF run configuration
-
-`aclf_run.json` defines Newton–Raphson and related options (`maxIterations`, `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For ACLF, `src/main/py/ipss_cmd.py` resolves the file with a **two-tier lookup**:
-
-1. **Case-specific (preferred):** `<input_parent>/config/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/config/aclf_run.json` for input under that folder).
-2. **Project default (fallback):** `config/aclf_run.json` at the project root.
-
-The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied with `configAclfRun(algo, polarCoordinate, includeAdjustments, False)`. The script prints `Using config file: <path>` to stderr so you can confirm which file ran. Edit the JSON to tune convergence or solver behavior without editing Python.
-
-## Step 4: Running a Loadflow test
-
-### Java `IpssCmd` (optional native CLI)
-
-Build the fat JAR at the project root (unpacks `lib/ipss_runnable.jar` and `lib/deps/*.jar` into one runnable artifact):
+From the project root:
 
 ```bash
 ./mvnw package
 ```
 
-Run from `wspace/` (paths below are relative to `wspace/`):
+Produces:
+
+```text
+target/ipss-agent-cmd-1.0.0-shaded.jar
+```
+
+The shaded JAR unpacks `lib/ipss_runnable.jar` and all `lib/deps/*.jar` into one runnable artifact (~30 MB).
+
+## Step 3: Configuration
+
+### ACLF run configuration
+
+`aclf_run.json` defines Newton–Raphson and related options. For ACLF, `IpssCmd` resolves the file with a **two-tier lookup**:
+
+1. **Case-specific (preferred):** `<input_parent>/config/aclf_run.json` relative to `wspace/`.
+2. **Project default (fallback):** `config/aclf_run.json` at the project root.
+
+The tool prints `Using config file: <path>` to stdout. Edit either JSON to tune convergence or limit controls without recompiling.
+
+### Report thresholds
+
+`config/gen_report.json` supplies voltage bands and branch loading limits referenced when agents draft compliance reports. See [GenReport.md](GenReport.md).
+
+### Logging (optional)
+
+Pass Log4j2 configuration when launching:
+
+```bash
+java -Dlog4j.configurationFile=../config/log4j2.xml -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar ...
+```
+
+## Step 4: Running simulations
+
+Run from `wspace/` (paths relative to `wspace/`):
 
 ```bash
 cd wspace
 java -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
 ```
 
-Same command syntax as the Python CLI: `<simutype> <format> <input> [<cont_file> <monitor_file>]`.
+### Command syntax
 
-### Python `ipss_cmd.py`
-
-The Python entry point is `src/main/py/ipss_cmd.py`. Run it from the `wspace/` directory with the virtual environment activated (paths below are relative to `wspace/`):
-
-macOS / Linux:
-
-```bash
-cd wspace
-source ../.venv/bin/activate
-python ../src/main/py/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
+```
+java -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar <simutype> <format> <input> [<cont_file> <monitor_file>]
 ```
 
-Windows PowerShell:
+
+| Argument | Values | Description |
+| -------- | ------ | ----------- |
+| `simutype` | `aclf`, `ca` | Load flow or contingency analysis |
+| `format` | `ieee`, `psse` | Input file format |
+| `input` | path | Case file (relative to `wspace/`) |
+| `cont_file` | path | Contingency JSON (required for `ca`) |
+| `monitor_file` | path | Monitored-branches JSON (required for `ca`) |
+
+Windows PowerShell (same arguments):
 
 ```powershell
 cd wspace
-..\.venv\Scripts\Activate.ps1
-python ..\src\main\py\ipss_cmd.py aclf ieee data\ieee\Ieee118Bus\ieee118.ieee
+java -jar ..\target\ipss-agent-cmd-1.0.0-shaded.jar aclf ieee data\ieee\Ieee118Bus\ieee118.ieee
 ```
-
-### Command Syntax
-
-```
-python ../src/main/py/ipss_cmd.py <simutype> <format> <input> [<cont_file> <monitor_file>]
-```
-
-
-| Argument        | Values         | Description                                                                 |
-| --------------- | -------------- | --------------------------------------------------------------------------- |
-| `simutype`      | `aclf`, `ca`   | Simulation type: load flow or contingency analysis                          |
-| `format`        | `ieee`, `psse` | Input file format                                                           |
-| `input`         | path           | Case file path (relative to `wspace/`)                                       |
-| `cont_file`     | path           | Contingency JSON (required for `ca`; relative to `wspace/`)                 |
-| `monitor_file`  | path           | Monitored-branches JSON (required for `ca`; relative to `wspace/`)          |
 
 ### Contingency analysis example
 
 ```bash
 cd wspace
-source ../.venv/bin/activate
-python ../src/main/py/ipss_cmd.py ca psse \
+java -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar ca psse \
   data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW \
   data/psse/Texas2K/2k_contingencies_115kVAbove.json \
   data/psse/Texas2K/2k_monitored_branches.json
 ```
 
-## Step 5: Generating NERC TPL-001-5 Reports
-
-The report generator (`src/main/py/report/generate_nerc_tpl_report.py`) reads CSV outputs from a previous simulation run and produces a NERC TPL-001-5 compliance report in Markdown. The CSV prefix is auto-discovered from the result directory, so you provide a display name and the result directory name:
+Large cases may need a higher heap:
 
 ```bash
-cd wspace
-source ../.venv/bin/activate
-
-# <display_name> is a human-readable name for the report header
-# <result_dir> is the folder with CSVs: path relative to wspace/ (ACLF/CA CLI output), or a name under wspace/result/
-python ../src/main/py/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
-python ../src/main/py/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
+java -Xmx8g -jar ../target/ipss-agent-cmd-1.0.0-shaded.jar aclf psse data/psse/Texas2K/...
 ```
 
-Windows PowerShell:
+## Step 5: Reports and downstream analysis
 
-```powershell
-cd wspace
-..\.venv\Scripts\Activate.ps1
-python ..\src\main\py\report\generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data\ieee\Ieee118Bus\result
-```
+Simulation CSVs are consumed by agent skills and optional HTML/slide generators. See [GenReport.md](GenReport.md) for artifact names and the `ipss-sim` / `nerc-report-*` skill workflow. No separate simulation CLI is required beyond `IpssCmd`.
 
-The script writes `NERC_TPL_001_5_Report.md` into the same result directory. Alias-based discovery is also supported for single-argument backward compatibility:
+## Step 6: Verifying the `ipss-sim` agent skill
 
-```bash
-python ../src/main/py/report/generate_nerc_tpl_report.py texas2k
-python ../src/main/py/report/generate_nerc_tpl_report.py ieee118
-```
-
-Known aliases (`ieee` → `ieee118`, `texas` → `texas2k`) are defined in `KNOWN_CASE_ALIASES` at the top of `src/main/py/report/generate_nerc_tpl_report.py`.
-
-### Generating AC Loadflow reports
-
-For a focused AC load flow report (no NERC TPL contingency criteria, no `*_DF_contingency.csv` consumption), use `src/main/py/report/generate_aclf_report.py`. It reads the same `*_DF_{bus,branch,gen,load}.csv` plus `*_network_info.txt` that `../src/main/py/ipss_cmd.py aclf` produces and writes `AC_Loadflow_Report.md` into the same result directory:
-
-```bash
-cd wspace
-source ../.venv/bin/activate
-python ../src/main/py/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
-python ../src/main/py/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
-```
-
-The script shares analysis and Markdown helpers with the NERC generator through `src/main/py/report/ipss_report_common.py`, so voltage bands, thermal loading percentages, and generator Q-limit logic stay aligned between the two reports.
-
-## Step 6: Verifying the `ipss-sim` Agent Skill
-
-This repository already includes agent-facing skill files so Codex and Claude can run the full simulation workflow from a natural-language prompt. No copy step is required when the repository is opened as a project; setup means verifying the files are present and then invoking the skill from the supported agent.
+Agent skill files are included for Codex and Claude. Setup means completing Steps 1–2, then invoking the skill from a supported agent.
 
 ### OpenAI Codex Desktop
 
-The Codex project skill is stored at:
-
 ```text
 .agents/skills/ipss-sim/SKILL.md
-```
-
-UI metadata for the skill is stored at:
-
-```text
 .agents/skills/ipss-sim/agents/openai.yaml
 ```
 
-To use it:
-
-1. Add or open this repository folder as a Codex Desktop project.
-2. Make sure Steps 1-3 above have been completed.
-3. Verify the files below are present.
-4. Invoke the skill by name in a prompt:
+Example prompt:
 
 ```text
 Use $ipss-sim to run data/ieee/Ieee118Bus/ieee118.ieee "IEEE 118-Bus Test Case"
 ```
 
-For a directory that contains a case file plus contingency and monitored-branch JSON files:
+Directory mode:
 
 ```text
 Use $ipss-sim to run data/psse/Texas2K "Texas 2K-Bus System"
 ```
 
-Codex should load the project skill from `.agents/skills/ipss-sim/` and then run the workflow from `wspace/`:
-
-1. ACLF with `python ../src/main/py/ipss_cmd.py aclf ...`
-2. CA with `python ../src/main/py/ipss_cmd.py ca ...` when contingency and monitored files are provided or auto-discovered
-3. Report generation with `python ../src/main/py/report/generate_nerc_tpl_report.py ...`
+The skill runs `IpssCmd` from `wspace/` for ACLF/CA, then produces reports per [GenReport.md](GenReport.md).
 
 ### Claude Code CLI
-
-Claude skill and command registration files are stored at:
 
 ```text
 .claude/skills/ipss-sim/SKILL.md
 .claude/commands/ipss-sim.md
 ```
-
-Use the slash-command form:
 
 ```text
 /ipss-sim data/ieee/Ieee118Bus/ieee118.ieee "IEEE 118-Bus Test Case"
 ```
 
-or directory mode:
+### Version-control notes
 
-```text
-/ipss-sim data/psse/Texas2K "Texas 2K-Bus System"
-```
-
-### Version-Control Notes
-
-- `.agents/skills/ipss-sim/**`, `.claude/skills/ipss-sim/**`, and `.claude/commands/ipss-sim.md` should be committed.
-- `.venv/`, `config/config.json`, generated `lib/deps/*.jar`, `.mvn/wrapper/dists/`, and `wspace/**/result/` are local setup or output artifacts and should remain uncommitted.
-- If the skill instructions change, edit `.agents/skills/ipss-sim/SKILL.md` first, then run `./scripts/sync_ipss_skills.sh` from the project root to copy it to `.claude/skills/ipss-sim/SKILL.md` (or copy the file manually on Windows).
-
-### Quick Verification
-
-From the project root, these commands should show the registered skill files:
-
-macOS / Linux:
-
-```bash
-find .agents/skills/ipss-sim .claude/skills/ipss-sim .claude/commands -maxdepth 3 -type f | sort
-```
-
-Windows PowerShell:
-
-```powershell
-Get-ChildItem .agents\skills\ipss-sim, .claude\skills\ipss-sim, .claude\commands -Recurse -File |
-  ForEach-Object { Resolve-Path -Relative $_.FullName }
-```
-
-Expected entries include:
-
-```text
-.agents/skills/ipss-sim/SKILL.md
-.agents/skills/ipss-sim/agents/openai.yaml
-.claude/commands/ipss-sim.md
-.claude/skills/ipss-sim/SKILL.md
-```
+- Commit `.agents/skills/ipss-sim/**`, `.claude/skills/ipss-sim/**`, and `.claude/commands/ipss-sim.md`.
+- Do not commit `target/`, generated extra `lib/deps/*.jar` beyond tracked pins, `.mvn/wrapper/dists/`, or `wspace/**/result/`.
+- After editing `.agents/skills/ipss-sim/SKILL.md`, sync to Claude with `./scripts/sync_ipss_skills.sh` if available.
 
 ## Troubleshooting
 
+
 | Symptom | What to check |
 | ------- | ------------- |
-| `ModuleNotFoundError: No module named 'config'` (or `report`, `interpss`) | Run CLI scripts from `wspace/` using paths like `python ../src/main/py/ipss_cmd.py`, not from inside `src/main/py/`. Entry scripts must bootstrap `src/main/py` onto `sys.path` first. |
-| `Could not find ipss-agent Python root` | Ensure `src/main/py/paths.py` and `src/main/py/config.py` exist; do not rename the `src/main/py` directory. |
-| `Config file not found` | Create `config/config.json` from the examples in Step 3; paths in that file are relative to the **project root**. |
-| `Failed to start JVM` | Verify `jvm_path` in `config/config.json` matches your JDK install (see Prerequisites). |
-| JVM runs out of memory on large cases | Add `"jvm_options": ["-Xmx8g"]` (or higher) to `config/config.json`. |
-| Report script cannot find CSVs | Pass the `result` directory that contains `*_DF_bus.csv` (same folder `ipss_cmd.py aclf` wrote to). |
-
+| `Could not find ipss-agent project root` | Run `IpssCmd` from `wspace/` or ensure `wspace/` and `config/` exist at the project root. |
+| `Case file not found` | Paths are relative to `wspace/`, not the project root. |
+| `NoClassDefFoundError` / missing InterPSS classes | Rebuild with `./mvnw package` after `lib/deps/` is populated. |
+| NR load flow does not converge | Raise `maxIterations` in the resolved `aclf_run.json`. |
+| `OutOfMemoryError` on large cases | Use `java -Xmx8g` (or higher) when launching the shaded JAR. |
+| Report skill cannot find CSVs | Pass the `result` directory that contains `*_DF_bus.csv` (same folder `IpssCmd` wrote to). |

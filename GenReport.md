@@ -1,104 +1,37 @@
-# Markdown report generation (InterPSS CSVs)
+# Simulation outputs and reports
 
-After you run `python ../src/main/py/ipss_cmd.py aclf` (and optionally `python ../src/main/py/ipss_cmd.py ca`) from `wspace/`, CSVs land under `<input_parent>/result/` relative to `wspace/`. Two Python generators turn those files into Markdown reports:
+After you run `IpssCmd` ACLF (and optionally CA) from `wspace/`, CSV and summary files land under `<input_parent>/result/` relative to `wspace/`. See [IpssCmd.md](IpssCmd.md) for build and run commands.
 
-| Script | Report | Scope |
-|--------|--------|--------|
-| `src/main/py/report/generate_aclf_report.py` | `AC_Loadflow_Report.md` | Base-case AC load flow only (no contingency CSV, no NERC compliance narrative) |
-| `src/main/py/report/generate_nerc_tpl_report.py` | `NERC_TPL_001_5_Report.md` | Steady-state assessment including optional N-1 contingency tables for NERC TPL-001-5 style wording |
+## Files produced by `IpssCmd`
 
-Both are invoked from `wspace/` with the venv activated (e.g. `python ../src/main/py/report/...`) and share resolution helpers and analysis logic via `src/main/py/report/ipss_report_common.py` (voltage bands, thermal loading, generator Q limits stay aligned). Thresholds for bands come from `config/gen_report.json`; the ACLF report labels them as planning-style guidance only.
+| File | When | Content |
+| ---- | ---- | ------- |
+| `<Case>_DF_bus.csv` | ACLF | Bus voltages, types (PQ/PV/Swing) |
+| `<Case>_DF_branch.csv` | ACLF | Branch flows, ratings, loading |
+| `<Case>_DF_gen.csv` | ACLF | Generator output, Q limits |
+| `<Case>_DF_load.csv` | ACLF | Load P and Q |
+| `<Case>_network_info.txt` | ACLF | Network summary and loadflow convergence |
+| `<Case>_DF_contingency.csv` | CA | Post-contingency monitored branch results |
 
----
+Example: input `data/ieee/Ieee118Bus/ieee118.ieee` → `wspace/data/ieee/Ieee118Bus/result/ieee118_DF_bus.csv`, etc.
 
-## AC Load Flow report generation
+## Report artifacts
 
-`src/main/py/report/generate_aclf_report.py` reads the ACLF CSV outputs (and optional network summary text) and writes a neutral **AC Load Flow** Markdown report: network summary, convergence, voltage profile, branch loading, and generator reactive margins. It does **not** read `*_DF_contingency.csv` and does **not** assert NERC TPL-001-5 compliance. For that, use `src/main/py/report/generate_nerc_tpl_report.py` on the same result folder once contingency CSVs exist.
+Agents and follow-on skills typically produce these Markdown or presentation outputs **from the CSVs** (no separate simulation CLI):
 
-From `wspace/` with the venv activated:
+| Artifact | Typical producer | Scope |
+| -------- | ---------------- | ----- |
+| `AC_Loadflow_Report.md` | Agent / `ipss-sim` workflow | Base-case load flow summary |
+| `NERC_TPL_001_5_Report.md` | Agent / `ipss-sim` workflow | NERC TPL-001-5 style steady-state narrative |
+| `*_NERC_TPL_001_5_Interactive_Report.html` | [nerc-report-html](.agents/skills/nerc-report-html/SKILL.md) skill | Interactive dashboard from Markdown + CSVs |
+| `*_NERC_TPL_001_5_Report_Slides.pptx` | [nerc-report-slides](.agents/skills/nerc-report-slides/SKILL.md) skill | Executive / planning slide deck |
 
-```
-cd wspace
-source ../.venv/bin/activate
-python ../src/main/py/report/generate_aclf_report.py <display_name> <result_dir> [csv_prefix]
-```
+### Thresholds
 
-`display_name` is the title in the report header. `result_dir` is the folder that contains the CSVs: a path **relative to `wspace/`** (under `<input_parent>/result/` where `python ../src/main/py/ipss_cmd.py` writes), or a legacy subdirectory under `wspace/result/`.
+`config/gen_report.json` defines voltage bands, thermal loading limits, and related criteria. Reference this file when drafting compliance language so reports stay aligned with project defaults.
 
-**Examples** (match [Setup.md](Setup.md)):
+### Workflow
 
-```
-python ../src/main/py/ipss_cmd.py aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
-python ../src/main/py/report/generate_aclf_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
-
-python ../src/main/py/ipss_cmd.py aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
-python ../src/main/py/report/generate_aclf_report.py "Texas 2000-Bus System" data/psse/Texas2K/result
-```
-
-**Optional `csv_prefix`:** When several cases share one `result/` directory, pass the CSV stem explicitly (e.g. `ieee14` for `ieee14_DF_bus.csv`). If omitted, the first `*_DF_bus.csv` in lexicographic order is used.
-
-### Required inputs in `result_dir`
-
-| File | Content |
-|---|---|
-| `<Case>_DF_bus.csv` | Bus voltages, types (PQ/PV/Swing) |
-| `<Case>_DF_branch.csv` | Branch flows, ratings, loading |
-| `<Case>_DF_gen.csv` | Generator output, Q limits, setpoints |
-| `<Case>_DF_load.csv` | Load P and Q |
-| `<Case>_network_info.txt` | AclfNetwork summary and loadflow run information (optional; sections omitted if missing) |
-
-### Output
-
-The report is written next to the CSVs:
-
-```
-<resolved_result_dir>/AC_Loadflow_Report.md
-```
-
----
-
-## NERC TPL-001-5 report generation
-
-`src/main/py/report/generate_nerc_tpl_report.py` reads CSV output from InterPSS load flow and contingency analysis, then produces a NERC TPL-001-5 steady-state compliance report in Markdown format.
-
-From `wspace/` with the venv activated:
-
-```
-cd wspace
-source ../.venv/bin/activate
-python ../src/main/py/report/generate_nerc_tpl_report.py <display_name> <result_dir>
-```
-
-`display_name` is the title for the report header. `result_dir` is the folder that contains the CSVs: a path **relative to `wspace/`** (under `<input_parent>/result/` where `python ../src/main/py/ipss_cmd.py` writes), or a legacy subdirectory name under `wspace/result/`.
-
-**Examples** (match [Setup.md](Setup.md)):
-
-```
-python ../src/main/py/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
-python ../src/main/py/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
-```
-
-**Legacy single-argument aliases** (when results live under `wspace/result/` and were auto-discovered): you can pass only the alias, e.g. `texas2k` or `ieee118`. Short aliases `ieee` → `ieee118` and `texas` → `texas2k` are defined in `KNOWN_CASE_ALIASES` at the top of `src/main/py/report/generate_nerc_tpl_report.py`.
-
-### Input data in `result_dir`
-
-The script reads four mandatory CSVs, one optional CSV, and one optional text file from that directory:
-
-| File | Content |
-|---|---|
-| `<Case>_DF_bus.csv` | Bus voltage profiles, types (PQ/PV/Swing) |
-| `<Case>_DF_branch.csv` | Branch flows, ratings, loading percentages |
-| `<Case>_DF_gen.csv` | Generator output, Q limits, voltage setpoints |
-| `<Case>_DF_load.csv` | Load demand (P and Q) |
-| `<Case>_network_info.txt` | AclfNetwork summary and loadflow run information (optional, included as summary section) |
-| `<Case>_DF_contingency.csv` | N-1 contingency results (optional) |
-
-The `_network_info.txt` file is parsed and rendered as an **AclfNetwork Summary** table in the report, showing bus/branch counts, total generation/load, control device counts, loadflow convergence status, and max mismatch. If absent, the section is simply omitted.
-
-### Output
-
-The report is written next to the CSVs:
-
-```
-<resolved_result_dir>/NERC_TPL_001_5_Report.md
-```
+1. Run ACLF (and CA if needed) with `IpssCmd` — see [IpssCmd.md](IpssCmd.md).
+2. Use agent skills (`/ipss-sim`, `/NERC Report HTML`, `/NERC Report Slides`) or natural-language prompts to analyze CSVs and author reports in the same `result/` directory.
+3. Pass the `result/` folder path relative to `wspace/` (e.g. `data/ieee/Ieee118Bus/result`) when invoking report skills.

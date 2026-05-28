@@ -77,7 +77,7 @@ Find the top N-1 loaded branches
 | Topic                            | Document                     |
 | -------------------------------- | ---------------------------- |
 | Layout, JARs, `config.json`, JVM | [Setup.md](Setup.md)         |
-| `IpssCmd` / `ipss_cmd.py` usage          | [IpssCmd.md](IpssCmd.md)     |
+| `IpssCmd` CLI usage                      | [IpssCmd.md](IpssCmd.md)     |
 | Report generator                 | [GenReport.md](GenReport.md) |
 
 

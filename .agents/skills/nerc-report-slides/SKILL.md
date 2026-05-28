@@ -63,7 +63,7 @@ node <presentations-skill>/scripts/build_artifact_deck.mjs \
   --slide-count <n>
 ```
 
-If `--contact-sheet` fails because `python3` lacks Pillow (`ModuleNotFoundError: No module named 'PIL'`), rebuild without `--contact-sheet`. The individual previews and layout JSON are sufficient for QA.
+If `--contact-sheet` fails because Pillow is not installed (`ModuleNotFoundError: No module named 'PIL'`), rebuild without `--contact-sheet`. The individual previews and layout JSON are sufficient for QA.
 
 ## Deck Requirements
 
