@@ -14,8 +14,6 @@ import java.util.stream.Collectors;
 
 import org.dflib.DataFrame;
 import org.dflib.csv.Csv;
-import org.interpss.agent.input.IeeeFileAdapter;
-import org.interpss.agent.input.PsseFileAdapter;
 import org.interpss.agent.util.IpssNetworkInfo;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.aclf.config.AclfRunConfigRec;
@@ -25,6 +23,7 @@ import org.interpss.plugin.contingency.definition.BranchContingencyRecord;
 import org.interpss.plugin.contingency.definition.MonitoredBranchRecord;
 import org.interpss.plugin.contingency.util.ContingencyFileUtil;
 import org.interpss.plugin.contingency.util.DclfContingencyHelper;
+import org.interpss.plugin.pssl.plugin.IpssAdapter;
 import org.interpss.plugin.result.dframe.AclfNetDFrameAdapter;
 import org.interpss.plugin.result.dframe.ca.DclfContingencyDFrameAdapter;
 
@@ -35,6 +34,10 @@ import com.interpss.core.algo.LoadflowAlgorithm;
 import com.interpss.core.algo.dclf.ContingencyAnalysisAlgorithm;
 import com.interpss.core.algo.dclf.DclfMethod;
 import com.interpss.core.contingency.dclf.DclfBranchOutage;
+
+import static org.interpss.plugin.pssl.plugin.IpssAdapter.FileFormat.IEEECommonFormat;
+import static org.interpss.plugin.pssl.plugin.IpssAdapter.FileFormat.PSSE;
+import org.interpss.plugin.pssl.plugin.IpssAdapter.PsseVersion;
 
 /**
  * InterPSS command-line tool: AC load flow and DC contingency analysis.
@@ -71,14 +74,30 @@ public final class IpssCmd {
 
     private static AclfNetwork loadNetwork(String format, String filePath) throws Exception {
         return switch (format) {
-            case "ieee" -> IeeeFileAdapter.createAclfNet(filePath);
-            case "psse" -> PsseFileAdapter.createAclfNet(filePath);
+            case "ieee" -> createIeeeAclfNet(filePath);
+            case "psse" -> createPsseAclfNet(filePath);
             default -> {
                 System.err.println("Invalid format");
                 System.exit(1);
                 throw new IllegalStateException();
             }
         };
+    }
+
+    private static AclfNetwork createIeeeAclfNet(String filePath) throws Exception {
+        return IpssAdapter.importAclfNet(filePath)
+                .setFormat(IEEECommonFormat)
+                .load()
+                .getImportedObj();
+    }
+
+    private static AclfNetwork createPsseAclfNet(String filePath) throws Exception {
+        PsseVersion psseVersion = IpssAdapter.parsePsseVersion(filePath);
+        return IpssAdapter.importAclfNet(filePath)
+                .setFormat(PSSE)
+                .setPsseVersion(psseVersion)
+                .load()
+                .getImportedObj();
     }
 
     private static void runAclf(ProjectPaths paths, String inputRelative, AclfNetwork net,
