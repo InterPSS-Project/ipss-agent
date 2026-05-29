@@ -28,14 +28,14 @@ from datetime import datetime
 from math import sqrt
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[1]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
-from src.report.ipss_report_common import (
+from report.ipss_report_common import (
     BASE_KVA,
     CFG,
     RESULT_DIR,

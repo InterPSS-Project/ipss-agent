@@ -72,6 +72,7 @@ public final class IpssCmd {
         }
     }
 
+    // TODO: put the loadNetwork in a separate file
     private static AclfNetwork loadNetwork(String format, String filePath) throws Exception {
         return switch (format) {
             case "ieee" -> createIeeeAclfNet(filePath);
@@ -100,6 +101,7 @@ public final class IpssCmd {
                 .getImportedObj();
     }
 
+    // TODO: put the runAclf in a separate file
     private static void runAclf(ProjectPaths paths, String inputRelative, AclfNetwork net,
             Path resultsDir, String stem) throws Exception {
         LoadflowAlgorithm algo = LoadflowAlgoObjectFactory.createLoadflowAlgorithm(net);
@@ -129,6 +131,7 @@ public final class IpssCmd {
         Csv.saver().save(dfAdapter.getDfBranch(), resultsDir.resolve(stem + "_DF_branch.csv").toString());
     }
 
+    // TODO: put the runCa in a separate file
     private static void runCa(ProjectPaths paths, CliArgs cli, AclfNetwork net,
             Path resultsDir, String stem) throws Exception {
         if (cli.contFile == null || cli.monitorFile == null) {
@@ -189,6 +192,7 @@ public final class IpssCmd {
         System.err.println("  paths are relative to wspace/");
     }
 
+    // TODO: put the CliArgs in a separate file
     private record CliArgs(String simutype, String format, String input, String contFile, String monitorFile) {
 
         static CliArgs parse(String[] args) {

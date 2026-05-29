@@ -24,7 +24,7 @@ from pathlib import Path
 # --- Locations ---------------------------------------------------------------
 
 _REPORT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = _REPORT_DIR.parent.parent
+PROJECT_ROOT = _REPORT_DIR.parents[3]
 WSPACE = PROJECT_ROOT / "wspace"
 RESULT_DIR = WSPACE / "result"
 
