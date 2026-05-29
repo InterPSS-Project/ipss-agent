@@ -5,6 +5,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.dflib.csv.Csv;
+import org.interpss.agent.input.NetworkLoader;
 import org.interpss.agent.util.IpssNetworkInfo;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.aclf.config.AclfRunConfigRec;
@@ -20,6 +21,12 @@ import com.interpss.core.algo.LoadflowAlgorithm;
 public final class AclfRunner {
 
     private AclfRunner() {
+    }
+
+    public static void run(ProjectPaths paths, String format, String caseFilePath,
+            String inputRelative, Path resultsDir, String stem) throws Exception {
+        AclfNetwork net = NetworkLoader.loadNetwork(format, caseFilePath);
+        run(paths, inputRelative, net, resultsDir, stem);
     }
 
     public static void run(ProjectPaths paths, String inputRelative, AclfNetwork net,

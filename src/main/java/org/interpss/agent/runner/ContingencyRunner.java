@@ -14,6 +14,7 @@ import java.util.stream.Collectors;
 import org.dflib.DataFrame;
 import org.dflib.csv.Csv;
 import org.interpss.agent.cli.CliArgs;
+import org.interpss.agent.input.NetworkLoader;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.contingency.DclfContingencyConfig;
 import org.interpss.plugin.contingency.ParallelDclfContingencyAnalyzer;
@@ -35,6 +36,12 @@ import com.interpss.core.contingency.dclf.DclfBranchOutage;
 public final class ContingencyRunner {
 
     private ContingencyRunner() {
+    }
+
+    public static void run(ProjectPaths paths, CliArgs cli, String caseFilePath,
+            Path resultsDir, String stem) throws Exception {
+        AclfNetwork net = NetworkLoader.loadNetwork(cli.format(), caseFilePath);
+        run(paths, cli, net, resultsDir, stem);
     }
 
     public static void run(ProjectPaths paths, CliArgs cli, AclfNetwork net,

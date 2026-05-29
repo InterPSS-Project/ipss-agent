@@ -3,13 +3,10 @@ package org.interpss.agent;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-import org.interpss.agent.input.NetworkLoader;
+import org.interpss.agent.cli.CliArgs;
 import org.interpss.agent.runner.AclfRunner;
 import org.interpss.agent.runner.ContingencyRunner;
-import org.interpss.agent.cli.CliArgs;
 import org.interpss.agent.util.ProjectPaths;
-
-import com.interpss.core.aclf.AclfNetwork;
 
 /**
  * InterPSS command-line tool: AC load flow and DC contingency analysis.
@@ -30,13 +27,13 @@ public final class IpssCmd {
             System.exit(1);
         }
 
-        AclfNetwork net = NetworkLoader.loadNetwork(cli.format(), caseFile.toString());
+        String caseFilePath = caseFile.toString();
         Path resultsDir = paths.resultsDir(cli.input());
         String stem = ProjectPaths.outputStem(cli.input());
 
         switch (cli.simutype()) {
-            case "aclf" -> AclfRunner.run(paths, cli.input(), net, resultsDir, stem);
-            case "ca" -> ContingencyRunner.run(paths, cli, net, resultsDir, stem);
+            case "aclf" -> AclfRunner.run(paths, cli.format(), caseFilePath, cli.input(), resultsDir, stem);
+            case "ca" -> ContingencyRunner.run(paths, cli, caseFilePath, resultsDir, stem);
             default -> {
                 System.err.println("Invalid simulation type");
                 System.exit(1);
