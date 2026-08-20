@@ -39,7 +39,7 @@ Setup the skills and commands to run the workflow
 
 ## DSH Plugin setup
 
-Download the DSH Plugin from the release page and install it following the provided instructions.
+Download the DSH Plugin from the [Release page](https://github.com/interpss/ipss-agent/releases) and install it following the provided instructions.
 
 ## Run simulations and generate reports
 
