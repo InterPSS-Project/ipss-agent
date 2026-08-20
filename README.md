@@ -43,7 +43,7 @@ Download the DSH Plugin from the release page and install it following the provi
 
 ## Run simulations and generate reports
 
-After the setup, run power-system simulations through the agent.
+After the setup, run(Chat) power-system simulations through the agent.
 
 ### Skill-style simulation
 
