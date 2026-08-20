@@ -39,7 +39,7 @@ Setup the skills and commands to run the workflow
 
 ## DSH Plugin setup
 
-// TODO: add DSH Plugin setup instructions
+Download the DSH Plugin from the release page and install it following the provided instructions.
 
 ## Run simulations and generate reports
 
