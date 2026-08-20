@@ -4,11 +4,11 @@
 
 It is also integrated into Deepseek Harness as a DSH Plugin. You can run power system simulation in the traditional step-by-step way:
 
-![ipss-dsh-plugin](image/ipss-dsh-plugin.png)
+ipss-dsh-plugin
 
-Or in the native AI way:
+Or in the native AI Chat way:
 
-![ipss-agent-chat](image/ipss-agent-chat.png)
+ipss-agent-chat
 
 ## Environment setup
 
@@ -27,8 +27,6 @@ Setup ipss.agent env
 
 After completing the env setup, add your data folder as a Codex project and use the agent to do the simulations.
 
-**Data Security**: If you are concenred about your simulation data security, you can run your Codex with a local Ollama LLM. Use a latest LLM model, such as Qwen3.6, is recommended. Also, use a machine with 32GB or more memory to run Codex with the local LLM setup.
-
 ### Claude Code CLI setup
 
 ```text
@@ -36,6 +34,8 @@ After completing the env setup, add your data folder as a Codex project and use 
 Setup ipss.agent env
 Setup the skills and commands to run the workflow
 ```
+
+
 
 ## DSH Plugin setup
 
