@@ -4,11 +4,11 @@
 
 It is also integrated into Deepseek Harness as a DSH Plugin. You can run power system simulation in the traditional step-by-step way:
 
-ipss-dsh-plugin
+![ipss-dsh-plugin](./image/ipss-dsh-plugin.png)
 
 Or in the native AI Chat way:
 
-ipss-agent-chat
+![ipss-agent-chat](./image/ipss-agent-chat.png)
 
 ## Environment setup
 
