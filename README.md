@@ -37,7 +37,9 @@ Setup ipss.agent env
 Setup the skills and commands to run the workflow
 ```
 
+## DSH Plugin setup
 
+// TODO: add DSH Plugin setup instructions
 
 ## Run simulations and generate reports
 
