@@ -1,6 +1,14 @@
 # iPSS Agent
 
-**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop** and **Claude Code CLI** (see [Setup.md](Setup.md)). Other agent CLIs can reuse the same workflow by copying the skill content from `.agents/skills/ipss-sim/` or `.claude/skills/ipss-sim/`.
+**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop** and **Claude Code CLI** (see [Setup.md](Setup.md)). Other agent CLIs can reuse the same workflow by copying the skill content from `.agents/skills/ipss-sim/` or `.claude/skills/ipss-sim/`. 
+
+It is also integrated into Deepseek Harness as a DSH Plugin. You can run power system simulation in the traditional step-by-step way:
+
+![ipss-dsh-plugin](image/ipss-dsh-plugin.png)
+
+Or in the native AI way:
+
+![ipss-agent-chat](image/ipss-agent-chat.png)
 
 ## Environment setup
 
@@ -29,6 +37,8 @@ Setup ipss.agent env
 Setup the skills and commands to run the workflow
 ```
 
+
+
 ## Run simulations and generate reports
 
 After the setup, run power-system simulations through the agent.
@@ -51,6 +61,8 @@ Input directory mode (auto-discovers `*.RAW` / `*.raw` / `*.ieee`, `*contingency
 /NERC Report Slides       # generate PPT report
 ```
 
+
+
 ### Direct prompt simulation
 
 ```text
@@ -58,6 +70,8 @@ Run ACLF format psse <case_file>
 Run CA format psse <case_file> <contingency_file> <monitor_file>
 Gen NERC TPL report "<NERC Report Name>" <result_dir>
 ```
+
+
 
 ## Explore simulation results
 
@@ -70,6 +84,8 @@ Find the highest loading branch
 # Contingency analysis
 Find the top N-1 loaded branches
 ```
+
+
 
 ## Reference
 
