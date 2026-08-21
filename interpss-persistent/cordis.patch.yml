@@ -1,0 +1,8 @@
+# @deepseek-ai/dsh-interpss bundle patch — mounts the InterPSS tab as a
+# persistent composition row of the profile. Declared via `dsh.bundle.patch`
+# in package.json, so `dsh plugin --profile <name> add <this package>` both
+# pnpm-installs the plugin and reconciles it into the profile's
+# `dsh.profile.bundles` layer list, mounting the row below on the next boot.
+- insert:
+    - id: interpss
+      name: '@deepseek-ai/dsh-interpss'
