@@ -12,32 +12,17 @@ Or in the native AI Chat way:
 
 ## Environment setup
 
-Git check out or download this repository and follow the setup instructions below.
-
-### OpenAI Codex Desktop (recommended)
-
-1. Add the folder as a Codex project.
-2. Run the setup below, then test with a sample case (for example, under `wspace/data/psse/Texas2K`).
+Prompt Codex, Claude Code, or Deepseek Harness to install and setup ipss.agent.
 
 ```text
-Setup ipss.agent env
+Install and setup ipss.agent from https://github.com/InterPSS-Project/ipss-agent
+```
+```text
 # Test the setup with a sample case directory
 /ipss-sim <simu_case_directory> "<NERC Report Name>"
 ```
 
-After completing the env setup, add your data folder as a Codex project and use the agent to do the simulations.
-
-### Claude Code CLI setup
-
-```text
-/init  # optional
-Setup ipss.agent env
-Setup the skills and commands to run the workflow
-```
-
-
-
-## DSH Plugin setup
+#### DSH Plugin setup
 
 Download the DSH Plugin from the [Release page](https://github.com/InterPSS-Project/ipss-agent/releases) and install it following the provided instructions.
 
@@ -45,7 +30,7 @@ Download the DSH Plugin from the [Release page](https://github.com/InterPSS-Proj
 
 After the setup, run(Chat) power-system simulations through the agent.
 
-### Skill-style simulation
+#### Skill-style simulation
 
 Input file mode:
 
