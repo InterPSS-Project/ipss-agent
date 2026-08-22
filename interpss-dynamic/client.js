@@ -225,109 +225,60 @@ return {
       )
     }
 
-    function renderConnDiagram(busId, rows, busRecords, onBusDoubleClick) {
+    function renderConnDiagram(busId, rows, onBusDoubleClick) {
       const rowsArr = rows || []
-      const records = busRecords || []
-      const byId = {}
-      for (const b of records) byId[b.id] = b
-
-      // Displayed buses: the selected bus plus every neighbor (From/To of a branch row).
-      const ids = [busId]
+      const map = new Map()
       for (const r of rowsArr) {
         const from = r[4]
         const to = r[7]
-        for (const x of [from, to]) if (ids.indexOf(x) === -1) ids.push(x)
+        const other = from === busId ? to : from
+        if (!other) continue
+        if (!map.has(other)) map.set(other, [])
+        map.get(other).push(r)
       }
+      const ids = Array.from(map.keys())
+      const N = ids.length
+      const W = 640
+      const H = 440
+      const cx = W / 2
+      const cy = H / 2
+      const R = N <= 1 ? 130 : Math.min(W, H) / 2 - 90
+      const nodeR = 20
 
-      // Order left-to-right: selected bus centered, neighbors split left/right,
-      // each side sorted by bus number (then raw id) for a stable layout.
-      const num = (id) => { const b = byId[id]; return b ? (parseInt(b.number, 10) || 0) : 0 }
-      const cmp = (a, b) => (num(a) - num(b)) || (a < b ? -1 : a > b ? 1 : 0)
-      const centerIdx = ids.indexOf(busId)
-      const left = ids.slice(0, centerIdx).sort(cmp)
-      const right = ids.slice(centerIdx + 1).sort(cmp)
-      const ordered = []
-      for (let i = left.length - 1; i >= 0; i--) ordered.push(left[i])
-      ordered.push(busId)
-      for (const x of right) ordered.push(x)
-
-      // Stable x slot per bus id.
-      const slot = {}
-      const spacing = 118
-      ordered.forEach((id, i) => { slot[id] = i })
-      const n = ordered.length
-      const W = Math.max(720, spacing * n + 80)
-      const H = 340
-      const barW = 9
-      const barH = 130
-      const barY = 80
-      const lineY = barY + barH / 2 - 6
-
-      const xOf = (id) => 40 + slot[id] * spacing
-
-      function fmt(nv) {
-        return formatValue(nv)
+      function pos(i) {
+        const angle = N <= 1 ? 0 : (2 * Math.PI * i) / N - Math.PI / 2
+        return { x: cx + R * Math.cos(angle), y: cy + R * Math.sin(angle) }
       }
 
       const edgeEls = []
       const labelEls = []
       const nodeEls = []
 
-      // Branch edges + flow labels. Draw connectors between the two bus bars.
-      rowsArr.forEach((r, ri) => {
-        const from = r[4]
-        const to = r[7]
-        const x1 = xOf(from)
-        const x2 = xOf(to)
-        const midX = (x1 + x2) / 2
-        const isXfmr = r[12] === 'true'
-        const fromSel = from === busId
-        const p = fromSel ? r[19] : r[21]
-        const q = fromSel ? r[20] : r[22]
-        const pF = fmt(p)
-        const qF = fmt(q)
-        const flowLabel = pF + (qF.indexOf('-') === 0 ? qF : '+ j' + qF)
-        edgeEls.push(React.createElement('line', { key: 'e' + ri, x1: x1, y1: lineY, x2: x2, y2: lineY, stroke: 'var(--border, #555)', strokeWidth: 1.5 }))
-        labelEls.push(React.createElement('text', { key: 'fl' + ri, x: midX, y: lineY - 14, fill: 'var(--text-secondary, #999)', fontSize: 10, textAnchor: 'middle' }, flowLabel))
-        if (isXfmr) {
-          const rX = 9
-          labelEls.push(React.createElement('circle', { key: 'tx1' + ri, cx: midX - rX / 2, cy: lineY, r: rX, fill: 'none', stroke: 'var(--text, #fff)', strokeWidth: 1.5 }))
-          labelEls.push(React.createElement('circle', { key: 'tx2' + ri, cx: midX + rX / 2, cy: lineY, r: rX, fill: 'none', stroke: 'var(--text, #fff)', strokeWidth: 1.5 }))
-        }
+      ids.forEach((id, i) => {
+        const p = pos(i)
+        const branches = map.get(id)
+        const code = branches[0] && branches[0][11] ? branches[0][11] : ''
+        const label = branches.length > 1 ? code + ' ×' + branches.length : code
+        edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: p.x, y2: p.y, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1.5 }))
+        const mx = (cx + p.x) / 2
+        const my = (cy + p.y) / 2
+        labelEls.push(React.createElement('text', { key: 'l' + i, x: mx, y: my, fill: 'var(--text-secondary, #999)', fontSize: 10, textAnchor: 'middle', dy: '-0.4em' }, label))
       })
 
-      // Bus bars: one vertical rect per bus, with name + VMag(VAng) + P+jQ labels.
-      ordered.forEach((id, i) => {
-        const b = byId[id]
-        const isSel = id === busId
-        const x = xOf(id)
-        const label = b && b.name ? b.name : id
-        const barProps = isSel ? {
-          fill: 'var(--accent, #4a9eff)',
-          stroke: 'var(--surface-0, #111)',
-          strokeWidth: 2,
-        } : {
-          fill: 'var(--surface-2, rgba(128,128,128,0.22))',
-          stroke: 'var(--border, #555)',
-          strokeWidth: 1.5,
-        }
-        const interactProps = (!isSel && onBusDoubleClick) ? {
+      nodeEls.push(React.createElement('circle', { key: 'c', cx: cx, cy: cy, r: nodeR + 5, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 2 }))
+      nodeEls.push(React.createElement('text', { key: 'ct', x: cx, y: cy, fill: '#000', fontSize: 12, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId))
+
+      ids.forEach((id, i) => {
+        const p = pos(i)
+        const neighborProps = onBusDoubleClick ? {
           style: { cursor: 'pointer' },
           title: 'Double-click to re-center',
           onDoubleClick: () => onBusDoubleClick(id),
         } : {}
-        const children = []
-        children.push(React.createElement('rect', { key: 'bar', x: x - barW, y: barY, width: barW * 2, height: barH, rx: 2, ...barProps }))
-        children.push(React.createElement('text', { key: 'name', x: x, y: barY - 16, fill: 'var(--text, #fff)', fontSize: 13, fontWeight: 600, textAnchor: 'middle' }, label))
-        if (b && b.voltMag) {
-          children.push(React.createElement('text', { key: 'v', x: x, y: barY + barH + 18, fill: 'var(--text-secondary, #999)', fontSize: 10, textAnchor: 'middle' },
-            fmt(b.voltMag) + '(' + fmt(b.voltAng) + ')'))
-          const injP = fmt(b.injP)
-          const injQ = fmt(b.injQ)
-          children.push(React.createElement('text', { key: 'i', x: x, y: barY + barH + 34, fill: 'var(--text-secondary, #999)', fontSize: 10, textAnchor: 'middle' },
-            injP + (injQ.indexOf('-') === 0 ? injQ : '+ j' + injQ)))
-        }
-        nodeEls.push(React.createElement('g', { key: 'n' + id, ...interactProps }, children))
+        nodeEls.push(React.createElement('g', { key: 'n' + i, ...neighborProps },
+          React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1.5 }),
+          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 12, textAnchor: 'middle', dy: '0.35em' }, id),
+        ))
       })
 
       return React.createElement('svg', { width: '100%', viewBox: '0 0 ' + W + ' ' + H, style: { border: '1px solid var(--border, #444)', borderRadius: '8px', background: 'var(--surface, transparent)', marginBottom: '8px' } },
@@ -938,7 +889,7 @@ return {
 
       function renderConnBody() {
         if (connView === 'diagram') {
-          return renderConnDiagram(connResult.busId || selectedBus, connResult.rows, connResult.busRecords, handleBusDoubleClick)
+          return renderConnDiagram(connResult.busId || selectedBus, connResult.rows, handleBusDoubleClick)
         }
         if (connView === 'gen') {
           if (connResult.genRows && connResult.genRows.length > 0) {
