@@ -310,6 +310,37 @@ export default {
         const gen = await readBusData(path.replace(/_DF_branch\.csv$/, '_DF_gen.csv'), 0)
         const load = await readBusData(path.replace(/_DF_branch\.csv$/, '_DF_load.csv'), 0)
 
+        // Also read the bus CSV so the one-line diagram can label each bus with
+        // VMag(VAng) and net injection P+jQ (VoltMag=12, VoltAng=13, BusInjP=23,
+        // BusInjQ=24). Collect the ids of the selected bus and every neighbor
+        // found in the branch rows, then keep only matching bus rows.
+        const needed = new Set([busId])
+        for (const r of rows) { needed.add(r[4]); needed.add(r[7]) }
+        let busRecords = []
+        try {
+          const bTarget = await fs.resolve(wspace + '/' + path.replace(/_DF_branch\.csv$/, '_DF_bus.csv'))
+          const bTxt = await fs.readText(bTarget)
+          const blines = String(bTxt).replace(/\r\n/g, '\n').split('\n')
+          while (blines.length > 0 && blines[blines.length - 1].trim() === '') blines.pop()
+          for (let i = 1; i < blines.length; i++) {
+            if (blines[i].trim() === '') continue
+            const b = blines[i].split(',')
+            if (needed.has(b[0])) {
+              busRecords.push({
+                id: b[0],
+                name: b[2],
+                number: b[1],
+                voltMag: b[12],
+                voltAng: b[13],
+                injP: b[23],
+                injQ: b[24],
+              })
+            }
+          }
+        } catch (e) {
+          busRecords = []
+        }
+
         return {
           ok: true,
           busId: busId,
@@ -322,6 +353,7 @@ export default {
           loadHeader: load.header,
           loadRows: load.rows,
           loadCount: load.count,
+          busRecords: busRecords,
         }
       },
 
