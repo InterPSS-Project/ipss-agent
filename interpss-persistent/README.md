@@ -53,7 +53,7 @@ to:
 
 ## Install
 
-See `INSTALL.md` at the root of the `ipss-dsh.zip` distribution. Two methods:
+See `InstallDSHPlugin.md` at the root of the `ipss-dsh.zip` distribution. Two methods:
 
 1. **Automatic (`dsh plugin`)** — from the unzipped directory or the npm
    tarball:
@@ -100,5 +100,5 @@ To rebuild the distributable artifacts:
 cd interpss-persistent
 npm pack                                   # -> deepseek-ai-dsh-interpss-<version>.tgz
 cd ..
-zip -r ipss-dsh.zip INSTALL.md dsh-interpss   # from the source tree
+zip -r ipss-dsh.zip InstallDSHPlugin.md dsh-interpss   # from the source tree
 ```

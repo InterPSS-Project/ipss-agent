@@ -9,7 +9,7 @@ profile's `cordis.patch.yml`, so the InterPSS tab survives restarts.
 
 | Entry | Description |
 | --- | --- |
-| `INSTALL.md` | This file. |
+| `InstallDSHPlugin.md` | This file. |
 | `dsh-interpss/` | The plugin package — copy it under the profile's `node_modules/@deepseek-ai/` (Method 2) or point `dsh plugin` at it (Method 1). |
 | `deepseek-ai-dsh-interpss-<version>.tgz` | npm-pack tarball of the same package, for `dsh plugin add`. |
 
