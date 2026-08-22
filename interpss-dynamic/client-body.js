@@ -136,15 +136,42 @@ return {
     const tdStyle = { padding: '3px 8px', border: '1px solid var(--border, #444)', whiteSpace: 'nowrap' }
     const tableStyle = { borderCollapse: 'collapse', fontSize: '12px', marginTop: '8px', width: '100%' }
 
-    function renderCsvTable(header, rows) {
+    function formatValue(v) {
+      const s = v == null ? '' : String(v)
+      const t = s.trim()
+      if (t === '') return s
+      // only touch plain-decimal or scientific numeric strings (e.g. -0.51, 3.4E-4)
+      if (!/^[+-]?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t)) return s
+      const mantissa = t.split(/[eE]/)[0]
+      const dot = mantissa.indexOf('.')
+      if (dot === -1) return s
+      if (mantissa.length - dot - 1 <= 4) return s
+      const n = Number(t)
+      if (!Number.isFinite(n)) return s
+      return String(parseFloat(n.toFixed(4)))
+    }
+
+    function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatNumbers) {
       if (!header) return null
       const headerCols = header.split(',')
+      const isBusCol = (ci) => busCols && onBusDoubleClick && busCols.indexOf(ci) !== -1
       return React.createElement('table', { style: tableStyle },
         React.createElement('thead', null,
           React.createElement('tr', null, headerCols.map((h, i) => React.createElement('th', { key: i, style: thStyle }, h))),
         ),
         React.createElement('tbody', null,
-          (rows || []).map((r, ri) => React.createElement('tr', { key: ri }, r.split(',').map((c, ci) => React.createElement('td', { key: ci, style: tdStyle }, c)))),
+          (rows || []).map((r, ri) => React.createElement('tr', { key: ri }, r.split(',').map((c, ci) => {
+            const display = formatNumbers ? formatValue(c) : c
+            if (isBusCol(ci)) {
+              return React.createElement('td', {
+                key: ci,
+                style: { ...tdStyle, cursor: 'pointer', color: 'var(--accent, #4a9eff)', textDecoration: 'underline' },
+                title: 'Double-click to select bus',
+                onDoubleClick: () => onBusDoubleClick(c),
+              }, display)
+            }
+            return React.createElement('td', { key: ci, style: tdStyle }, display)
+          }))),
         ),
       )
     }
@@ -175,7 +202,7 @@ return {
                     }, c),
                   )
                 }
-                return React.createElement('td', { key: ci, style: tdStyle }, c)
+                return React.createElement('td', { key: ci, style: tdStyle }, formatValue(c))
               }),
             )
           }),
@@ -198,7 +225,7 @@ return {
       )
     }
 
-    function renderConnDiagram(busId, rows) {
+    function renderConnDiagram(busId, rows, onBusDoubleClick) {
       const rowsArr = rows || []
       const map = new Map()
       for (const r of rowsArr) {
@@ -243,8 +270,15 @@ return {
 
       ids.forEach((id, i) => {
         const p = pos(i)
-        nodeEls.push(React.createElement('circle', { key: 'n' + i, cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1.5 }))
-        nodeEls.push(React.createElement('text', { key: 'nt' + i, x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 12, textAnchor: 'middle', dy: '0.35em' }, id))
+        const neighborProps = onBusDoubleClick ? {
+          style: { cursor: 'pointer' },
+          title: 'Double-click to re-center',
+          onDoubleClick: () => onBusDoubleClick(id),
+        } : {}
+        nodeEls.push(React.createElement('g', { key: 'n' + i, ...neighborProps },
+          React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1.5 }),
+          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 12, textAnchor: 'middle', dy: '0.35em' }, id),
+        ))
       })
 
       return React.createElement('svg', { width: '100%', viewBox: '0 0 ' + W + ' ' + H, style: { border: '1px solid var(--border, #444)', borderRadius: '8px', background: 'var(--surface, transparent)', marginBottom: '8px' } },
@@ -658,14 +692,14 @@ return {
         setCtxMenu({ x: e.clientX, y: e.clientY, busId: id })
       }
 
-      function showConnections(busId) {
+      function showConnections(busId, keepView) {
         const bid = busId !== undefined && busId !== null ? busId : selectedBus
         if (bid === null || bid === undefined) return
         setCtxMenu(null)
         setConnOpen(true)
         setConnResult(null)
         setConnLoading(true)
-        setConnView('diagram')
+        if (!keepView) setConnView('diagram')
         const branchFile = result && result.files ? result.files.find((f) => f.indexOf('_DF_branch.csv') !== -1) : undefined
         if (branchFile === undefined) {
           setConnLoading(false)
@@ -676,6 +710,13 @@ return {
           (res) => { setConnLoading(false); setConnResult(res) },
           (err) => { setConnLoading(false); setConnResult({ error: String(err && err.message ? err.message : err) }) },
         )
+      }
+
+      function handleBusDoubleClick(busId) {
+        if (busId === null || busId === undefined || busId === '') return
+        if (busId === selectedBus) return
+        selectBus(busId)
+        showConnections(busId, true)
       }
 
       const LF_METHODS = [['NR', 'NR'], ['PQ', 'PQ'], ['GS', 'GS']]
@@ -823,7 +864,7 @@ return {
             csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
             csvHeader !== null ? React.createElement('div', null,
               React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary, #888)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
-              React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--border, #555)', borderRadius: '8px', background: 'var(--surface, transparent)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : renderCsvTable(csvHeader, csvRows)),
+              React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--border, #555)', borderRadius: '8px', background: 'var(--surface, transparent)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
               csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--text-secondary, #888)', fontSize: '12px' } }, 'Loading more…') : null,
               csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
                 React.createElement('span', { style: { fontSize: '12px', color: 'var(--text-secondary, #888)' } }, 'Selected bus: ' + selectedBus),
@@ -848,7 +889,7 @@ return {
 
       function renderConnBody() {
         if (connView === 'diagram') {
-          return renderConnDiagram(connResult.busId || selectedBus, connResult.rows)
+          return renderConnDiagram(connResult.busId || selectedBus, connResult.rows, handleBusDoubleClick)
         }
         if (connView === 'gen') {
           if (connResult.genRows && connResult.genRows.length > 0) {
@@ -944,7 +985,7 @@ return {
         React.createElement('input', { type: 'number', step: 'any', disabled: !!disabled, value: optForm[key], onChange: (e) => setOptForm({ ...optForm, [key]: e.target.value }), style: { ...selectStyle, width: '70px', padding: '3px 6px', opacity: disabled ? 0.5 : 1 } }),
       )
 
-      const OPT_TABS = [['main', 'Main'], ['nr', 'NR Config'], ['adj', 'Adj/Ctrl Setting'], ['psse', 'PSS/E Setting']]
+      const OPT_TABS = [['main', 'Main'], ['nr', 'NR Config'], ['adj', 'Adj/Ctrl Setting']]
 
       function renderOptTab() {
         if (optForm === null) return null
@@ -981,9 +1022,6 @@ return {
               optRow('PSXfr Power Ctrl AccFactor', optNum('psXfrPContrlAccFactor', undefined, !optForm.applyPowerAdjust)),
             ),
           )
-        }
-        if (optTab === 'psse') {
-          return React.createElement('div', { style: { color: 'var(--text-secondary, #888)', fontSize: '12px', padding: '12px 0' } }, 'No PSS/E-specific options.')
         }
         return React.createElement('div', null,
           React.createElement('div', { style: { display: 'flex', gap: '28px', flexWrap: 'wrap' } },
