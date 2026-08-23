@@ -29,8 +29,8 @@ parameters and results, no build-time Typert compiler required.
 - Case selection: presets (IEEE 118 / IEEE 14 / Texas 2K) plus a custom path with a filtered file picker.
 - **Auto-display** of an existing converged result on case selection (and on first open), read from `*_network_info.txt`.
 - Bus / Branch / Gen / Load CSV explorer with infinite scroll and sticky headers.
-- Selectable bus IDs with a branch-connection popup: **Diagram** (double-click a node to select it), **Branch**, **Gen**, and **Load** tabs.
-- AC Loadflow Options dialog (4 tabs — Main / NR Config / Adj-Ctrl Setting / PSS/E Setting), backed by `config/aclf_run.json`.
+- Selectable bus IDs with a branch-connection popup: **Diagram** (bus info tooltips on hover, transformer styling, double-click a node to navigate), **Branch**, **Gen**, and **Load** tabs.
+- AC Loadflow Options dialog (3 tabs — Main / NR Config / Adj-Ctrl Setting), backed by `config/aclf_run.json`.
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
 - Remembers the last selected case across tab switches.

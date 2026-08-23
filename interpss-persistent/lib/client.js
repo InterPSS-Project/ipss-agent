@@ -13,7 +13,6 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 
     var React = require("react");
-
     const PRESETS = [
       { label: 'IEEE 118-bus', format: 'ieee', input: 'data/ieee/Ieee118Bus/ieee118.ieee' },
       { label: 'IEEE 14-bus', format: 'ieee', input: 'data/ieee/Ieee14Bus/ieee14.ieee' },
@@ -148,15 +147,107 @@ window.__ModuleLoader__.load({
     const tdStyle = { padding: '3px 8px', border: '1px solid var(--border, #444)', whiteSpace: 'nowrap' }
     const tableStyle = { borderCollapse: 'collapse', fontSize: '12px', marginTop: '8px', width: '100%' }
 
-    function renderCsvTable(header, rows) {
+    function formatValue(v) {
+      const s = v == null ? '' : String(v)
+      const t = s.trim()
+      if (t === '') return s
+      // only touch plain-decimal or scientific numeric strings (e.g. -0.51, 3.4E-4)
+      if (!/^[+-]?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t)) return s
+      const mantissa = t.split(/[eE]/)[0]
+      const dot = mantissa.indexOf('.')
+      if (dot === -1) return s
+      if (mantissa.length - dot - 1 <= 4) return s
+      const n = Number(t)
+      if (!Number.isFinite(n)) return s
+      return String(parseFloat(n.toFixed(4)))
+    }
+
+    function fmt(v, d) {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return v == null ? '' : String(v)
+      return n.toFixed(d)
+    }
+
+    function busTooltip(rec) {
+      if (!rec) return 'Bus info'
+      const lines = []
+      lines.push('Bus Name: ' + (rec.name || ''))
+      lines.push('BaseVolt: ' + fmt(rec.baseKV, 2))
+      lines.push('Status: ' + (rec.status || ''))
+      lines.push('')
+      lines.push('Voltage (pu): ' + fmt(rec.voltMag, 4))
+      lines.push('Angle (degrees): ' + fmt(rec.voltAng, 2))
+      if (rec.genCount > 0) {
+        lines.push('')
+        lines.push('Bus GenCode: ' + (rec.genCode || ''))
+        lines.push('Number of generators: ' + rec.genCount)
+        lines.push('Gen ID: ' + (rec.genIds || []).join(', '))
+      }
+      if (rec.loadCount > 0) {
+        lines.push('')
+        lines.push('Bus LoadCode: ' + (rec.loadCode || ''))
+        lines.push('Number of loads: ' + rec.loadCount)
+        lines.push('Load ID: ' + (rec.loadIds || []).join(', '))
+      }
+      lines.push('')
+      lines.push('Total Gen P (pu): ' + fmt(rec.totalGenP, 2))
+      lines.push('Total Gen Q (pu): ' + fmt(rec.totalGenQ, 4))
+      return lines.join('\n')
+    }
+
+    function fmt4(v) {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return v == null ? '' : String(v)
+      return String(parseFloat(n.toFixed(4)))
+    }
+
+    function pqText(p, q) {
+      const pn = Number(p)
+      const qn = Number(q)
+      const pf = Number.isFinite(pn) ? String(parseFloat(pn.toFixed(4))) : String(p == null ? '' : p)
+      const qf = Number.isFinite(qn) ? String(parseFloat(Math.abs(qn).toFixed(4))) : String(q == null ? '' : q)
+      const sign = (Number.isFinite(qn) && qn < 0) ? ' - j' : ' + j'
+      return pf + sign + qf
+    }
+
+    function branchTooltip(r) {
+      if (!r) return 'Branch info'
+      const isXfmr = r[12] === 'true'
+      const lines = []
+      lines.push('Branch ID: ' + (r[0] || ''))
+      lines.push('Branch Type: ' + (isXfmr ? 'Transformer' : 'Line'))
+      lines.push('Circuit: ' + (r[2] || ''))
+      lines.push('Status: ' + (r[3] || ''))
+      lines.push('')
+      lines.push('From Bus: ' + (r[4] || '') + ' (' + (r[6] || '') + ')')
+      lines.push('To Bus: ' + (r[7] || '') + ' (' + (r[9] || '') + ')')
+      lines.push('')
+      lines.push('Power From->To: ' + pqText(r[19], r[20]))
+      lines.push('Power To->From: ' + pqText(r[21], r[22]))
+      return lines.join('\n')
+    }
+
+    function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatNumbers) {
       if (!header) return null
       const headerCols = header.split(',')
+      const isBusCol = (ci) => busCols && onBusDoubleClick && busCols.indexOf(ci) !== -1
       return React.createElement('table', { style: tableStyle },
         React.createElement('thead', null,
           React.createElement('tr', null, headerCols.map((h, i) => React.createElement('th', { key: i, style: thStyle }, h))),
         ),
         React.createElement('tbody', null,
-          (rows || []).map((r, ri) => React.createElement('tr', { key: ri }, r.split(',').map((c, ci) => React.createElement('td', { key: ci, style: tdStyle }, c)))),
+          (rows || []).map((r, ri) => React.createElement('tr', { key: ri }, r.split(',').map((c, ci) => {
+            const display = formatNumbers ? formatValue(c) : c
+            if (isBusCol(ci)) {
+              return React.createElement('td', {
+                key: ci,
+                style: { ...tdStyle, cursor: 'pointer', color: 'var(--accent, #4a9eff)', textDecoration: 'underline' },
+                title: 'Double-click to select bus',
+                onDoubleClick: () => onBusDoubleClick(c),
+              }, display)
+            }
+            return React.createElement('td', { key: ci, style: tdStyle }, display)
+          }))),
         ),
       )
     }
@@ -187,7 +278,7 @@ window.__ModuleLoader__.load({
                     }, c),
                   )
                 }
-                return React.createElement('td', { key: ci, style: tdStyle }, c)
+                return React.createElement('td', { key: ci, style: tdStyle }, formatValue(c))
               }),
             )
           }),
@@ -210,8 +301,10 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function renderConnDiagram(busId, rows, onBusDoubleClick) {
+    function renderConnDiagram(busId, rows, busRecords, onBusDoubleClick, showTip, moveTip, hideTip) {
       const rowsArr = rows || []
+      const recById = {}
+      for (const r of (busRecords || [])) recById[r.id] = r
       const map = new Map()
       for (const r of rowsArr) {
         const from = r[4]
@@ -228,7 +321,7 @@ window.__ModuleLoader__.load({
       const cx = W / 2
       const cy = H / 2
       const R = N <= 1 ? 130 : Math.min(W, H) / 2 - 90
-      const nodeR = 20
+      const nodeR = 14
 
       function pos(i) {
         const angle = N <= 1 ? 0 : (2 * Math.PI * i) / N - Math.PI / 2
@@ -242,22 +335,69 @@ window.__ModuleLoader__.load({
       ids.forEach((id, i) => {
         const p = pos(i)
         const branches = map.get(id)
-        const code = branches[0] && branches[0][11] ? branches[0][11] : ''
-        const label = branches.length > 1 ? code + ' ×' + branches.length : code
-        edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: p.x, y2: p.y, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1.5 }))
+        const isXfmr = branches.some((b) => b[12] === 'true')
+        const tipProps = showTip ? {
+          onMouseEnter: (e) => showTip(branchTooltip(branches[0]), e),
+          onMouseMove: moveTip,
+          onMouseLeave: hideTip,
+        } : {}
+        const dx = p.x - cx
+        const dy = p.y - cy
+        const len = Math.sqrt(dx * dx + dy * dy) || 1
+        const ux = dx / len
+        const uy = dy / len
         const mx = (cx + p.x) / 2
         const my = (cy + p.y) / 2
-        labelEls.push(React.createElement('text', { key: 'l' + i, x: mx, y: my, fill: 'var(--text-secondary, #999)', fontSize: 10, textAnchor: 'middle', dy: '-0.4em' }, label))
+        // Stop the branch line at the neighbor bus rim so the bus node sits on
+        // top (in front) of the line rather than letting the line cross under it.
+        const nx = p.x - nodeR * ux
+        const ny = p.y - nodeR * uy
+        if (isXfmr) {
+          // Transformer symbol: two overlapping circles on the branch line.
+          const tr = 5
+          const co = 3.5
+          const c1x = mx - co * ux
+          const c1y = my - co * uy
+          const c2x = mx + co * ux
+          const c2y = my + co * uy
+          const gsx = mx - (co + tr) * ux
+          const gsy = my - (co + tr) * uy
+          const gex = mx + (co + tr) * ux
+          const gey = my + (co + tr) * uy
+          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: gsx, y2: gsy, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
+          edgeEls.push(React.createElement('line', { key: 'e' + i + 'b', x1: gex, y1: gey, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
+          labelEls.push(React.createElement('circle', { key: 'x1' + i, cx: c1x, cy: c1y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1, ...tipProps }))
+          labelEls.push(React.createElement('circle', { key: 'x2' + i, cx: c2x, cy: c2y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1, ...tipProps }))
+        } else {
+          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
+        }
       })
 
-      nodeEls.push(React.createElement('circle', { key: 'c', cx: cx, cy: cy, r: nodeR + 5, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 2 }))
-      nodeEls.push(React.createElement('text', { key: 'ct', x: cx, y: cy, fill: '#000', fontSize: 12, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId))
+      const centerTip = showTip ? {
+        onMouseEnter: (e) => showTip(busTooltip(recById[busId]), e),
+        onMouseMove: moveTip,
+        onMouseLeave: hideTip,
+      } : {}
+      nodeEls.push(React.createElement('g', { key: 'c', ...centerTip },
+        React.createElement('circle', { cx: cx, cy: cy, r: nodeR + 4, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 1 }),
+        React.createElement('text', { x: cx, y: cy, fill: '#000', fontSize: 7, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId),
+      ))
 
       ids.forEach((id, i) => {
         const p = pos(i)
-        const dbl = onBusDoubleClick ? { onDoubleClick: () => onBusDoubleClick(id), style: { cursor: 'pointer' }, title: 'Double-click to select' } : {}
-        nodeEls.push(React.createElement('circle', { key: 'n' + i, cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1.5, ...dbl }))
-        nodeEls.push(React.createElement('text', { key: 'nt' + i, x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 12, textAnchor: 'middle', dy: '0.35em', ...dbl }, id))
+        const neighborProps = onBusDoubleClick ? {
+          style: { cursor: 'pointer' },
+          onDoubleClick: () => onBusDoubleClick(id),
+        } : {}
+        const tipProps = showTip ? {
+          onMouseEnter: (e) => showTip(busTooltip(recById[id]), e),
+          onMouseMove: moveTip,
+          onMouseLeave: hideTip,
+        } : {}
+        nodeEls.push(React.createElement('g', { key: 'n' + i, ...neighborProps, ...tipProps },
+          React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1 }),
+          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 7, textAnchor: 'middle', dy: '0.35em' }, id),
+        ))
       })
 
       return React.createElement('svg', { width: '100%', viewBox: '0 0 ' + W + ' ' + H, style: { border: '1px solid var(--border, #444)', borderRadius: '8px', background: 'var(--surface, transparent)', marginBottom: '8px' } },
@@ -430,6 +570,7 @@ window.__ModuleLoader__.load({
       const [connResult, setConnResult] = React.useState(null)
       const [connLoading, setConnLoading] = React.useState(false)
       const [connView, setConnView] = React.useState('diagram')
+      const [diagramTip, setDiagramTip] = React.useState(null)
       const [ctxMenu, setCtxMenu] = React.useState(null)
       const [optOpen, setOptOpen] = React.useState(false)
       const [optTab, setOptTab] = React.useState('main')
@@ -671,15 +812,14 @@ window.__ModuleLoader__.load({
         setCtxMenu({ x: e.clientX, y: e.clientY, busId: id })
       }
 
-      function showConnections(busId) {
+      function showConnections(busId, keepView) {
         const bid = busId !== undefined && busId !== null ? busId : selectedBus
         if (bid === null || bid === undefined) return
-        setSelectedBus(bid)
         setCtxMenu(null)
         setConnOpen(true)
         setConnResult(null)
         setConnLoading(true)
-        setConnView('diagram')
+        if (!keepView) setConnView('diagram')
         const branchFile = result && result.files ? result.files.find((f) => f.indexOf('_DF_branch.csv') !== -1) : undefined
         if (branchFile === undefined) {
           setConnLoading(false)
@@ -690,6 +830,13 @@ window.__ModuleLoader__.load({
           (res) => { setConnLoading(false); setConnResult(res) },
           (err) => { setConnLoading(false); setConnResult({ error: String(err && err.message ? err.message : err) }) },
         )
+      }
+
+      function handleBusDoubleClick(busId) {
+        if (busId === null || busId === undefined || busId === '') return
+        if (busId === selectedBus) return
+        selectBus(busId)
+        showConnections(busId, true)
       }
 
       const LF_METHODS = [['NR', 'NR'], ['PQ', 'PQ'], ['GS', 'GS']]
@@ -837,7 +984,7 @@ window.__ModuleLoader__.load({
             csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
             csvHeader !== null ? React.createElement('div', null,
               React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary, #888)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
-              React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--border, #555)', borderRadius: '8px', background: 'var(--surface, transparent)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : renderCsvTable(csvHeader, csvRows)),
+              React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--border, #555)', borderRadius: '8px', background: 'var(--surface, transparent)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
               csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--text-secondary, #888)', fontSize: '12px' } }, 'Loading more…') : null,
               csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
                 React.createElement('span', { style: { fontSize: '12px', color: 'var(--text-secondary, #888)' } }, 'Selected bus: ' + selectedBus),
@@ -860,9 +1007,19 @@ window.__ModuleLoader__.load({
         }
       }
 
+      function showDiagramTip(text, e) {
+        setDiagramTip({ text: text, x: e.clientX, y: e.clientY })
+      }
+      function moveDiagramTip(e) {
+        setDiagramTip((t) => (t ? { text: t.text, x: e.clientX, y: e.clientY } : t))
+      }
+      function hideDiagramTip() {
+        setDiagramTip(null)
+      }
+
       function renderConnBody() {
         if (connView === 'diagram') {
-          return renderConnDiagram(connResult.busId || selectedBus, connResult.rows, showConnections)
+          return renderConnDiagram(connResult.busId || selectedBus, connResult.rows, connResult.busRecords, handleBusDoubleClick, showDiagramTip, moveDiagramTip, hideDiagramTip)
         }
         if (connView === 'gen') {
           if (connResult.genRows && connResult.genRows.length > 0) {
@@ -958,7 +1115,7 @@ window.__ModuleLoader__.load({
         React.createElement('input', { type: 'number', step: 'any', disabled: !!disabled, value: optForm[key], onChange: (e) => setOptForm({ ...optForm, [key]: e.target.value }), style: { ...selectStyle, width: '70px', padding: '3px 6px', opacity: disabled ? 0.5 : 1 } }),
       )
 
-      const OPT_TABS = [['main', 'Main'], ['nr', 'NR Config'], ['adj', 'Adj/Ctrl Setting'], ['psse', 'PSS/E Setting']]
+      const OPT_TABS = [['main', 'Main'], ['nr', 'NR Config'], ['adj', 'Adj/Ctrl Setting']]
 
       function renderOptTab() {
         if (optForm === null) return null
@@ -995,9 +1152,6 @@ window.__ModuleLoader__.load({
               optRow('PSXfr Power Ctrl AccFactor', optNum('psXfrPContrlAccFactor', undefined, !optForm.applyPowerAdjust)),
             ),
           )
-        }
-        if (optTab === 'psse') {
-          return React.createElement('div', { style: { color: 'var(--text-secondary, #888)', fontSize: '12px', padding: '12px 0' } }, 'No PSS/E-specific options.')
         }
         return React.createElement('div', null,
           React.createElement('div', { style: { display: 'flex', gap: '28px', flexWrap: 'wrap' } },
@@ -1120,6 +1274,16 @@ window.__ModuleLoader__.load({
         return React.createElement('div', { style: { padding: '20px', color: 'var(--text-secondary, #888)' } }, 'InterPSS is not available in this workspace. Please install iPSS Agent from GitHub first')
       }
 
+      const diagramTipEl = diagramTip ? React.createElement('div', {
+        style: {
+          position: 'fixed', left: diagramTip.x + 12, top: diagramTip.y + 12,
+          background: 'var(--surface-0, #1e1e1e)', border: '1px solid var(--border, #555)', borderRadius: '6px',
+          padding: '8px 10px', fontSize: '11px', lineHeight: '1.5', whiteSpace: 'pre',
+          color: 'var(--text, #fff)', zIndex: 10000, pointerEvents: 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)', maxWidth: '320px',
+        },
+      }, diagramTip.text) : null
+
       return React.createElement('div', { style: { padding: '20px', maxWidth: '860px' } },
         React.createElement('h2', { style: { margin: '0 0 4px' } }, 'InterPSS'),
         React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--text-secondary, #888)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
@@ -1130,6 +1294,7 @@ window.__ModuleLoader__.load({
         ctxMenuEl,
         optModal,
         reportModal,
+        diagramTipEl,
       )
     }
 
@@ -1155,3 +1320,4 @@ window.__ModuleLoader__.load({
     return module.exports;
   }
 });
+
