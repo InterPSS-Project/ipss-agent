@@ -107,19 +107,19 @@ return {
       margin: 0,
     }
     const panel = {
-      border: '1px solid var(--border, #555)',
+      border: '1px solid var(--dsw-alias-border-l1)',
       borderRadius: '8px',
       padding: '12px',
       marginTop: '12px',
-      background: 'var(--surface, transparent)',
+      background: 'var(--dsw-alias-bg-layer-1)',
       overflowY: 'auto',
     }
     const btn = {
       padding: '7px 14px',
       borderRadius: '6px',
-      border: '1px solid var(--border, #555)',
-      background: 'var(--surface, transparent)',
-      color: 'var(--text, inherit)',
+      border: '1px solid var(--dsw-alias-border-l1)',
+      background: 'var(--dsw-alias-bg-layer-1)',
+      color: 'var(--dsw-alias-label-primary)',
       cursor: 'pointer',
     }
     const searchIcon = React.createElement('svg',
@@ -132,8 +132,8 @@ return {
       React.createElement('circle', { cx: 12, cy: 12, r: 3 }),
       React.createElement('path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' }),
     )
-    const thStyle = { position: 'sticky', top: 0, zIndex: 1, padding: '4px 8px', border: '1px solid var(--border, #444)', background: 'var(--surface-0, #1e1e1e)', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }
-    const tdStyle = { padding: '3px 8px', border: '1px solid var(--border, #444)', whiteSpace: 'nowrap' }
+    const thStyle = { position: 'sticky', top: 0, zIndex: 1, padding: '4px 8px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-overlay)', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }
+    const tdStyle = { padding: '3px 8px', border: '1px solid var(--dsw-alias-border-l1)', whiteSpace: 'nowrap' }
     const tableStyle = { borderCollapse: 'collapse', fontSize: '12px', marginTop: '8px', width: '100%' }
 
     function formatValue(v) {
@@ -230,7 +230,7 @@ return {
             if (isBusCol(ci)) {
               return React.createElement('td', {
                 key: ci,
-                style: { ...tdStyle, cursor: 'pointer', color: 'var(--accent, #4a9eff)', textDecoration: 'underline' },
+                style: { ...tdStyle, cursor: 'pointer', color: 'var(--dsw-alias-brand-primary)', textDecoration: 'underline' },
                 title: 'Double-click to select bus',
                 onDoubleClick: () => onBusDoubleClick(c),
               }, display)
@@ -256,14 +256,14 @@ return {
             return React.createElement('tr', {
               key: ri,
               onContextMenu: onContextMenu ? (e) => onContextMenu(e, id) : undefined,
-              style: { cursor: 'context-menu', ...(isSel ? { background: 'var(--accent-soft, rgba(74,158,255,0.18))' } : null) },
+              style: { cursor: 'context-menu', ...(isSel ? { background: 'color-mix(in srgb, var(--dsw-alias-brand-primary) 18%, transparent)' } : null) },
             },
               cols.map((c, ci) => {
                 if (ci === 0) {
                   return React.createElement('td', { key: ci, style: tdStyle },
                     React.createElement('button', {
                       onClick: () => onSelect(id),
-                      style: { background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--accent, #4a9eff)', textDecoration: 'underline', font: 'inherit', fontWeight: 600 },
+                      style: { background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--dsw-alias-brand-primary)', textDecoration: 'underline', font: 'inherit', fontWeight: 600 },
                     }, c),
                   )
                 }
@@ -353,12 +353,12 @@ return {
           const gsy = my - (co + tr) * uy
           const gex = mx + (co + tr) * ux
           const gey = my + (co + tr) * uy
-          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: gsx, y2: gsy, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
-          edgeEls.push(React.createElement('line', { key: 'e' + i + 'b', x1: gex, y1: gey, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
-          labelEls.push(React.createElement('circle', { key: 'x1' + i, cx: c1x, cy: c1y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1, ...tipProps }))
-          labelEls.push(React.createElement('circle', { key: 'x2' + i, cx: c2x, cy: c2y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1, ...tipProps }))
+          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: gsx, y2: gsy, stroke: 'var(--dsw-alias-brand-primary)', strokeWidth: 1, ...tipProps }))
+          edgeEls.push(React.createElement('line', { key: 'e' + i + 'b', x1: gex, y1: gey, x2: nx, y2: ny, stroke: 'var(--dsw-alias-brand-primary)', strokeWidth: 1, ...tipProps }))
+          labelEls.push(React.createElement('circle', { key: 'x1' + i, cx: c1x, cy: c1y, r: tr, fill: 'var(--dsw-alias-bg-layer-1)', stroke: 'var(--dsw-alias-label-primary)', strokeWidth: 1, ...tipProps }))
+          labelEls.push(React.createElement('circle', { key: 'x2' + i, cx: c2x, cy: c2y, r: tr, fill: 'var(--dsw-alias-bg-layer-1)', stroke: 'var(--dsw-alias-label-primary)', strokeWidth: 1, ...tipProps }))
         } else {
-          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
+          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: nx, y2: ny, stroke: 'var(--dsw-alias-brand-primary)', strokeWidth: 1, ...tipProps }))
         }
       })
 
@@ -368,8 +368,8 @@ return {
         onMouseLeave: hideTip,
       } : {}
       nodeEls.push(React.createElement('g', { key: 'c', ...centerTip },
-        React.createElement('circle', { cx: cx, cy: cy, r: nodeR + 4, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 1 }),
-        React.createElement('text', { x: cx, y: cy, fill: '#000', fontSize: 7, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId),
+        React.createElement('circle', { cx: cx, cy: cy, r: nodeR + 4, fill: 'var(--dsw-alias-brand-primary)', stroke: 'var(--dsw-alias-bg-overlay)', strokeWidth: 1 }),
+        React.createElement('text', { x: cx, y: cy, fill: 'var(--dsw-alias-bg-base)', fontSize: 7, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId),
       ))
 
       ids.forEach((id, i) => {
@@ -384,12 +384,12 @@ return {
           onMouseLeave: hideTip,
         } : {}
         nodeEls.push(React.createElement('g', { key: 'n' + i, ...neighborProps, ...tipProps },
-          React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1 }),
-          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 7, textAnchor: 'middle', dy: '0.35em' }, id),
+          React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--dsw-alias-bg-layer-2)', stroke: 'var(--dsw-alias-border-l2)', strokeWidth: 1 }),
+          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--dsw-alias-label-primary)', fontSize: 7, textAnchor: 'middle', dy: '0.35em' }, id),
         ))
       })
 
-      return React.createElement('svg', { width: '100%', viewBox: '0 0 ' + W + ' ' + H, style: { border: '1px solid var(--border, #444)', borderRadius: '8px', background: 'var(--surface, transparent)', marginBottom: '8px' } },
+      return React.createElement('svg', { width: '100%', viewBox: '0 0 ' + W + ' ' + H, style: { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)', marginBottom: '8px' } },
         edgeEls,
         labelEls,
         nodeEls,
@@ -399,7 +399,7 @@ return {
     const codeStyle = {
       fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
       fontSize: '12px',
-      background: 'var(--surface-2, rgba(128,128,128,0.22))',
+      background: 'var(--dsw-alias-bg-layer-2)',
       padding: '1px 5px',
       borderRadius: '4px',
     }
@@ -465,7 +465,7 @@ return {
         }
 
         if (/^(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
-          blocks.push(React.createElement('hr', { key: 'b' + blocks.length, style: { border: 'none', borderTop: '1px solid var(--border, #444)', margin: '16px 0' } }))
+          blocks.push(React.createElement('hr', { key: 'b' + blocks.length, style: { border: 'none', borderTop: '1px solid var(--dsw-alias-border-l1)', margin: '16px 0' } }))
           i++
           continue
         }
@@ -483,7 +483,7 @@ return {
             inner.push(lines[i].replace(/^>\s?/, ''))
             i++
           }
-          blocks.push(React.createElement('blockquote', { key: 'b' + blocks.length, style: { borderLeft: '3px solid var(--border, #555)', paddingLeft: '12px', margin: '10px 0', color: 'var(--text-secondary, #999)' } },
+          blocks.push(React.createElement('blockquote', { key: 'b' + blocks.length, style: { borderLeft: '3px solid var(--dsw-alias-border-l1)', paddingLeft: '12px', margin: '10px 0', color: 'var(--dsw-alias-label-secondary)' } },
             renderMarkdown(inner.join('\n'))))
           continue
         }
@@ -882,9 +882,9 @@ return {
       )
       options.push(React.createElement('option', { key: 'custom', value: 'custom' }, 'Select…'))
 
-      const selectStyle = { padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border, #555)', background: 'var(--surface, transparent)', color: 'var(--text, inherit)' }
+      const selectStyle = { padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)' }
       const controls = [
-        React.createElement('span', { key: 'case-label', style: { fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #888)' } }, 'Simu Case:'),
+        React.createElement('span', { key: 'case-label', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, 'Simu Case:'),
         React.createElement('select', { key: 'case', value: mode, onChange: (e) => { const m = e.target.value; lastSelection.mode = m; setMode(m); onCaseChanged(m === 'custom' ? customInput.trim() : (PRESETS[Number(m)] ? PRESETS[Number(m)].input : '')) }, style: selectStyle }, options),
       ]
       if (isCustom) {
@@ -921,24 +921,24 @@ return {
           }, gearIcon),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
         ),
-        optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--success, #2ea043)' } }, '✓ Options saved') : null,
+        optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Options saved') : null,
       )
 
       let picker = null
       if (pickerOpen) {
         let pickerBody
         if (loadingCases) {
-          pickerBody = React.createElement('div', { style: { padding: '12px', color: 'var(--text-secondary, #888)' } }, 'Loading cases…')
+          pickerBody = React.createElement('div', { style: { padding: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Loading cases…')
         } else if (cases !== null) {
           const filtered = cases.filter((c) => c && c.format === customFormat)
           if (filtered.length === 0) {
-            pickerBody = React.createElement('div', { style: { padding: '12px', color: 'var(--text-secondary, #888)' } }, customFormat === 'psse' ? 'No PSS/E RAW (.raw) files found under wspace/data.' : 'No IEEE CDF (.ieee) files found under wspace/data.')
+            pickerBody = React.createElement('div', { style: { padding: '12px', color: 'var(--dsw-alias-label-secondary)' } }, customFormat === 'psse' ? 'No PSS/E RAW (.raw) files found under wspace/data.' : 'No IEEE CDF (.ieee) files found under wspace/data.')
           } else {
             pickerBody = filtered.map((c) =>
               React.createElement('button', {
                 key: c.path,
                 onClick: () => pickCase(c),
-                style: { display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: 'none', borderBottom: '1px solid var(--border, #333)', background: 'transparent', color: 'var(--text, inherit)', cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' },
+                style: { display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: 'none', borderBottom: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' },
               },
                 React.createElement('span', { style: { opacity: 0.65, marginRight: '10px' } }, c.format === 'psse' ? 'PSSE' : 'IEEE'),
                 c.path,
@@ -946,37 +946,37 @@ return {
             )
           }
         }
-        picker = React.createElement('div', { style: { marginTop: '8px', border: '1px solid var(--border, #555)', borderRadius: '8px', maxHeight: '260px', overflowY: 'auto', background: 'var(--surface, transparent)' } }, pickerBody)
+        picker = React.createElement('div', { style: { marginTop: '8px', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', maxHeight: '260px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)' } }, pickerBody)
       }
 
       let body = null
       if (result !== null) {
         if (result.ok) {
           body = React.createElement('div', null,
-            React.createElement('div', { style: { color: 'var(--success, #2ea043)', fontWeight: 600, marginBottom: '8px' } }, '✓ Load flow converged'),
+            React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Load flow converged'),
             result.networkInfo ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '340px' } }, result.networkInfo) : null,
-            React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary, #888)' } }, 'Results written to: ' + result.resultDir),
-            React.createElement('div', { style: { marginTop: '4px', fontSize: '12px', color: 'var(--text-secondary, #888)' } }, 'Files: ' + (result.files ? result.files.join(', ') : '')),
+            React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Results written to: ' + result.resultDir),
+            React.createElement('div', { style: { marginTop: '4px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Files: ' + (result.files ? result.files.join(', ') : '')),
             React.createElement('div', { style: { marginTop: '12px' } },
-              React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary, #888)', marginBottom: '6px' } }, 'Explore result files:'),
+              React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: '6px' } }, 'Explore result files:'),
               React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } },
                 ['bus', 'branch', 'gen', 'load'].map((kind) =>
                   React.createElement('button', {
                     key: kind,
                     onClick: () => openCsv(kind),
-                    style: { ...btn, padding: '5px 10px', borderColor: csvSel === kind ? 'var(--accent, #4a9eff)' : 'var(--border, #555)' },
+                    style: { ...btn, padding: '5px 10px', borderColor: csvSel === kind ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' },
                   }, kind.charAt(0).toUpperCase() + kind.slice(1)),
                 ),
               ),
             ),
-            csvLoading ? React.createElement('div', { style: { marginTop: '8px', color: 'var(--text-secondary, #888)' } }, 'Loading…') : null,
+            csvLoading ? React.createElement('div', { style: { marginTop: '8px', color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') : null,
             csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
             csvHeader !== null ? React.createElement('div', null,
-              React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary, #888)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
-              React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--border, #555)', borderRadius: '8px', background: 'var(--surface, transparent)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
-              csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--text-secondary, #888)', fontSize: '12px' } }, 'Loading more…') : null,
+              React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
+              React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
+              csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } }, 'Loading more…') : null,
               csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
-                React.createElement('span', { style: { fontSize: '12px', color: 'var(--text-secondary, #888)' } }, 'Selected bus: ' + selectedBus),
+                React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Selected bus: ' + selectedBus),
               ) : null,
             ) : null,
             result.loaded ? null : React.createElement('div', null,
@@ -986,7 +986,7 @@ return {
           )
         } else {
           body = React.createElement('div', null,
-            React.createElement('div', { style: { color: 'var(--danger, #f85149)', fontWeight: 600, marginBottom: '8px' } }, '✗ Load flow failed' + (result.exitCode !== null && result.exitCode !== undefined ? ' (exit ' + result.exitCode + ')' : '')),
+            React.createElement('div', { style: { color: 'var(--dsw-alias-state-error-primary)', fontWeight: 600, marginBottom: '8px' } }, '✗ Load flow failed' + (result.exitCode !== null && result.exitCode !== undefined ? ' (exit ' + result.exitCode + ')' : '')),
             result.error ? React.createElement('pre', { style: { ...mono, ...panel } }, result.error) : null,
             result.timedOut ? React.createElement('div', { style: { marginTop: '8px' } }, 'Timed out.') : null,
             result.aborted ? React.createElement('div', { style: { marginTop: '8px' } }, 'Aborted.') : null,
@@ -1014,13 +1014,13 @@ return {
           if (connResult.genRows && connResult.genRows.length > 0) {
             return renderConnTable(connResult.genHeader, connResult.genRows, [3, 4, 6, 9, 10, 11, 12, 13, 14, 15])
           }
-          return React.createElement('div', { style: { color: 'var(--text-secondary, #888)' } }, 'No generators connected to this bus.')
+          return React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No generators connected to this bus.')
         }
         if (connView === 'load') {
           if (connResult.loadRows && connResult.loadRows.length > 0) {
             return renderConnTable(connResult.loadHeader, connResult.loadRows, [3, 4, 5, 6, 7, 8, 9, 10])
           }
-          return React.createElement('div', { style: { color: 'var(--text-secondary, #888)' } }, 'No loads connected to this bus.')
+          return React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No loads connected to this bus.')
         }
         return renderConnTable(connResult.header, connResult.rows)
       }
@@ -1037,21 +1037,21 @@ return {
       },
         React.createElement('div', {
           onClick: (e) => e.stopPropagation(),
-          style: { background: 'var(--surface-0, #1e1e1e)', border: '1px solid var(--border, #555)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '960px', height: '70vh', display: 'flex', flexDirection: 'column' },
+          style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '960px', height: '70vh', display: 'flex', flexDirection: 'column' },
         },
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' } },
             React.createElement('div', { style: { fontWeight: 600 } }, (selectedBus ? selectedBus : '') + ' — branch connections'),
             React.createElement('button', { onClick: () => setConnOpen(false), style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
           ),
-          connLoading ? React.createElement('div', { style: { color: 'var(--text-secondary, #888)' } }, 'Loading…') :
+          connLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
           connResult && connResult.error ? React.createElement('pre', { style: { ...mono, maxHeight: '220px', overflow: 'auto' } }, connResult.error) :
           connResult && connResult.ok ? React.createElement('div', { style: { flex: '1 1 auto', overflow: 'auto', minHeight: 0 } },
             React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', flexWrap: 'wrap' } },
-              React.createElement('button', { onClick: () => setConnView('diagram'), style: { ...btn, padding: '4px 10px', borderColor: connView === 'diagram' ? 'var(--accent, #4a9eff)' : 'var(--border, #555)' } }, 'Diagram'),
-              React.createElement('button', { onClick: () => setConnView('table'), style: { ...btn, padding: '4px 10px', borderColor: connView === 'table' ? 'var(--accent, #4a9eff)' : 'var(--border, #555)' } }, 'Branch'),
-              React.createElement('button', { onClick: () => setConnView('gen'), style: { ...btn, padding: '4px 10px', borderColor: connView === 'gen' ? 'var(--accent, #4a9eff)' : 'var(--border, #555)' } }, 'Gen'),
-              React.createElement('button', { onClick: () => setConnView('load'), style: { ...btn, padding: '4px 10px', borderColor: connView === 'load' ? 'var(--accent, #4a9eff)' : 'var(--border, #555)' } }, 'Load'),
-              React.createElement('span', { style: { fontSize: '12px', color: 'var(--text-secondary, #888)', marginLeft: 'auto' } }, connCountLabel()),
+              React.createElement('button', { onClick: () => setConnView('diagram'), style: { ...btn, padding: '4px 10px', borderColor: connView === 'diagram' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Diagram'),
+              React.createElement('button', { onClick: () => setConnView('table'), style: { ...btn, padding: '4px 10px', borderColor: connView === 'table' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Branch'),
+              React.createElement('button', { onClick: () => setConnView('gen'), style: { ...btn, padding: '4px 10px', borderColor: connView === 'gen' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Gen'),
+              React.createElement('button', { onClick: () => setConnView('load'), style: { ...btn, padding: '4px 10px', borderColor: connView === 'load' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Load'),
+              React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginLeft: 'auto' } }, connCountLabel()),
             ),
             renderConnBody(),
           ) : null,
@@ -1067,20 +1067,20 @@ return {
           onClick: (e) => e.stopPropagation(),
           style: {
             position: 'fixed', left: ctxMenu.x, top: ctxMenu.y,
-            background: 'var(--surface-0, #1e1e1e)', border: '1px solid var(--border, #555)', borderRadius: '6px',
+            background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '6px',
             boxShadow: '0 4px 16px rgba(0,0,0,0.4)', minWidth: '150px', padding: '4px 0', zIndex: 9999,
           },
         },
           React.createElement('button', {
             onClick: () => showConnections(ctxMenu.busId),
-            style: { display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', background: 'transparent', border: 'none', color: 'var(--text, inherit)', cursor: 'pointer', fontSize: '13px' },
+            style: { display: 'block', width: '100%', textAlign: 'left', padding: '7px 14px', background: 'transparent', border: 'none', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontSize: '13px' },
           }, 'Connection info'),
         ),
       ) : null
 
       const optInputStyle = { ...selectStyle, width: '100%' }
       const optRow = (label, control) => React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '9px' } },
-        React.createElement('span', { style: { width: '168px', fontSize: '12px', color: 'var(--text-secondary, #888)', flexShrink: 0, lineHeight: '1.3' } }, label),
+        React.createElement('span', { style: { width: '168px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flexShrink: 0, lineHeight: '1.3' } }, label),
         React.createElement('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', gap: '8px', alignItems: 'center' } }, control),
       )
       const optCheck = (key, label, disabled, indent) => React.createElement('label', { key: key, style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', cursor: disabled ? 'default' : 'pointer', marginBottom: '6px', lineHeight: '1.3', opacity: disabled ? 0.5 : 1, marginLeft: indent || 0 } },
@@ -1100,7 +1100,7 @@ return {
         opts.map((o) => React.createElement('option', { key: o[0], value: o[0] }, o[1])),
       )
       const optConstInline = (label, key, disabled) => React.createElement('div', { key: key, style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', marginLeft: '8px', whiteSpace: 'nowrap' } },
-        React.createElement('span', { style: { color: 'var(--text-secondary, #888)' } }, label + ':'),
+        React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, label + ':'),
         React.createElement('input', { type: 'number', step: 'any', disabled: !!disabled, value: optForm[key], onChange: (e) => setOptForm({ ...optForm, [key]: e.target.value }), style: { ...selectStyle, width: '70px', padding: '3px 6px', opacity: disabled ? 0.5 : 1 } }),
       )
 
@@ -1201,30 +1201,30 @@ return {
       },
         React.createElement('div', {
           onClick: (e) => e.stopPropagation(),
-          style: { background: 'var(--surface-0, #1e1e1e)', border: '1px solid var(--border, #555)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '760px', height: '70vh', display: 'flex', flexDirection: 'column' },
+          style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '760px', height: '70vh', display: 'flex', flexDirection: 'column' },
         },
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' } },
             React.createElement('div', { style: { fontWeight: 600 } }, 'Run AC Loadflow'),
             React.createElement('button', { onClick: () => setOptOpen(false), style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
           ),
-          optLoading ? React.createElement('div', { style: { color: 'var(--text-secondary, #888)' } }, 'Loading…') :
+          optLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
           optError ? React.createElement('pre', { style: { ...mono, maxHeight: '180px', overflow: 'auto' } }, optError) :
           optForm !== null ? React.createElement('div', { style: { display: 'flex', flexDirection: 'column', flex: '1 1 auto', minHeight: 0 } },
-            React.createElement('div', { style: { display: 'flex', gap: '2px', borderBottom: '1px solid var(--border, #333)', marginBottom: '12px' } },
+            React.createElement('div', { style: { display: 'flex', gap: '2px', borderBottom: '1px solid var(--dsw-alias-border-l1)', marginBottom: '12px' } },
               OPT_TABS.map((t) => {
                 const tabDisabled = t[0] === 'adj' && !optForm.includeAdjustments
                 return React.createElement('button', {
                   key: t[0],
                   onClick: () => { if (!tabDisabled) setOptTab(t[0]) },
                   disabled: tabDisabled,
-                  style: { ...btn, padding: '6px 12px', border: 'none', borderBottom: optTab === t[0] ? '2px solid var(--accent, #4a9eff)' : '2px solid transparent', borderRadius: 0, background: 'transparent', color: optTab === t[0] ? 'var(--accent, #4a9eff)' : 'var(--text, inherit)', fontWeight: optTab === t[0] ? 600 : 400, opacity: tabDisabled ? 0.4 : 1, cursor: tabDisabled ? 'not-allowed' : 'pointer' },
+                  style: { ...btn, padding: '6px 12px', border: 'none', borderBottom: optTab === t[0] ? '2px solid var(--dsw-alias-brand-primary)' : '2px solid transparent', borderRadius: 0, background: 'transparent', color: optTab === t[0] ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-primary)', fontWeight: optTab === t[0] ? 600 : 400, opacity: tabDisabled ? 0.4 : 1, cursor: tabDisabled ? 'not-allowed' : 'pointer' },
                 }, t[1])
               }),
             ),
             React.createElement('div', { style: { flex: '1 1 auto', overflowY: 'auto', minHeight: 0, paddingRight: '4px' } }, renderOptTab()),
-            React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px', borderTop: '1px solid var(--border, #333)', paddingTop: '12px' } },
+            React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px', borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '12px' } },
               React.createElement('button', { onClick: () => setOptOpen(false), disabled: optSaving, style: btn }, 'Close'),
-              React.createElement('button', { onClick: saveOptions, disabled: optSaving, style: { ...btn, borderColor: 'var(--accent, #4a9eff)', color: 'var(--accent, #4a9eff)', opacity: optSaving ? 0.6 : 1 } }, optSaving ? 'Saving…' : 'Save'),
+              React.createElement('button', { onClick: saveOptions, disabled: optSaving, style: { ...btn, borderColor: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)', opacity: optSaving ? 0.6 : 1 } }, optSaving ? 'Saving…' : 'Save'),
             ),
           ) : null,
         ),
@@ -1236,17 +1236,17 @@ return {
       },
         React.createElement('div', {
           onClick: (e) => e.stopPropagation(),
-          style: { background: 'var(--surface-0, #1e1e1e)', border: '1px solid var(--border, #555)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '960px', height: '82vh', display: 'flex', flexDirection: 'column' },
+          style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '960px', height: '82vh', display: 'flex', flexDirection: 'column' },
         },
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' } },
             React.createElement('div', { style: { fontWeight: 600, fontSize: '15px' } }, 'NERC TPL-001-5 Report' + (reportName ? ' — ' + reportName : '')),
             React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-              React.createElement('button', { onClick: () => setReportView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: reportView === 'rendered' ? 'var(--accent, #4a9eff)' : 'var(--border, #555)' } }, 'Rendered'),
-              React.createElement('button', { onClick: () => setReportView('source'), style: { ...btn, padding: '4px 10px', borderColor: reportView === 'source' ? 'var(--accent, #4a9eff)' : 'var(--border, #555)' } }, 'Source'),
+              React.createElement('button', { onClick: () => setReportView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: reportView === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered'),
+              React.createElement('button', { onClick: () => setReportView('source'), style: { ...btn, padding: '4px 10px', borderColor: reportView === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source'),
               React.createElement('button', { onClick: () => setReportOpen(false), style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
             ),
           ),
-          reportLoading ? React.createElement('div', { style: { color: 'var(--text-secondary, #888)' } }, 'Generating report…') :
+          reportLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Generating report…') :
           reportError ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, reportError) :
           React.createElement('div', { style: { flex: '1 1 auto', overflowY: 'auto', minHeight: 0, fontSize: '13px', lineHeight: '1.55' } },
             reportView === 'source'
@@ -1257,25 +1257,25 @@ return {
       ) : null
 
       if (activated === null) {
-        return React.createElement('div', { style: { padding: '20px', color: 'var(--text-secondary, #888)' } }, 'Checking workspace…')
+        return React.createElement('div', { style: { padding: '20px', color: 'var(--dsw-alias-label-secondary)' } }, 'Checking workspace…')
       }
       if (activated === false) {
-        return React.createElement('div', { style: { padding: '20px', color: 'var(--text-secondary, #888)' } }, 'InterPSS is not available in this workspace. Please install iPSS Agent from GitHub first')
+        return React.createElement('div', { style: { padding: '20px', color: 'var(--dsw-alias-label-secondary)' } }, 'InterPSS is not available in this workspace. Please install iPSS Agent from GitHub first')
       }
 
       const diagramTipEl = diagramTip ? React.createElement('div', {
         style: {
           position: 'fixed', left: diagramTip.x + 12, top: diagramTip.y + 12,
-          background: 'var(--surface-0, #1e1e1e)', border: '1px solid var(--border, #555)', borderRadius: '6px',
+          background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '6px',
           padding: '8px 10px', fontSize: '11px', lineHeight: '1.5', whiteSpace: 'pre',
-          color: 'var(--text, #fff)', zIndex: 10000, pointerEvents: 'none',
+          color: 'var(--dsw-alias-label-primary)', zIndex: 10000, pointerEvents: 'none',
           boxShadow: '0 4px 16px rgba(0,0,0,0.4)', maxWidth: '320px',
         },
       }, diagramTip.text) : null
 
       return React.createElement('div', { style: { padding: '20px', maxWidth: '860px' } },
         React.createElement('h2', { style: { margin: '0 0 4px' } }, 'InterPSS'),
-        React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--text-secondary, #888)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
+        React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--dsw-alias-label-secondary)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
         React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, controls),
         picker,
         body,
