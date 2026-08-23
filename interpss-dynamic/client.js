@@ -1096,7 +1096,7 @@ return {
         label,
       )
       const optNum = (key, width, disabled) => React.createElement('input', { type: 'number', step: 'any', disabled: !!disabled, value: optForm[key], onChange: (e) => setOptForm({ ...optForm, [key]: e.target.value }), style: { ...optInputStyle, width: width || '120px', flex: '0 0 ' + (width || '120px'), opacity: disabled ? 0.5 : 1 } })
-      const optSel = (key, opts, disabled) => React.createElement('select', { value: optForm[key], disabled: !!disabled, onChange: (e) => setOptForm({ ...optForm, [key]: e.target.value }), style: { ...optInputStyle, opacity: disabled ? 0.5 : 1 } },
+      const optSel = (key, opts, disabled, width) => React.createElement('select', { value: optForm[key], disabled: !!disabled, onChange: (e) => setOptForm({ ...optForm, [key]: e.target.value }), style: { ...optInputStyle, width: width || '100%', flex: width ? '0 0 auto' : undefined, opacity: disabled ? 0.5 : 1 } },
         opts.map((o) => React.createElement('option', { key: o[0], value: o[0] }, o[1])),
       )
       const optConstInline = (label, key, disabled) => React.createElement('div', { key: key, style: { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', marginLeft: '8px', whiteSpace: 'nowrap' } },
@@ -1110,7 +1110,7 @@ return {
         if (optForm === null) return null
         if (optTab === 'nr') {
           return React.createElement('div', null,
-            optRow('Optimize Algorithm', optSel('optAlgo', OPT_ALGOS)),
+            optRow('Optimize Algorithm', optSel('optAlgo', OPT_ALGOS, undefined, '200px')),
             optRow('Variable Update Limit', optCheckBox('variableUpdateLimit')),
             optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit')),
             optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit')),
