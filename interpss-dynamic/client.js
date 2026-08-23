@@ -257,16 +257,41 @@ return {
       ids.forEach((id, i) => {
         const p = pos(i)
         const branches = map.get(id)
-        const code = branches[0] && branches[0][11] ? branches[0][11] : ''
-        const label = branches.length > 1 ? code + ' ×' + branches.length : code
-        edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: p.x, y2: p.y, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1 }))
+        const isXfmr = branches.some((b) => b[12] === 'true')
+        const dx = p.x - cx
+        const dy = p.y - cy
+        const len = Math.sqrt(dx * dx + dy * dy) || 1
+        const ux = dx / len
+        const uy = dy / len
         const mx = (cx + p.x) / 2
         const my = (cy + p.y) / 2
-        labelEls.push(React.createElement('text', { key: 'l' + i, x: mx, y: my, fill: 'var(--text-secondary, #999)', fontSize: 8, textAnchor: 'middle', dy: '-0.4em' }, label))
+        // Stop the branch line at the neighbor bus rim so the bus node sits on
+        // top (in front) of the line rather than letting the line cross under it.
+        const nx = p.x - nodeR * ux
+        const ny = p.y - nodeR * uy
+        if (isXfmr) {
+          // Transformer symbol: two overlapping circles on the branch line.
+          const tr = 5
+          const co = 3.5
+          const c1x = mx - co * ux
+          const c1y = my - co * uy
+          const c2x = mx + co * ux
+          const c2y = my + co * uy
+          const gsx = mx - (co + tr) * ux
+          const gsy = my - (co + tr) * uy
+          const gex = mx + (co + tr) * ux
+          const gey = my + (co + tr) * uy
+          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: gsx, y2: gsy, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1 }))
+          edgeEls.push(React.createElement('line', { key: 'e' + i + 'b', x1: gex, y1: gey, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1 }))
+          labelEls.push(React.createElement('circle', { key: 'x1' + i, cx: c1x, cy: c1y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1 }))
+          labelEls.push(React.createElement('circle', { key: 'x2' + i, cx: c2x, cy: c2y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1 }))
+        } else {
+          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1 }))
+        }
       })
 
       nodeEls.push(React.createElement('circle', { key: 'c', cx: cx, cy: cy, r: nodeR + 4, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 1 }))
-      nodeEls.push(React.createElement('text', { key: 'ct', x: cx, y: cy, fill: '#000', fontSize: 9, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId))
+      nodeEls.push(React.createElement('text', { key: 'ct', x: cx, y: cy, fill: '#000', fontSize: 7, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId))
 
       ids.forEach((id, i) => {
         const p = pos(i)
@@ -277,7 +302,7 @@ return {
         } : {}
         nodeEls.push(React.createElement('g', { key: 'n' + i, ...neighborProps },
           React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1 }),
-          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 9, textAnchor: 'middle', dy: '0.35em' }, id),
+          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 7, textAnchor: 'middle', dy: '0.35em' }, id),
         ))
       })
 
