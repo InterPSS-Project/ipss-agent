@@ -17,13 +17,17 @@ Prompt Codex, Claude Code, or Deepseek Harness to install and setup ipss.agent.
 ```text
 Install and setup ipss.agent from https://github.com/InterPSS-Project/ipss-agent
 ```
+Depending on your network speed, it may take some time to download and install ipss.agent.
 
+Initialize the ipss-sim skill.
 ```text
-# Test the setup with a sample case directory
-/ipss-sim <simu_case_directory> "<NERC Report Name>"
+init   
 ```
 
-Depending on your network speed, it may take some time to download and install ipss.agent.
+Test the setup with a sample case directory.
+```text
+/ipss-sim <simu_case_directory> "<NERC Report Name>"   
+```
 
 #### DSH Plugin setup
 
