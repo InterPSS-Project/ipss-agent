@@ -90,7 +90,7 @@ async function scanCases(fs, dirTarget, relDir, out) {
   }
 }
 
-return  {
+return {
   apply(ctx) {
     function resolveWorkspaceRoot(sessionId) {
       if (typeof sessionId === 'string' && sessionId !== '') {
@@ -287,28 +287,82 @@ return  {
           if (cols[4] === busId || cols[7] === busId) rows.push(cols)
         }
 
-        const readBusData = async (relPath, keyCol) => {
+        const readAll = async (relPath) => {
           try {
             const target = await fs.resolve(wspace + '/' + relPath)
             const txt = await fs.readText(target)
             const ls = String(txt).replace(/\r\n/g, '\n').split('\n')
             while (ls.length > 0 && ls[ls.length - 1].trim() === '') ls.pop()
-            if (ls.length === 0) return { header: [], rows: [], count: 0 }
+            if (ls.length === 0) return { header: [], rows: [] }
             const hdr = ls[0].split(',')
             const out = []
             for (let i = 1; i < ls.length; i++) {
               if (ls[i].trim() === '') continue
-              const cols = ls[i].split(',')
-              if (cols[keyCol] === busId) out.push(cols)
+              out.push(ls[i].split(','))
             }
-            return { header: hdr, rows: out, count: out.length }
+            return { header: hdr, rows: out }
           } catch (e) {
-            return { header: [], rows: [], count: 0 }
+            return { header: [], rows: [] }
           }
         }
 
-        const gen = await readBusData(path.replace(/_DF_branch\.csv$/, '_DF_gen.csv'), 0)
-        const load = await readBusData(path.replace(/_DF_branch\.csv$/, '_DF_load.csv'), 0)
+        const busFile = path.replace(/_DF_branch\.csv$/, '_DF_bus.csv')
+        const genFile = path.replace(/_DF_branch\.csv$/, '_DF_gen.csv')
+        const loadFile = path.replace(/_DF_branch\.csv$/, '_DF_load.csv')
+
+        const busAll = await readAll(busFile)
+        const genAll = await readAll(genFile)
+        const loadAll = await readAll(loadFile)
+
+        const busById = {}
+        for (const c of busAll.rows) busById[c[0]] = c
+
+        const genByBus = {}
+        for (const c of genAll.rows) {
+          if (!genByBus[c[0]]) genByBus[c[0]] = []
+          genByBus[c[0]].push(c)
+        }
+        const loadByBus = {}
+        for (const c of loadAll.rows) {
+          if (!loadByBus[c[0]]) loadByBus[c[0]] = []
+          loadByBus[c[0]].push(c)
+        }
+
+        const displayed = new Set([busId])
+        for (const r of rows) { displayed.add(r[4]); displayed.add(r[7]) }
+
+        const busRecords = []
+        for (const id of displayed) {
+          const b = busById[id]
+          if (!b) continue
+          const gs = genByBus[id] || []
+          const ls = loadByBus[id] || []
+          let totalGenP = 0
+          let totalGenQ = 0
+          for (const g of gs) {
+            const p = parseFloat(g[9]); if (isFinite(p)) totalGenP += p
+            const q = parseFloat(g[12]); if (isFinite(q)) totalGenQ += q
+          }
+          busRecords.push({
+            id: id,
+            name: b[2] || '',
+            baseKV: b[11] || '',
+            status: b[9] || '',
+            voltMag: b[12] || '',
+            voltAng: b[13] || '',
+            genCode: gs.length > 0 ? (gs[0][5] || '') : '',
+            genCount: gs.length,
+            genIds: gs.map((g) => g[3] || ''),
+            loadCode: ls.length > 0 ? (ls[0][5] || '') : '',
+            loadCount: ls.length,
+            loadIds: ls.map((l) => l[3] || ''),
+            totalGenP: totalGenP,
+            totalGenQ: totalGenQ,
+          })
+        }
+
+        const selGen = genByBus[busId] || []
+        const selLoad = loadByBus[busId] || []
 
         return {
           ok: true,
@@ -316,12 +370,13 @@ return  {
           header: header,
           rows: rows,
           count: rows.length,
-          genHeader: gen.header,
-          genRows: gen.rows,
-          genCount: gen.count,
-          loadHeader: load.header,
-          loadRows: load.rows,
-          loadCount: load.count,
+          genHeader: genAll.header,
+          genRows: selGen,
+          genCount: selGen.length,
+          loadHeader: loadAll.header,
+          loadRows: selLoad,
+          loadCount: selLoad.length,
+          busRecords: busRecords,
         }
       },
 

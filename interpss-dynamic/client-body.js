@@ -151,6 +151,71 @@ return {
       return String(parseFloat(n.toFixed(4)))
     }
 
+    function fmt(v, d) {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return v == null ? '' : String(v)
+      return n.toFixed(d)
+    }
+
+    function busTooltip(rec) {
+      if (!rec) return 'Bus info'
+      const lines = []
+      lines.push('Bus Name: ' + (rec.name || ''))
+      lines.push('BaseVolt: ' + fmt(rec.baseKV, 2))
+      lines.push('Status: ' + (rec.status || ''))
+      lines.push('')
+      lines.push('Voltage (pu): ' + fmt(rec.voltMag, 4))
+      lines.push('Angle (degrees): ' + fmt(rec.voltAng, 2))
+      if (rec.genCount > 0) {
+        lines.push('')
+        lines.push('Bus GenCode: ' + (rec.genCode || ''))
+        lines.push('Number of generators: ' + rec.genCount)
+        lines.push('Gen ID: ' + (rec.genIds || []).join(', '))
+      }
+      if (rec.loadCount > 0) {
+        lines.push('')
+        lines.push('Bus LoadCode: ' + (rec.loadCode || ''))
+        lines.push('Number of loads: ' + rec.loadCount)
+        lines.push('Load ID: ' + (rec.loadIds || []).join(', '))
+      }
+      lines.push('')
+      lines.push('Total Gen P (pu): ' + fmt(rec.totalGenP, 2))
+      lines.push('Total Gen Q (pu): ' + fmt(rec.totalGenQ, 4))
+      return lines.join('\n')
+    }
+
+    function fmt4(v) {
+      const n = Number(v)
+      if (!Number.isFinite(n)) return v == null ? '' : String(v)
+      return String(parseFloat(n.toFixed(4)))
+    }
+
+    function pqText(p, q) {
+      const pn = Number(p)
+      const qn = Number(q)
+      const pf = Number.isFinite(pn) ? String(parseFloat(pn.toFixed(4))) : String(p == null ? '' : p)
+      const qf = Number.isFinite(qn) ? String(parseFloat(Math.abs(qn).toFixed(4))) : String(q == null ? '' : q)
+      const sign = (Number.isFinite(qn) && qn < 0) ? ' - j' : ' + j'
+      return pf + sign + qf
+    }
+
+    function branchTooltip(r) {
+      if (!r) return 'Branch info'
+      const isXfmr = r[12] === 'true'
+      const lines = []
+      lines.push('Branch ID: ' + (r[0] || ''))
+      lines.push('Branch Type: ' + (isXfmr ? 'Transformer' : 'Line'))
+      lines.push('Circuit: ' + (r[2] || ''))
+      lines.push('Status: ' + (r[3] || ''))
+      lines.push('')
+      lines.push('From Bus: ' + (r[4] || '') + ' (' + (r[6] || '') + ')')
+      lines.push('To Bus: ' + (r[7] || '') + ' (' + (r[9] || '') + ')')
+      lines.push('')
+      lines.push('Power From->To: ' + pqText(r[19], r[20]))
+      lines.push('Power To->From: ' + pqText(r[21], r[22]))
+      return lines.join('\n')
+    }
+
     function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatNumbers) {
       if (!header) return null
       const headerCols = header.split(',')
@@ -225,8 +290,10 @@ return {
       )
     }
 
-    function renderConnDiagram(busId, rows, onBusDoubleClick) {
+    function renderConnDiagram(busId, rows, busRecords, onBusDoubleClick, showTip, moveTip, hideTip) {
       const rowsArr = rows || []
+      const recById = {}
+      for (const r of (busRecords || [])) recById[r.id] = r
       const map = new Map()
       for (const r of rowsArr) {
         const from = r[4]
@@ -258,6 +325,11 @@ return {
         const p = pos(i)
         const branches = map.get(id)
         const isXfmr = branches.some((b) => b[12] === 'true')
+        const tipProps = showTip ? {
+          onMouseEnter: (e) => showTip(branchTooltip(branches[0]), e),
+          onMouseMove: moveTip,
+          onMouseLeave: hideTip,
+        } : {}
         const dx = p.x - cx
         const dy = p.y - cy
         const len = Math.sqrt(dx * dx + dy * dy) || 1
@@ -281,26 +353,37 @@ return {
           const gsy = my - (co + tr) * uy
           const gex = mx + (co + tr) * ux
           const gey = my + (co + tr) * uy
-          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: gsx, y2: gsy, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1 }))
-          edgeEls.push(React.createElement('line', { key: 'e' + i + 'b', x1: gex, y1: gey, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1 }))
-          labelEls.push(React.createElement('circle', { key: 'x1' + i, cx: c1x, cy: c1y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1 }))
-          labelEls.push(React.createElement('circle', { key: 'x2' + i, cx: c2x, cy: c2y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1 }))
+          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: gsx, y2: gsy, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
+          edgeEls.push(React.createElement('line', { key: 'e' + i + 'b', x1: gex, y1: gey, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
+          labelEls.push(React.createElement('circle', { key: 'x1' + i, cx: c1x, cy: c1y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1, ...tipProps }))
+          labelEls.push(React.createElement('circle', { key: 'x2' + i, cx: c2x, cy: c2y, r: tr, fill: 'var(--surface, transparent)', stroke: 'var(--text, #fff)', strokeWidth: 1, ...tipProps }))
         } else {
-          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1 }))
+          edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: nx, y2: ny, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1, ...tipProps }))
         }
       })
 
-      nodeEls.push(React.createElement('circle', { key: 'c', cx: cx, cy: cy, r: nodeR + 4, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 1 }))
-      nodeEls.push(React.createElement('text', { key: 'ct', x: cx, y: cy, fill: '#000', fontSize: 7, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId))
+      const centerTip = showTip ? {
+        onMouseEnter: (e) => showTip(busTooltip(recById[busId]), e),
+        onMouseMove: moveTip,
+        onMouseLeave: hideTip,
+      } : {}
+      nodeEls.push(React.createElement('g', { key: 'c', ...centerTip },
+        React.createElement('circle', { cx: cx, cy: cy, r: nodeR + 4, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 1 }),
+        React.createElement('text', { x: cx, y: cy, fill: '#000', fontSize: 7, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId),
+      ))
 
       ids.forEach((id, i) => {
         const p = pos(i)
         const neighborProps = onBusDoubleClick ? {
           style: { cursor: 'pointer' },
-          title: 'Double-click to re-center',
           onDoubleClick: () => onBusDoubleClick(id),
         } : {}
-        nodeEls.push(React.createElement('g', { key: 'n' + i, ...neighborProps },
+        const tipProps = showTip ? {
+          onMouseEnter: (e) => showTip(busTooltip(recById[id]), e),
+          onMouseMove: moveTip,
+          onMouseLeave: hideTip,
+        } : {}
+        nodeEls.push(React.createElement('g', { key: 'n' + i, ...neighborProps, ...tipProps },
           React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1 }),
           React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 7, textAnchor: 'middle', dy: '0.35em' }, id),
         ))
@@ -476,6 +559,7 @@ return {
       const [connResult, setConnResult] = React.useState(null)
       const [connLoading, setConnLoading] = React.useState(false)
       const [connView, setConnView] = React.useState('diagram')
+      const [diagramTip, setDiagramTip] = React.useState(null)
       const [ctxMenu, setCtxMenu] = React.useState(null)
       const [optOpen, setOptOpen] = React.useState(false)
       const [optTab, setOptTab] = React.useState('main')
@@ -912,9 +996,19 @@ return {
         }
       }
 
+      function showDiagramTip(text, e) {
+        setDiagramTip({ text: text, x: e.clientX, y: e.clientY })
+      }
+      function moveDiagramTip(e) {
+        setDiagramTip((t) => (t ? { text: t.text, x: e.clientX, y: e.clientY } : t))
+      }
+      function hideDiagramTip() {
+        setDiagramTip(null)
+      }
+
       function renderConnBody() {
         if (connView === 'diagram') {
-          return renderConnDiagram(connResult.busId || selectedBus, connResult.rows, handleBusDoubleClick)
+          return renderConnDiagram(connResult.busId || selectedBus, connResult.rows, connResult.busRecords, handleBusDoubleClick, showDiagramTip, moveDiagramTip, hideDiagramTip)
         }
         if (connView === 'gen') {
           if (connResult.genRows && connResult.genRows.length > 0) {
@@ -1169,6 +1263,16 @@ return {
         return React.createElement('div', { style: { padding: '20px', color: 'var(--text-secondary, #888)' } }, 'InterPSS is not available in this workspace. Please install iPSS Agent from GitHub first')
       }
 
+      const diagramTipEl = diagramTip ? React.createElement('div', {
+        style: {
+          position: 'fixed', left: diagramTip.x + 12, top: diagramTip.y + 12,
+          background: 'var(--surface-0, #1e1e1e)', border: '1px solid var(--border, #555)', borderRadius: '6px',
+          padding: '8px 10px', fontSize: '11px', lineHeight: '1.5', whiteSpace: 'pre',
+          color: 'var(--text, #fff)', zIndex: 10000, pointerEvents: 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)', maxWidth: '320px',
+        },
+      }, diagramTip.text) : null
+
       return React.createElement('div', { style: { padding: '20px', maxWidth: '860px' } },
         React.createElement('h2', { style: { margin: '0 0 4px' } }, 'InterPSS'),
         React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--text-secondary, #888)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
@@ -1179,6 +1283,7 @@ return {
         ctxMenuEl,
         optModal,
         reportModal,
+        diagramTipEl,
       )
     }
 
