@@ -243,7 +243,7 @@ return {
       const cx = W / 2
       const cy = H / 2
       const R = N <= 1 ? 130 : Math.min(W, H) / 2 - 90
-      const nodeR = 20
+      const nodeR = 14
 
       function pos(i) {
         const angle = N <= 1 ? 0 : (2 * Math.PI * i) / N - Math.PI / 2
@@ -259,14 +259,14 @@ return {
         const branches = map.get(id)
         const code = branches[0] && branches[0][11] ? branches[0][11] : ''
         const label = branches.length > 1 ? code + ' ×' + branches.length : code
-        edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: p.x, y2: p.y, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1.5 }))
+        edgeEls.push(React.createElement('line', { key: 'e' + i, x1: cx, y1: cy, x2: p.x, y2: p.y, stroke: 'var(--accent, #4a9eff)', strokeWidth: 1 }))
         const mx = (cx + p.x) / 2
         const my = (cy + p.y) / 2
-        labelEls.push(React.createElement('text', { key: 'l' + i, x: mx, y: my, fill: 'var(--text-secondary, #999)', fontSize: 10, textAnchor: 'middle', dy: '-0.4em' }, label))
+        labelEls.push(React.createElement('text', { key: 'l' + i, x: mx, y: my, fill: 'var(--text-secondary, #999)', fontSize: 8, textAnchor: 'middle', dy: '-0.4em' }, label))
       })
 
-      nodeEls.push(React.createElement('circle', { key: 'c', cx: cx, cy: cy, r: nodeR + 5, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 2 }))
-      nodeEls.push(React.createElement('text', { key: 'ct', x: cx, y: cy, fill: '#000', fontSize: 12, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId))
+      nodeEls.push(React.createElement('circle', { key: 'c', cx: cx, cy: cy, r: nodeR + 4, fill: 'var(--accent, #4a9eff)', stroke: 'var(--surface-0, #111)', strokeWidth: 1 }))
+      nodeEls.push(React.createElement('text', { key: 'ct', x: cx, y: cy, fill: '#000', fontSize: 9, fontWeight: 700, textAnchor: 'middle', dy: '0.35em' }, busId))
 
       ids.forEach((id, i) => {
         const p = pos(i)
@@ -276,8 +276,8 @@ return {
           onDoubleClick: () => onBusDoubleClick(id),
         } : {}
         nodeEls.push(React.createElement('g', { key: 'n' + i, ...neighborProps },
-          React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1.5 }),
-          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 12, textAnchor: 'middle', dy: '0.35em' }, id),
+          React.createElement('circle', { cx: p.x, cy: p.y, r: nodeR, fill: 'var(--surface-2, rgba(128,128,128,0.22))', stroke: 'var(--border, #555)', strokeWidth: 1 }),
+          React.createElement('text', { x: p.x, y: p.y, fill: 'var(--text, #fff)', fontSize: 9, textAnchor: 'middle', dy: '0.35em' }, id),
         ))
       })
 
