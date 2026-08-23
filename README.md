@@ -24,7 +24,11 @@ Install and setup ipss.agent from https://github.com/InterPSS-Project/ipss-agent
 
 #### DSH Plugin setup
 
-Download the DSH Plugin from the [Release page](https://github.com/InterPSS-Project/ipss-agent/releases) and install it following the provided instructions.
+Prompt Deepseek Harness to install the InterPSS DSH Plugin.
+
+```text
+Install the InterPSS dsh plugin
+```
 
 ## Run simulations and generate reports
 
