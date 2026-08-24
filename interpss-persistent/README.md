@@ -53,7 +53,7 @@ to:
 
 ## Install
 
-See `InstallDSHPlugin.md` at the root of the `ipss-dsh.zip` distribution. Two methods:
+See `InstallDSHPlugin.md` in the repository root. Two methods:
 
 1. **Automatic (`dsh plugin`)** — from the unzipped directory or the npm
    tarball:
@@ -94,11 +94,9 @@ workspace. Please install iPSS Agent from GitHub first".
 
 ## Packaging
 
-To rebuild the distributable artifacts:
+The distributable is the npm tarball; no zip is produced:
 
 ```sh
 cd interpss-persistent
-npm pack                                   # -> deepseek-ai-dsh-interpss-<version>.tgz
-cd ..
-zip -r ipss-dsh.zip InstallDSHPlugin.md dsh-interpss   # from the source tree
+npm pack    # -> deepseek-ai-dsh-interpss-<version>.tgz
 ```

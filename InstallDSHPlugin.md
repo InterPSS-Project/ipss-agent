@@ -1,17 +1,16 @@
 # Installing the InterPSS DSH Plugin (persistent)
 
-`ipss-dsh.zip` packages the InterPSS capability for the **DeepSeek Harness**
-(`dsh`) web GUI as a **persistent** Cordis plugin
+The InterPSS capability is distributed as a **persistent** Cordis plugin
 (`@deepseek-ai/dsh-interpss`): a real composition row mounted through the web
 profile's `cordis.patch.yml`, so the InterPSS tab survives restarts.
 
-## What's inside
+## Distribution artifacts
 
-| Entry | Description |
+| Artifact | Description |
 | --- | --- |
+| `deepseek-ai-dsh-interpss-<version>.tgz` | npm-pack tarball of the plugin package — the primary distributable. |
+| `dsh-interpss/` (or the package source in `interpss-persistent/`) | The unpacked plugin package — copy it under the profile's `node_modules/@deepseek-ai/` (Method 2) or point `dsh plugin` at it (Method 1). |
 | `InstallDSHPlugin.md` | This file. |
-| `dsh-interpss/` | The plugin package — copy it under the profile's `node_modules/@deepseek-ai/` (Method 2) or point `dsh plugin` at it (Method 1). |
-| `deepseek-ai-dsh-interpss-<version>.tgz` | npm-pack tarball of the same package, for `dsh plugin add`. |
 
 ## Prerequisites
 
@@ -22,16 +21,16 @@ profile's `cordis.patch.yml`, so the InterPSS tab survives restarts.
 
 ## Method 1 — `dsh plugin` (automatic, recommended)
 
-Unzip the archive, then from any directory:
-
-```sh
-dsh plugin --profile web add /path/to/unzipped/dsh-interpss
-```
-
-or, using the tarball:
+From any directory:
 
 ```sh
 dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-<version>.tgz
+```
+
+or, pointing at the unpacked package directory:
+
+```sh
+dsh plugin --profile web add /path/to/dsh-interpss
 ```
 
 `dsh plugin` forwards to pnpm in the profile directory, then reconciles
@@ -47,7 +46,7 @@ row automatically — no manual patch editing.
 
 ```sh
 mkdir -p "$DSH_HOME/profiles/web/node_modules/@deepseek-ai"
-cp -R /path/to/unzipped/dsh-interpss "$DSH_HOME/profiles/web/node_modules/@deepseek-ai/"
+cp -R /path/to/dsh-interpss "$DSH_HOME/profiles/web/node_modules/@deepseek-ai/"
 ```
 
 Then add one row to `$DSH_HOME/profiles/web/cordis.patch.yml`:
