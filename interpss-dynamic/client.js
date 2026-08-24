@@ -1079,7 +1079,7 @@ return {
       ) : null
 
       const optInputStyle = { ...selectStyle, width: '100%' }
-      const optRow = (label, control) => React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '9px' } },
+      const optRow = (label, control, indent) => React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '9px', marginLeft: indent || 0 } },
         React.createElement('span', { style: { width: '168px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flexShrink: 0, lineHeight: '1.3' } }, label),
         React.createElement('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', gap: '8px', alignItems: 'center' } }, control),
       )
@@ -1122,8 +1122,8 @@ return {
           return React.createElement('div', null,
             optRow('Optimize Algorithm', optSel('optAlgo', OPT_ALGOS, undefined, '200px')),
             optCheck('variableUpdateLimit', 'Variable Update Limit'),
-            optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit', '150px')),
-            optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit', '150px')),
+            optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit', '150px'), 44),
+            optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit', '150px'), 44),
             optCheck('stopNoSolutionFound', 'Stop No Solution Found'),
             optRow('Min Scale Factor', optNum('minScaleFactor', '150px')),
           )
