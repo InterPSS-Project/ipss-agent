@@ -1104,6 +1104,16 @@ return {
         React.createElement('input', { type: 'number', step: 'any', disabled: !!disabled, value: optForm[key], onChange: (e) => setOptForm({ ...optForm, [key]: e.target.value }), style: { ...selectStyle, width: '70px', padding: '3px 6px', opacity: disabled ? 0.5 : 1 } }),
       )
 
+      const optGroup = (title, fields) => React.createElement('div', { key: title, style: { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', padding: '12px 14px', marginBottom: '12px' } },
+        React.createElement('div', { style: { fontWeight: 600, fontSize: '13px', marginBottom: '10px', color: 'var(--dsw-alias-label-primary)' } }, title),
+        React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '24px', rowGap: '10px' } },
+          fields.map((f) => React.createElement('div', { key: f[0], style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flexShrink: 0 } }, f[0]),
+            f[1],
+          )),
+        ),
+      )
+
       const OPT_TABS = [['main', 'Main'], ['nr', 'NR Config'], ['adj', 'Adj/Ctrl Setting']]
 
       function renderOptTab() {
@@ -1119,27 +1129,31 @@ return {
           )
         }
         if (optTab === 'adj') {
-          return React.createElement('div', { style: { display: 'flex', gap: '28px' } },
-            React.createElement('div', { style: { flex: '1 1 0' } },
-              optRow('Limit Ctrl StartPoint', optNum('limitCtrlStartPoint', undefined, !optForm.applyLimitControl)),
-              optRow('Limit Ctrl Apply Type', optSel('limitCtrlApplyType', APPLY_TYPES, !optForm.applyLimitControl)),
-              optRow('Limit Ctrl ErrFactor', optNum('limitCtrlTolearnceFactor', undefined, !optForm.applyLimitControl)),
-              optRow('Voltage Adj StartPoint', optNum('voltAdjStartPoint', undefined, !optForm.applyVoltAdjust)),
-              optRow('Voltage Adj Apply Type', optSel('voltAdjApplyType', APPLY_TYPES, !optForm.applyVoltAdjust)),
-              optRow('Voltage Adj Tolerance (PU)', optNum('voltAdjTolearnce', undefined, !optForm.applyVoltAdjust)),
-              optRow('dQ/dV Threshold', optNum('dQ_dVThreshold', undefined, !optForm.applyVoltAdjust)),
-            ),
-            React.createElement('div', { style: { flex: '1 1 0' } },
-              optRow('Power Adj StartPoint', optNum('powerAdjStartPoint', undefined, !optForm.applyPowerAdjust)),
-              optRow('Power Adj Apply Type', optSel('powerAdjApplyType', APPLY_TYPES, !optForm.applyPowerAdjust)),
-              optRow('Power Adj ErrFactor', optNum('powerAdjTolearnceFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('PVLimit Ctrl AccFactor', optNum('pvLimitAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('ReQBus Adj AccFactor', optNum('reQBusAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('Xfr Tap Ctrl AccFactor', optNum('xfrTapAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('PQLimit Ctrl AccFactor', optNum('pqLimitAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('SVC Ctrl AccFactor', optNum('svcAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('PSXfr Power Ctrl AccFactor', optNum('psXfrPContrlAccFactor', undefined, !optForm.applyPowerAdjust)),
-            ),
+          return React.createElement('div', null,
+            optGroup('Limit Ctrl', [
+              ['Limit Ctrl StartPoint', optNum('limitCtrlStartPoint', '150px', !optForm.applyLimitControl)],
+              ['Limit Ctrl ErrFactor', optNum('limitCtrlTolearnceFactor', '150px', !optForm.applyLimitControl)],
+              ['Limit Ctrl Apply Type', optSel('limitCtrlApplyType', APPLY_TYPES, !optForm.applyLimitControl)],
+            ]),
+            optGroup('Voltage Adj', [
+              ['Voltage Adj StartPoint', optNum('voltAdjStartPoint', '150px', !optForm.applyVoltAdjust)],
+              ['Voltage Adj Tolerance (PU)', optNum('voltAdjTolearnce', '150px', !optForm.applyVoltAdjust)],
+              ['Voltage Adj Apply Type', optSel('voltAdjApplyType', APPLY_TYPES, !optForm.applyVoltAdjust)],
+              ['dQ/dV Threshold', optNum('dQ_dVThreshold', '150px', !optForm.applyVoltAdjust)],
+            ]),
+            optGroup('Power Adj', [
+              ['Power Adj StartPoint', optNum('powerAdjStartPoint', '150px', !optForm.applyPowerAdjust)],
+              ['Power Adj ErrFactor', optNum('powerAdjTolearnceFactor', '150px', !optForm.applyPowerAdjust)],
+              ['Power Adj Apply Type', optSel('powerAdjApplyType', APPLY_TYPES, !optForm.applyPowerAdjust)],
+            ]),
+            optGroup('Acceleration Factors', [
+              ['PVLimit Ctrl AccFactor', optNum('pvLimitAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['PQLimit Ctrl AccFactor', optNum('pqLimitAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['ReQBus Adj AccFactor', optNum('reQBusAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['SVC Ctrl AccFactor', optNum('svcAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['Xfr Tap Ctrl AccFactor', optNum('xfrTapAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['PSXfr Power Ctrl AccFactor', optNum('psXfrPContrlAccFactor', '150px', !optForm.applyPowerAdjust)],
+            ]),
           )
         }
         return React.createElement('div', null,
