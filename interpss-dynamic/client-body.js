@@ -1120,12 +1120,12 @@ return {
         if (optForm === null) return null
         if (optTab === 'nr') {
           return React.createElement('div', null,
-            optRow('Optimize Algorithm', optSel('optAlgo', OPT_ALGOS, undefined, '200px')),
+            optRow('Optimize Algorithm', optSel('optAlgo', OPT_ALGOS)),
             optCheck('variableUpdateLimit', 'Variable Update Limit'),
-            optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit', '150px')),
-            optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit', '150px')),
+            optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit', '100%')),
+            optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit', '100%')),
             optCheck('stopNoSolutionFound', 'Stop No Solution Found'),
-            optRow('Min Scale Factor', optNum('minScaleFactor', '150px')),
+            optRow('Min Scale Factor', optNum('minScaleFactor', '100%')),
           )
         }
         if (optTab === 'adj') {
