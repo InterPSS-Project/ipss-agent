@@ -20,9 +20,9 @@
 /CLAUDE.md
 /GEMINI.md
 
+/interpss-persistent.local-backup/
+
 target/**/*.*
 target/**/*
 src/assembly/uber.xml
-interpss-persistent.local-backup/**/*.*
-interpss-persistent.local-backup/*
 build/interpss-profile-patch.yml
