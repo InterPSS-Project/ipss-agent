@@ -1121,11 +1121,11 @@ return {
         if (optTab === 'nr') {
           return React.createElement('div', null,
             optRow('Optimize Algorithm', optSel('optAlgo', OPT_ALGOS, undefined, '200px')),
-            optRow('Variable Update Limit', optCheckBox('variableUpdateLimit')),
-            optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit')),
-            optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit')),
-            optRow('Stop No Solution Found', optCheckBox('stopNoSolutionFound')),
-            optRow('Min Scale Factor', optNum('minScaleFactor')),
+            optCheck('variableUpdateLimit', 'Variable Update Limit'),
+            optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit', '150px')),
+            optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit', '150px')),
+            optCheck('stopNoSolutionFound', 'Stop No Solution Found'),
+            optRow('Min Scale Factor', optNum('minScaleFactor', '150px')),
           )
         }
         if (optTab === 'adj') {
