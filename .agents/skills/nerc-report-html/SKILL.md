@@ -7,7 +7,7 @@ description: Generate reusable interactive HTML dashboards from InterPSS NERC TP
 
 Generate a standalone interactive HTML dashboard from an InterPSS `NERC_TPL_001_5_Report.md` and the companion `*_DF_bus.csv`, `*_DF_branch.csv`, `*_DF_gen.csv`, `*_DF_load.csv`, and optional `*_DF_contingency.csv` files.
 
-Use the bundled generator script for consistency instead of rewriting the dashboard by hand.
+Use the bundled Python script for consistency instead of rewriting the dashboard by hand.
 
 ## Inputs
 
@@ -21,16 +21,14 @@ The script auto-detects companion CSV files in the same directory by suffix, so 
 ## Quick Start
 
 ```bash
-./.agents/skills/nerc-report-html/scripts/generate_nerc_html.py <report-or-result-dir>
+python3 .agents/skills/nerc-report-html/scripts/generate_nerc_html.py <report-or-result-dir>
 ```
 
 Optional:
 
 ```bash
-./.agents/skills/nerc-report-html/scripts/generate_nerc_html.py <report-or-result-dir> --out <dashboard.html>
+python3 .agents/skills/nerc-report-html/scripts/generate_nerc_html.py <report-or-result-dir> --out <dashboard.html>
 ```
-
-Run from the project root (`chmod +x` on the script if needed).
 
 By default the output is saved beside the report as:
 

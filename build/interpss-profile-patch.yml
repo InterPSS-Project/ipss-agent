@@ -1,0 +1,6 @@
+# Persistent InterPSS plugin — mounted as a persistent composition row so the
+# InterPSS tab and its ACLF capability survive DSH restarts (replaces the
+# per-session cordis_define/cordis_run dynamic injection).
+- insert:
+    - id: interpss
+      name: '@deepseek-ai/dsh-interpss'
