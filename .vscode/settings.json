@@ -1,9 +1,3 @@
 {
-  "java.configuration.updateBuildConfiguration": "automatic",
-  "java.project.referencedLibraries": [
-    "lib/ipss_runnable.jar",
-    "lib/deps/ipss.core.lib-1.0.16.jar",
-    "lib/deps/ieee.odm.schema-1.0.1.jar",
-    "lib/deps/ieee.odm_pss-1.0.1.jar"
-  ]
+  "java.configuration.updateBuildConfiguration": "automatic"
 }
