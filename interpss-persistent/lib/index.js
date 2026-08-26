@@ -11,6 +11,15 @@
 // "iPSS Agent".
 
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { writeFileSync } from 'node:fs'
+
+// Diagnostic sink inside the session workspace so the agent can read, after a
+// restart, whether this plugin's apply() ran and what it did — without access
+// to the dsh web process stderr.
+const DIAG = '/Users/mzhou/Documents/wspace/gitRepo/ipss-agent/.dsh-interpss-diagnostic.log'
+function diag(line) {
+  try { writeFileSync(DIAG, line + '\n', 'utf8') } catch {}
+}
 
 const NAMESPACE = 'interpss'
 const PACKAGE = '@deepseek-ai/dsh-interpss'
@@ -690,6 +699,7 @@ export default {
   // best-effort: it only feeds the persistent client's own /api surface, which
   // the dynamic per-session plugin does not use.
   apply(ctx) {
+    diag('apply reached; ctx=' + (typeof ctx) + ' hasProvide=' + (typeof ctx.provide) + ' hasReflect=' + (typeof ctx.reflect))
     console.error('[dsh-interpss] apply reached')
     try {
     // Provide the `interpss` service (and its Typert binding) by instantiating
@@ -731,6 +741,9 @@ export default {
           return bridge.summarize(scope, sortRule, numRec)
         },
       })
+      diag('javaBridge provided; bridgeRoot=' + bridgeRoot)
+    } else {
+      diag('javaBridge SKIPPED; bridgeRoot empty')
     }
 
     const typert = ctx.get('typert')
@@ -744,7 +757,9 @@ export default {
       })
       ctx.effect(() => dispose)
     }
+    diag('apply complete; interpss=' + (ctx.get('interpss') !== undefined) + ' javaBridge=' + (ctx.get('javaBridge') !== undefined))
     } catch (e) {
+      diag('apply FAILED: ' + (e && e.stack ? e.stack : e))
       console.error('[dsh-interpss] apply failed:', e && e.stack ? e.stack : e)
       throw e
     }
