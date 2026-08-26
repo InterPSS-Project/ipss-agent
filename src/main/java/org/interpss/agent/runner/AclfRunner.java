@@ -31,11 +31,22 @@ public final class AclfRunner {
 
     public static void run(ProjectPaths paths, String inputRelative, AclfNetwork net,
             Path resultsDir, String stem) throws Exception {
+        Path configPath = paths.resolveAclfRunConfig(inputRelative);
+        runOnNet(net, configPath.toString(), resultsDir, stem);
+    }
+
+    /**
+     * In-process core: run AC load flow on an already-loaded {@code net} using
+     * an absolute {@code absoluteConfigPath}, then write the standard result
+     * files. Shared by the CLI ({@code IpssCmd}) and the in-process bridge
+     * ({@code IpssAgentBridge}).
+     */
+    public static void runOnNet(AclfNetwork net, String absoluteConfigPath,
+            Path resultsDir, String stem) throws Exception {
         LoadflowAlgorithm algo = LoadflowAlgoObjectFactory.createLoadflowAlgorithm(net);
 
-        Path configPath = paths.resolveAclfRunConfig(inputRelative);
-        System.out.println("Using config file: " + configPath);
-        AclfRunConfigRec aclfRunConfig = AclfRunConfigRec.loadAclfRunConfig(configPath.toString());
+        System.out.println("Using config file: " + absoluteConfigPath);
+        AclfRunConfigRec aclfRunConfig = AclfRunConfigRec.loadAclfRunConfig(absoluteConfigPath);
         aclfRunConfig.configAclfRun(
                 algo,
                 aclfRunConfig.polarCoordinate,

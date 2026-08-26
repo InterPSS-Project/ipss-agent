@@ -7,6 +7,9 @@
   },
   "type": "module",
   "main": "lib/index.js",
+  "dependencies": {
+    "java-bridge": "^2.6.0"
+  },
   "exports": {
     ".": {
       "default": "./lib/index.js"

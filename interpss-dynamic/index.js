@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runReport', 'getAclfOptions', 'saveAclfOptions']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'loadCase', 'summarizeResult']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -114,6 +114,33 @@ export default {
       const sp = ctx.get('sandboxPolicy')
       if (sp !== undefined && typeof sp.workspaceRoot === 'string' && sp.workspaceRoot !== '') return sp.workspaceRoot
       return ''
+    }
+
+    // In-process bridge, provided by the persistent plugin (which can require
+    // `java-bridge`). Optional: when absent, runAclf falls back to shell-out.
+    const javaBridge = ctx.get('javaBridge')
+
+    function caseParts(caseInput) {
+      const slash = caseInput.lastIndexOf('/')
+      const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
+      const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+      return { parent: parent, stem: stem }
+    }
+
+    // Replicates ProjectPaths.resolveAclfRunConfig: case-specific config wins,
+    // then the project default.
+    async function resolveAclfConfigPath(root, caseInput) {
+      const fs = ctx.get('fs')
+      if (fs === undefined) return root + '/config/aclf_run.json'
+      const { parent } = caseParts(caseInput)
+      const caseCfg = root + '/wspace/' + parent + '/config/aclf_run.json'
+      const defCfg = root + '/config/aclf_run.json'
+      try {
+        const target = await fs.resolve(caseCfg)
+        const info = await fs.stat(target)
+        if (info !== undefined) return caseCfg
+      } catch (e) {}
+      return defCfg
     }
 
     const handlers = {
@@ -381,9 +408,6 @@ export default {
       },
 
       async runAclf(args) {
-        const shell = ctx.get('shell')
-        if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
-
         const format = args && args.format === 'psse' ? 'psse' : 'ieee'
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
         if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
@@ -393,10 +417,49 @@ export default {
         const root = resolveWorkspaceRoot(args && args.sessionId)
         if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
 
+        const { parent, stem } = caseParts(caseInput)
+
+        // In-process bridge path (preferred): no JVM spawn, cached network.
+        if (javaBridge !== undefined && typeof javaBridge.runAclf === 'function') {
+          try {
+            const absCase = root + '/wspace/' + caseInput
+            const absCfg = await resolveAclfConfigPath(root, caseInput)
+            const absResults = root + '/wspace/' + parent + '/result'
+            const raw = await javaBridge.runAclf(format, absCase, absCfg, absResults, stem)
+            const parsed = JSON.parse(raw)
+            if (parsed && parsed.ok) {
+              return {
+                ok: true,
+                exitCode: 0,
+                timedOut: false,
+                aborted: false,
+                stdout: '',
+                stderr: '',
+                converged: !!parsed.converged,
+                networkInfo: parsed.networkInfo || null,
+                input: caseInput,
+                format: format,
+                resultDir: parent + '/result',
+                files: [
+                  stem + '_DF_bus.csv',
+                  stem + '_DF_branch.csv',
+                  stem + '_DF_gen.csv',
+                  stem + '_DF_load.csv',
+                  stem + '_network_info.txt',
+                ],
+              }
+            }
+            return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runAclf failed' }
+          } catch (e) {
+            return { ok: false, error: 'bridge runAclf failed: ' + (e && e.message ? e.message : String(e)) }
+          }
+        }
+
+        // Fallback: shell out to IpssCmd (no in-process bridge available).
+        const shell = ctx.get('shell')
+        if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
+
         const wspace = root + '/wspace'
-        const slash = caseInput.lastIndexOf('/')
-        const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
-        const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
         const infoRel = parent + '/result/' + stem + '_network_info.txt'
 
         const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
@@ -441,6 +504,49 @@ export default {
             stem + '_DF_load.csv',
             stem + '_network_info.txt',
           ],
+        }
+      },
+
+      async loadCase(args) {
+        const format = args && args.format === 'psse' ? 'psse' : 'ieee'
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+          return { ok: false, error: 'Invalid case path: ' + caseInput }
+        }
+        if (javaBridge === undefined || typeof javaBridge.loadCase !== 'function') {
+          return { ok: false, error: 'in-process bridge unavailable (install the persistent InterPSS plugin)' }
+        }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        try {
+          const absCase = root + '/wspace/' + caseInput
+          const raw = await javaBridge.loadCase(format, absCase)
+          const parsed = JSON.parse(raw)
+          if (parsed && parsed.ok) {
+            return { ok: true, format: parsed.format, input: caseInput, busCount: parsed.busCount, branchCount: parsed.branchCount }
+          }
+          return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge loadCase failed' }
+        } catch (e) {
+          return { ok: false, error: 'bridge loadCase failed: ' + (e && e.message ? e.message : String(e)) }
+        }
+      },
+
+      async summarizeResult(args) {
+        const scope = args && typeof args.scope === 'string' ? args.scope : 'Net'
+        const sortRule = args && typeof args.sortRule === 'string' ? args.sortRule : ''
+        const numRec = args && typeof args.numRec === 'number' && args.numRec > 0 ? Math.floor(args.numRec) : 10
+        if (javaBridge === undefined || typeof javaBridge.summarize !== 'function') {
+          return { ok: false, error: 'in-process bridge unavailable (install the persistent InterPSS plugin)' }
+        }
+        try {
+          const raw = await javaBridge.summarize(scope, sortRule, numRec)
+          const parsed = JSON.parse(raw)
+          if (parsed && parsed.ok) {
+            return { ok: true, scope: parsed.scope || scope, text: parsed.text || '' }
+          }
+          return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge summarize failed' }
+        } catch (e) {
+          return { ok: false, error: 'bridge summarize failed: ' + (e && e.message ? e.message : String(e)) }
         }
       },
 
