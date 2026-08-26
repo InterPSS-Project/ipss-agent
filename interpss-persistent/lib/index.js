@@ -685,12 +685,13 @@ class InterpssService extends TypertRemoteService {
 }
 
 export default {
-  // Wait for the `typert` registry before applying: loader entries activate in
-  // parallel, and without this dependency `ctx.get('typert')` can still be
-  // `undefined` here, silently skipping the Remote registration.
-  inject: ['typert'],
-
+  // Apply immediately so `interpss` and `javaBridge` are provided without
+  // waiting on the `typert` registry. The Remote registration below is
+  // best-effort: it only feeds the persistent client's own /api surface, which
+  // the dynamic per-session plugin does not use.
   apply(ctx) {
+    console.error('[dsh-interpss] apply reached')
+    try {
     // Provide the `interpss` service (and its Typert binding) by instantiating
     // the Service. Its registration is owned by this fiber, so it unwinds with
     // the plugin.
@@ -742,6 +743,10 @@ export default {
         invocations: DESCRIPTORS,
       })
       ctx.effect(() => dispose)
+    }
+    } catch (e) {
+      console.error('[dsh-interpss] apply failed:', e && e.stack ? e.stack : e)
+      throw e
     }
   },
 }
