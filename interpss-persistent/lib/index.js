@@ -115,7 +115,11 @@ let bridgePromise = null
 async function ensureBridge(root) {
   if (bridgePromise === null) {
     bridgePromise = (async () => {
-      const jb = await import('java-bridge')
+      const mod = await import('java-bridge')
+      // java-bridge v2.6 exports the helpers as top-level named exports; v2.7+
+      // moved them onto the module's default namespace. Pick whichever surface
+      // actually carries `appendClasspath` so either installed version works.
+      const jb = (mod.default && typeof mod.default.appendClasspath === 'function') ? mod.default : mod
       // Classpath must be set before the JVM starts.
       jb.appendClasspath([root + '/target/ipss-agent-cmd-1.0.0-uber.jar'])
       await jb.ensureJvm({ opts: ['-Xmx4g'] })
