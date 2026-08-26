@@ -576,6 +576,10 @@ return {
       const [reportName, setReportName] = React.useState(null)
       const [reportView, setReportView] = React.useState('rendered')
       const [reportAvailable, setReportAvailable] = React.useState(false)
+      const [caseLoaded, setCaseLoaded] = React.useState(false)
+      const [caseLoading, setCaseLoading] = React.useState(false)
+      const [caseLoadError, setCaseLoadError] = React.useState(null)
+      const [caseLoadedInfo, setCaseLoadedInfo] = React.useState(null)
 
       const isCustom = mode === 'custom'
 
@@ -605,6 +609,9 @@ return {
       function onCaseChanged(input) {
         const seq = ++checkSeq
         clearResults()
+        setCaseLoaded(false)
+        setCaseLoadError(null)
+        setCaseLoadedInfo(null)
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
           (res) => {
@@ -639,6 +646,29 @@ return {
         const p = PRESETS[Number(mode)]
         if (p === undefined) return null
         return { format: p.format, input: p.input, displayName: p.label }
+      }
+
+      function load() {
+        const c = resolveCase()
+        if (c === null || c.input === '') return
+        setCaseLoading(true)
+        setCaseLoaded(false)
+        setCaseLoadError(null)
+        setCaseLoadedInfo(null)
+        callRemote('loadCase', { format: c.format, input: c.input, sessionId }).then(
+          (res) => {
+            setCaseLoading(false)
+            if (res && res.ok) {
+              setCaseLoaded(true)
+              setCaseLoadError(null)
+              setCaseLoadedInfo((res.busCount != null ? res.busCount : '?') + ' buses, ' + (res.branchCount != null ? res.branchCount : '?') + ' branches')
+            } else {
+              setCaseLoaded(false)
+              setCaseLoadError(res && res.error ? res.error : 'failed to load case')
+            }
+          },
+          (err) => { setCaseLoading(false); setCaseLoaded(false); setCaseLoadError(String(err && err.message ? err.message : err)) },
+        )
       }
 
       function run() {
@@ -886,6 +916,7 @@ return {
       const controls = [
         React.createElement('span', { key: 'case-label', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, 'Simu Case:'),
         React.createElement('select', { key: 'case', value: mode, onChange: (e) => { const m = e.target.value; lastSelection.mode = m; setMode(m); onCaseChanged(m === 'custom' ? customInput.trim() : (PRESETS[Number(m)] ? PRESETS[Number(m)].input : '')) }, style: selectStyle }, options),
+        React.createElement('button', { key: 'load', onClick: load, disabled: caseLoading, title: 'Load the selected case into the simulation model', style: { ...btn, marginLeft: '8px', opacity: caseLoading ? 0.6 : 1 } }, caseLoading ? 'Loading…' : 'Load'),
       ]
       if (isCustom) {
         controls.push(
@@ -912,15 +943,18 @@ return {
       }
       controls.push(
         React.createElement('div', { key: 'run-group', style: { display: 'flex', alignItems: 'center', marginLeft: '8px' } },
-          React.createElement('button', { onClick: run, disabled: running, style: { ...btn, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none', opacity: running ? 0.6 : 1 } }, running ? 'Running…' : 'ACLF'),
+          React.createElement('button', { onClick: run, disabled: running || !caseLoaded, style: { ...btn, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none', opacity: (running || !caseLoaded) ? 0.6 : 1 } }, running ? 'Running…' : 'ACLF'),
           React.createElement('button', {
             onClick: openOptions,
+            disabled: !caseLoaded,
             title: 'AC Loadflow options',
             'aria-label': 'AC Loadflow options',
-            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '7px 10px' },
+            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '7px 10px', opacity: !caseLoaded ? 0.6 : 1 },
           }, gearIcon),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
         ),
+        caseLoaded ? React.createElement('span', { key: 'caseloaded', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Loaded: ' + (caseLoadedInfo || '')) : null,
+        caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
         optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Options saved') : null,
       )
 
