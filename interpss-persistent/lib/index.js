@@ -701,14 +701,28 @@ export default {
     // `ctx.get('javaBridge')`.
     const sp = ctx.get('sandboxPolicy')
     const bridgeRoot = sp && typeof sp.workspaceRoot === 'string' ? sp.workspaceRoot : ''
+
+    // The uber JAR lives at <workspace>/target/ipss-agent-cmd-1.0.0-uber.jar,
+    // but `sandboxPolicy.workspaceRoot` falls back to the DSH process cwd (not
+    // the session workspace). The caller passes absolute case paths rooted at
+    // the real workspace, so derive the root from them; fall back to the
+    // policy root only when a case path is unavailable (e.g. summarize).
+    function rootFor(absCase) {
+      if (typeof absCase === 'string') {
+        const i = absCase.indexOf('/wspace/')
+        if (i >= 0) return absCase.slice(0, i)
+      }
+      return bridgeRoot
+    }
+
     if (bridgeRoot !== '') {
       ctx.provide('javaBridge', {
         async loadCase(format, absCase) {
-          const bridge = await ensureBridge(bridgeRoot)
+          const bridge = await ensureBridge(rootFor(absCase))
           return bridge.loadCase(format, absCase)
         },
         async runAclf(format, absCase, absCfg, absResults, stem) {
-          const bridge = await ensureBridge(bridgeRoot)
+          const bridge = await ensureBridge(rootFor(absCase))
           return bridge.runAclf(format, absCase, absCfg, absResults, stem)
         },
         async summarize(scope, sortRule, numRec) {
