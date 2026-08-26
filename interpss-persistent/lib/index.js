@@ -413,14 +413,14 @@ class InterpssService extends TypertRemoteService {
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
     if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
 
-    const python = root + '/.venv/bin/python'
     const wspace = root + '/wspace'
     const slash = caseInput.lastIndexOf('/')
     const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
     const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
     const infoRel = parent + '/result/' + stem + '_network_info.txt'
 
-    const command = python + ' ../src/ipss_cmd.py aclf ' + format + ' ' + caseInput
+    const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
+    const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd aclf ' + format + ' ' + caseInput
     const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
 
     let res

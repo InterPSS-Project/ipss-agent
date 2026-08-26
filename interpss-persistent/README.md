@@ -46,8 +46,8 @@ The tab activates only inside an **iPSS Agent** workspace (see *Activation
 gate* below). That workspace must contain the runtime the Host half shells out
 to:
 
-- `.venv/bin/python` (a Python virtualenv with InterPSS bindings)
-- `src/ipss_cmd.py` and `src/report/generate_nerc_tpl_report.py`
+- Java 17+ on `PATH`, plus the built CLI: `target/classes`, `lib/ipss_runnable.jar`, and `lib/deps/*` (the host runs `org.interpss.agent.IpssCmd aclf`)
+- `.venv/bin/python` and `src/report/generate_nerc_tpl_report.py` (NERC report generation)
 - `wspace/data/**` case files
 - `config/aclf_run.json`
 
