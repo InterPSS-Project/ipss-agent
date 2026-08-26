@@ -77,10 +77,10 @@ Find the top N-1 loaded branches
 ## Reference
 
 
-| Topic                            | Document                     |
-| -------------------------------- | ---------------------------- |
-| Layout, JARs, `config.json`, JVM | [Setup.md](Setup.md)         |
-| `src/ipss_cmd.py` usage          | [IpssCmd.md](IpssCmd.md)     |
-| Report generator                 | [GenReport.md](GenReport.md) |
+| Topic                       | Document                 |
+| --------------------------- | ------------------------ |
+| Layout, build, JARs         | [Setup.md](Setup.md)     |
+| `IpssCmd` (Java CLI) usage  | [IpssCmd.md](IpssCmd.md) |
+| Report generator            | [GenReport.md](GenReport.md) |
 
 
