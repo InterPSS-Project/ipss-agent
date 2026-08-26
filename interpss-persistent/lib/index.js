@@ -11,14 +11,15 @@
 // "iPSS Agent".
 
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { writeFileSync } from 'node:fs'
+import { writeFileSync, appendFileSync } from 'node:fs'
 
 // Diagnostic sink inside the session workspace so the agent can read, after a
 // restart, whether this plugin's apply() ran and what it did — without access
-// to the dsh web process stderr.
+// to the dsh web process stderr. Cleared on module load, then appended.
 const DIAG = '/Users/mzhou/Documents/wspace/gitRepo/ipss-agent/.dsh-interpss-diagnostic.log'
+try { writeFileSync(DIAG, '', 'utf8') } catch {}
 function diag(line) {
-  try { writeFileSync(DIAG, line + '\n', 'utf8') } catch {}
+  try { appendFileSync(DIAG, line + '\n', 'utf8') } catch {}
 }
 
 const NAMESPACE = 'interpss'
@@ -709,42 +710,32 @@ export default {
 
     // Publish the in-process `javaBridge` service (lazy JVM bootstrap). Other
     // host rows — e.g. the dynamic per-session plugin — consume it via
-    // `ctx.get('javaBridge')`.
-    const sp = ctx.get('sandboxPolicy')
-    const bridgeRoot = sp && typeof sp.workspaceRoot === 'string' ? sp.workspaceRoot : ''
-
-    // The uber JAR lives at <workspace>/target/ipss-agent-cmd-1.0.0-uber.jar,
-    // but `sandboxPolicy.workspaceRoot` falls back to the DSH process cwd (not
-    // the session workspace). The caller passes absolute case paths rooted at
-    // the real workspace, so derive the root from them; fall back to the
-    // policy root only when a case path is unavailable (e.g. summarize).
+    // `ctx.get('javaBridge')`. Provided unconditionally: the uber-JAR root is
+    // derived from the case path (rootFor), never from sandboxPolicy, which
+    // may not be available when this row applies early.
     function rootFor(absCase) {
       if (typeof absCase === 'string') {
         const i = absCase.indexOf('/wspace/')
         if (i >= 0) return absCase.slice(0, i)
       }
-      return bridgeRoot
+      return ''
     }
 
-    if (bridgeRoot !== '') {
-      ctx.provide('javaBridge', {
-        async loadCase(format, absCase) {
-          const bridge = await ensureBridge(rootFor(absCase))
-          return bridge.loadCase(format, absCase)
-        },
-        async runAclf(format, absCase, absCfg, absResults, stem) {
-          const bridge = await ensureBridge(rootFor(absCase))
-          return bridge.runAclf(format, absCase, absCfg, absResults, stem)
-        },
-        async summarize(scope, sortRule, numRec) {
-          const bridge = await ensureBridge(bridgeRoot)
-          return bridge.summarize(scope, sortRule, numRec)
-        },
-      })
-      diag('javaBridge provided; bridgeRoot=' + bridgeRoot)
-    } else {
-      diag('javaBridge SKIPPED; bridgeRoot empty')
-    }
+    ctx.provide('javaBridge', {
+      async loadCase(format, absCase) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        return bridge.loadCase(format, absCase)
+      },
+      async runAclf(format, absCase, absCfg, absResults, stem) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        return bridge.runAclf(format, absCase, absCfg, absResults, stem)
+      },
+      async summarize(scope, sortRule, numRec) {
+        const bridge = await ensureBridge(rootFor(''))
+        return bridge.summarize(scope, sortRule, numRec)
+      },
+    })
+    diag('javaBridge provided unconditionally')
 
     const typert = ctx.get('typert')
     if (typert !== undefined) {
