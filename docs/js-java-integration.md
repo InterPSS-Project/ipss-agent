@@ -99,14 +99,22 @@ All return values are **JSON strings** (or plain text for `networkInfo`) so `jav
 
 ## Node bootstrap (once per Host process)
 
+The bootstrap runs in the **persistent** plugin (a full-Node ESM host row), which
+is the only half that can `require('java-bridge')` — the dynamic plugin's Host
+sandbox disables `require`/`process`. The persistent plugin publishes the bridge
+as the `javaBridge` Cordis service (`ctx.provide`); the dynamic plugin consumes it
+via `ctx.get('javaBridge')`.
+
+One-time enablement (build the Uber JAR, re-pack the plugin with its `java-bridge`
+dependency, install into the DSH profile, restart) is scripted:
+[`scripts/setup-java-bridge.sh`](../scripts/setup-java-bridge.sh).
+
 ```js
 const { ensureJvm, appendClasspath, importClass } = require('java-bridge')
 
 await ensureJvm({ opts: ['-Xmx4g'] /* , isPackagedElectron: true if needed */ })
 appendClasspath([
-  root + '/target/classes',
-  root + '/lib/ipss_runnable.jar',
-  // …or Uber JAR; expand lib/deps/*.jar as needed
+  root + '/target/ipss-agent-cmd-1.0.0-uber.jar',
 ])
 const Bridge = await importClass('org.interpss.agent.bridge.IpssAgentBridge')
 const bridge = await Bridge.newInstanceAsync() // or static getInstance()
