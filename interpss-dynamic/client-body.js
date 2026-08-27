@@ -937,7 +937,7 @@ return {
           React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
           React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
         ),
-        React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', flex: '1 1 260px', minWidth: 0 } },
+        React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', width: '380px', maxWidth: '100%' } },
           React.createElement('input', {
             type: 'text',
             value: customInput,
