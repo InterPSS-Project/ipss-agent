@@ -121,6 +121,9 @@ async function scanCases(fs, dirTarget, relDir, out) {
 // `java-bridge` is loaded with a dynamic import so the plugin still loads (and
 // runAclf falls back to shell-out) when the native module is not installed.
 let bridgePromise = null
+// java-bridge default namespace (carries stdout.enableRedirect in v2.7+),
+// captured during JVM bootstrap so runAclf can intercept JVM stdout/stderr.
+let jbApi = null
 
 async function ensureBridge(root) {
   if (bridgePromise === null) {
@@ -130,6 +133,7 @@ async function ensureBridge(root) {
       // moved them onto the module's default namespace. Pick whichever surface
       // actually carries `appendClasspath` so either installed version works.
       const jb = (mod.default && typeof mod.default.appendClasspath === 'function') ? mod.default : mod
+      jbApi = jb
       // Classpath must be set before the JVM starts.
       jb.appendClasspath([root + '/target/ipss-agent-cmd-1.0.0-uber.jar'])
       await jb.ensureJvm({ opts: ['-Xmx4g'] })
@@ -141,6 +145,34 @@ async function ensureBridge(root) {
     })
   }
   return bridgePromise
+}
+
+// Capture the embedded JVM's stdout/stderr into buffers for the duration of a
+// bridge call. When java-bridge exposes `stdout.enableRedirect`, the JVM's
+// native stdout/stderr are intercepted at the boundary (so log4j2 Console,
+// slf4j-simple, and direct System.out/err all land here) instead of spilling
+// into the dsh web terminal. Returns a tiny {out, err, stop} handle; callers
+// MUST stop() even on failure.
+function captureStdio() {
+  const chunksOut = []
+  const chunksErr = []
+  if (jbApi !== null && jbApi.stdout !== undefined && typeof jbApi.stdout.enableRedirect === 'function') {
+    let guard = null
+    try {
+      guard = jbApi.stdout.enableRedirect(
+        (err, data) => { if (!err && typeof data === 'string') chunksOut.push(data) },
+        (err, data) => { if (!err && typeof data === 'string') chunksErr.push(data) },
+      )
+    } catch (e) {
+      guard = null
+    }
+    return {
+      out: () => chunksOut.join(''),
+      err: () => chunksErr.join(''),
+      stop: () => { if (guard !== null) { try { guard.reset() } catch (e) {} } },
+    }
+  }
+  return { out: () => '', err: () => '', stop: () => {} }
 }
 
 class InterpssService extends TypertRemoteService {
@@ -732,7 +764,24 @@ export default {
       },
       async runAclf(format, absCase, absCfg, absResults, stem) {
         const bridge = await ensureBridge(rootFor(absCase))
-        return bridge.runAclf(format, absCase, absCfg, absResults, stem)
+        const cap = captureStdio()
+        let raw
+        try {
+          raw = await bridge.runAclf(format, absCase, absCfg, absResults, stem)
+        } finally {
+          cap.stop()
+        }
+        // Attach the intercepted stdout/stderr so the GUI "Show log info"
+        // panel can render them instead of the dsh terminal.
+        try {
+          const parsed = JSON.parse(raw)
+          if (parsed && typeof parsed === 'object') {
+            parsed.stdout = cap.out()
+            parsed.stderr = cap.err()
+            raw = JSON.stringify(parsed)
+          }
+        } catch (e) {}
+        return raw
       },
       async summarize(scope, sortRule, numRec) {
         const bridge = await ensureBridge(rootFor(''))

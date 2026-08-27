@@ -27,3 +27,5 @@ target/**/*
 src/assembly/uber.xml
 build/interpss-profile-patch.yml
 build/interpss-profile-patch-removed.yml
+
+/.npm-cache-local/
