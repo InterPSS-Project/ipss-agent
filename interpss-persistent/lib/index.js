@@ -787,6 +787,10 @@ export default {
         const bridge = await ensureBridge(rootFor(''))
         return bridge.summarize(scope, sortRule, numRec)
       },
+      async networkInfo() {
+        const bridge = await ensureBridge(rootFor(''))
+        return bridge.getNetworkInfo()
+      },
     })
     diag('javaBridge provided unconditionally')
 

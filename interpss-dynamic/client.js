@@ -585,6 +585,7 @@ return {
       const [caseLoading, setCaseLoading] = React.useState(false)
       const [caseLoadError, setCaseLoadError] = React.useState(null)
       const [caseLoadedInfo, setCaseLoadedInfo] = React.useState(null)
+      const [caseNetworkInfo, setCaseNetworkInfo] = React.useState(null)
 
       const isCustom = mode === 'custom'
 
@@ -617,6 +618,7 @@ return {
         setCaseLoaded(false)
         setCaseLoadError(null)
         setCaseLoadedInfo(null)
+        setCaseNetworkInfo(null)
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
           (res) => {
@@ -625,7 +627,7 @@ return {
               setResult({
                 ok: true,
                 loaded: true,
-                networkInfo: res.networkInfo,
+                networkInfo: null,
                 input: input,
                 resultDir: res.resultDir,
                 files: res.files,
@@ -660,6 +662,7 @@ return {
         setCaseLoaded(false)
         setCaseLoadError(null)
         setCaseLoadedInfo(null)
+        setCaseNetworkInfo(null)
         callRemote('loadCase', { format: c.format, input: c.input, sessionId }).then(
           (res) => {
             setCaseLoading(false)
@@ -667,6 +670,10 @@ return {
               setCaseLoaded(true)
               setCaseLoadError(null)
               setCaseLoadedInfo((res.busCount != null ? res.busCount : '?') + ' buses, ' + (res.branchCount != null ? res.branchCount : '?') + ' branches')
+              callRemote('getNetworkInfo', { sessionId }).then(
+                (r2) => { if (r2 && r2.ok && r2.networkInfo) setCaseNetworkInfo(r2.networkInfo) },
+                () => {},
+              )
             } else {
               setCaseLoaded(false)
               setCaseLoadError(res && res.error ? res.error : 'failed to load case')
@@ -686,6 +693,7 @@ return {
             setRunning(false)
             setResult(res)
             if (res && res.ok && res.exitCode === 0) {
+              if (res.networkInfo) setCaseNetworkInfo(res.networkInfo)
               callRemote('checkResultFiles', { input: c.input, sessionId }).then(
                 (r2) => { setReportAvailable(!!(r2 && r2.ok && r2.available)) },
                 () => {},
@@ -993,7 +1001,6 @@ return {
         if (result.ok) {
           body = React.createElement('div', null,
             React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Load flow converged'),
-            result.networkInfo ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '340px' } }, result.networkInfo) : null,
             React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Results written to: ' + result.resultDir),
             React.createElement('div', { style: { marginTop: '4px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Files: ' + (result.files ? result.files.join(', ') : '')),
             React.createElement('div', { style: { marginTop: '12px' } },
@@ -1326,6 +1333,11 @@ return {
         },
       }, diagramTip.text) : null
 
+      const networkInfoPanel = caseNetworkInfo ? React.createElement('div', { style: { marginTop: '16px' } },
+        React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: '6px' } }, 'Network info'),
+        React.createElement('pre', { style: { ...mono, ...panel, marginTop: 0, maxHeight: '340px' } }, caseNetworkInfo),
+      ) : null
+
       return React.createElement('div', { style: { padding: '20px', maxWidth: '860px' } },
         React.createElement('h2', { style: { margin: '0 0 4px' } }, 'InterPSS'),
         React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--dsw-alias-label-secondary)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
@@ -1334,6 +1346,7 @@ return {
           React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, actionRow),
         ),
         picker,
+        networkInfoPanel,
         body,
         connModal,
         ctxMenuEl,

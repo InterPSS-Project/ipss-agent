@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'loadCase', 'summarizeResult']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -547,6 +547,18 @@ return {
           return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge summarize failed' }
         } catch (e) {
           return { ok: false, error: 'bridge summarize failed: ' + (e && e.message ? e.message : String(e)) }
+        }
+      },
+
+      async getNetworkInfo(args) {
+        if (javaBridge === undefined || typeof javaBridge.networkInfo !== 'function') {
+          return { ok: false, error: 'in-process bridge unavailable (install the persistent InterPSS plugin)' }
+        }
+        try {
+          const text = await javaBridge.networkInfo()
+          return { ok: true, networkInfo: typeof text === 'string' ? text : '' }
+        } catch (e) {
+          return { ok: false, error: 'bridge getNetworkInfo failed: ' + (e && e.message ? e.message : String(e)) }
         }
       },
 
