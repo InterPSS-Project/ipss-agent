@@ -115,12 +115,17 @@ return {
       overflowY: 'auto',
     }
     const btn = {
-      padding: '7px 14px',
+      padding: '0 14px',
       borderRadius: '6px',
       border: '1px solid var(--dsw-alias-border-l1)',
       background: 'var(--dsw-alias-bg-layer-1)',
       color: 'var(--dsw-alias-label-primary)',
       cursor: 'pointer',
+      height: '34px',
+      boxSizing: 'border-box',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
     }
     const searchIcon = React.createElement('svg',
       { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
@@ -912,14 +917,14 @@ return {
       )
       options.push(React.createElement('option', { key: 'custom', value: 'custom' }, 'Select…'))
 
-      const selectStyle = { padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)' }
-      const controls = [
+      const selectStyle = { padding: '0 10px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', height: '34px', boxSizing: 'border-box', minWidth: '150px' }
+      const caseRow = [
         React.createElement('span', { key: 'case-label', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, 'Simu Case:'),
         React.createElement('select', { key: 'case', value: mode, onChange: (e) => { const m = e.target.value; lastSelection.mode = m; setMode(m); onCaseChanged(m === 'custom' ? customInput.trim() : (PRESETS[Number(m)] ? PRESETS[Number(m)].input : '')) }, style: selectStyle }, options),
         React.createElement('button', { key: 'load', onClick: load, disabled: caseLoading, title: 'Load the selected case into the simulation model', style: { ...btn, marginLeft: '8px', opacity: caseLoading ? 0.6 : 1 } }, caseLoading ? 'Loading…' : 'Load'),
       ]
       if (isCustom) {
-        controls.push(
+        caseRow.push(
           React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: { ...selectStyle, marginLeft: '8px' } },
             React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
             React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
@@ -941,8 +946,8 @@ return {
           ),
         )
       }
-      controls.push(
-        React.createElement('div', { key: 'run-group', style: { display: 'flex', alignItems: 'center', marginLeft: '8px' } },
+      const actionRow = [
+        React.createElement('div', { key: 'run-group', style: { display: 'flex', alignItems: 'center' } },
           React.createElement('button', { onClick: run, disabled: running || !caseLoaded, style: { ...btn, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none', opacity: (running || !caseLoaded) ? 0.6 : 1 } }, running ? 'Running…' : 'ACLF'),
           React.createElement('button', {
             onClick: openOptions,
@@ -956,7 +961,7 @@ return {
         caseLoaded ? React.createElement('span', { key: 'caseloaded', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Loaded: ' + (caseLoadedInfo || '')) : null,
         caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
         optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Options saved') : null,
-      )
+      ]
 
       let picker = null
       if (pickerOpen) {
@@ -1324,7 +1329,10 @@ return {
       return React.createElement('div', { style: { padding: '20px', maxWidth: '860px' } },
         React.createElement('h2', { style: { margin: '0 0 4px' } }, 'InterPSS'),
         React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--dsw-alias-label-secondary)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
-        React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, controls),
+        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' } },
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, caseRow),
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, actionRow),
+        ),
         picker,
         body,
         connModal,
