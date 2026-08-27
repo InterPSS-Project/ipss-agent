@@ -715,7 +715,11 @@ export default {
     // may not be available when this row applies early.
     function rootFor(absCase) {
       if (typeof absCase === 'string') {
-        const i = absCase.indexOf('/wspace/')
+        // The case path is always <workspace>/wspace/data/…, but the DSH home
+        // itself may live under a directory also named "wspace" (e.g.
+        // ~/Documents/wspace/…), so anchor on the unique "/wspace/data/" marker
+        // instead of the first "/wspace/".
+        const i = absCase.indexOf('/wspace/data/')
         if (i >= 0) return absCase.slice(0, i)
       }
       return ''
