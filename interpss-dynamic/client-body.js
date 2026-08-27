@@ -932,29 +932,27 @@ return {
         React.createElement('button', { key: 'load', onClick: load, disabled: caseLoading, title: 'Load the selected case into the simulation model', style: { ...btn, marginLeft: '8px', opacity: caseLoading ? 0.6 : 1 } }, caseLoading ? 'Loading…' : 'Load'),
         caseLoaded ? React.createElement('span', { key: 'caseloaded', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Loaded: ' + (caseLoadedInfo || '')) : null,
       ]
-      if (isCustom) {
-        caseRow.push(
-          React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: { ...selectStyle, marginLeft: '8px' } },
-            React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
-            React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
-          ),
-          React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', marginLeft: '8px', flex: '1 1 260px', minWidth: 0 } },
-            React.createElement('input', {
-              type: 'text',
-              value: customInput,
-              placeholder: 'data/ieee/Ieee118Bus/ieee118.ieee',
-              onChange: (e) => { const v = e.target.value; lastSelection.customInput = v; setCustomInput(v); onCaseChanged(v.trim()) },
-              style: { ...selectStyle, flex: '1 1 auto', minWidth: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' },
-            }),
-            React.createElement('button', {
-              onClick: openPicker,
-              title: pickerOpen ? 'Close case picker' : 'Pick a case file',
-              'aria-label': pickerOpen ? 'Close case picker' : 'Pick a case file',
-              style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '34px', padding: 0 },
-            }, searchIcon),
-          ),
-        )
-      }
+      const caseInputRow = isCustom ? [
+        React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: selectStyle },
+          React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
+          React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
+        ),
+        React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', flex: '1 1 260px', minWidth: 0 } },
+          React.createElement('input', {
+            type: 'text',
+            value: customInput,
+            placeholder: 'data/ieee/Ieee118Bus/ieee118.ieee',
+            onChange: (e) => { const v = e.target.value; lastSelection.customInput = v; setCustomInput(v); onCaseChanged(v.trim()) },
+            style: { ...selectStyle, flex: '1 1 auto', minWidth: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' },
+          }),
+          React.createElement('button', {
+            onClick: openPicker,
+            title: pickerOpen ? 'Close case picker' : 'Pick a case file',
+            'aria-label': pickerOpen ? 'Close case picker' : 'Pick a case file',
+            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '34px', padding: 0 },
+          }, searchIcon),
+        ),
+      ] : null
       const actionRow = [
         React.createElement('div', { key: 'run-group', style: { display: 'flex', alignItems: 'center' } },
           React.createElement('button', { onClick: run, disabled: running || !caseLoaded, style: { ...btn, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none', opacity: (running || !caseLoaded) ? 0.6 : 1 } }, running ? 'Running…' : 'ACLF'),
@@ -1343,6 +1341,7 @@ return {
         React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--dsw-alias-label-secondary)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
         React.createElement('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' } },
           React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, caseRow),
+          caseInputRow ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', width: '100%' } }, caseInputRow) : null,
           React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, actionRow),
         ),
         picker,
