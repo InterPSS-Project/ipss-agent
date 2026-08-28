@@ -30,7 +30,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf ieee data/ieee/Ieee118Bus
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar report aclf "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
 
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
-java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar report aclf "Texas 2000-Bus System" data/psse/Texas2K/result
+java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar report aclf "Texas 2K-Bus System" data/psse/Texas2K/result
 ```
 
 **Optional `csv_prefix`:** When several cases share one `result/` directory, pass the CSV stem explicitly (e.g. `ieee14` for `ieee14_DF_bus.csv`). If omitted, the first `*_DF_bus.csv` in lexicographic order is used.

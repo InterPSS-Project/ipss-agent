@@ -16,8 +16,10 @@ profile's `cordis.patch.yml`, so the InterPSS tab survives restarts.
 
 - DeepSeek Harness installed (`dsh` on `PATH`, `pnpm` on `PATH` for Method 1).
 - An **iPSS Agent** workspace (the InterPSS tab activates only when the
-  workspace `README.md`'s first `# H1` is exactly `iPSS Agent`), including its
-  `.venv`, `src/`, `wspace/data/**`, and `config/`.
+  workspace `README.md`'s first `# H1` is exactly `iPSS Agent`), including:
+  - **Java JDK 21** on `PATH`
+  - Built CLI: `target/ipss-agent-cmd-1.0.0-uber.jar` (run `./mvnw -q clean package` from the project root; see [Setup.md](Setup.md))
+  - `src/`, `wspace/data/**`, and `config/` (including `config/aclf_run.json`)
 
 ## Method 1 — `dsh plugin` (automatic, recommended)
 

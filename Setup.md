@@ -13,26 +13,32 @@ bridge and no JVM-path configuration.
 **Project layout** — the runtime is spread across a parent directory where
 `wspace/` is the working directory for data and results, while `src/`, `lib/`,
 and `config/` are shared infrastructure at the parent level. The tree below uses
-`temp/` as a placeholder for that **project root** (in this repo, the
-`ipss.agent/` directory).
+`ipss-agent/` as the **project root** (this repository).
 
 ```
-temp/
+ipss-agent/
 ├── .agents/
 │   └── skills/
-│       └── ipss-sim/          # OpenAI Codex Desktop project skill
+│       ├── ipss-sim/              # OpenAI Codex Desktop — simulation skill
+│       ├── nerc-report-html/      # Interactive HTML dashboard skill
+│       └── nerc-report-slides/    # NERC TPL slide-deck skill
 ├── .claude/
 │   ├── commands/
-│   │   └── ipss-sim.md        # Claude Code slash-command entry point
+│   │   ├── ipss-sim.md            # Claude Code slash-command entry point
+│   │   ├── nerc-report-html.md
+│   │   └── nerc-report-slides.md
 │   └── skills/
-│       └── ipss-sim/          # Claude Code skill copy
-├── pom.xml                    # Maven build for the Java CLI (Uber JAR)
+│       └── ipss-sim/              # Claude Code skill copy (synced from .agents)
+├── interpss-persistent/           # DeepSeek Harness DSH plugin package
+├── scripts/
+│   └── sync_ipss_skills.sh        # Copy canonical ipss-sim skill to .claude/
+├── pom.xml                        # Maven build for the Java CLI (Uber JAR)
 ├── config/
-│   ├── aclf_run.json          # ACLF NR / limit-control settings (used by IpssCmd)
-│   └── gen_report.json        # Report band thresholds (used by org.interpss.agent.report)
+│   ├── aclf_run.json              # ACLF NR / limit-control settings (used by IpssCmd)
+│   └── gen_report.json            # Report band thresholds (used by org.interpss.agent.report)
 ├── lib/
-│   ├── ipss_runnable.jar      # Main InterPSS runnable JAR
-│   └── deps/                  # Third-party JARs
+│   ├── ipss_runnable.jar          # Main InterPSS runnable JAR
+│   └── deps/                      # Third-party JARs
 │       ├── ipss.core.lib-1.0.16.jar
 │       ├── ieee.odm.schema-1.0.1.jar
 │       ├── ieee.odm_pss-1.0.1.jar
@@ -57,6 +63,7 @@ temp/
 │   │   └── util/ (IpssNetworkInfo, ProjectPaths)
 ├── target/
 │   └── ipss-agent-cmd-1.0.0-uber.jar   # Built by `./mvnw clean package`
+├── InstallDSHPlugin.md            # DeepSeek Harness plugin install guide
 └── wspace/                             # <-- working directory
     ├── data/
     │   └── ieee/
@@ -322,8 +329,21 @@ or directory mode:
 ### Version-Control Notes
 
 - `.agents/skills/ipss-sim/**`, `.claude/skills/ipss-sim/**`, and `.claude/commands/ipss-sim.md` should be committed.
-- `.venv/`, `target/`, generated `lib/deps/*.jar`, `.mvn/wrapper/dists/`, and `wspace/**/result/` are local setup or output artifacts and should remain uncommitted.
+- `.agents/skills/nerc-report-html/**`, `.agents/skills/nerc-report-slides/**`, and `.claude/commands/nerc-report-*.md` should be committed.
+- `target/`, generated `lib/deps/*.jar`, `.mvn/wrapper/dists/`, and `wspace/**/result/` are local build or output artifacts and should remain uncommitted.
 - If the skill instructions change, edit `.agents/skills/ipss-sim/SKILL.md` (canonical), then run `./scripts/sync_ipss_skills.sh` from the project root to copy it to `.claude/skills/ipss-sim/SKILL.md`. Set `SYNC_CODEX=1` to also refresh `~/.codex/skills/ipss-sim/SKILL.md` when that directory exists.
+
+### DeepSeek Harness (DSH Plugin)
+
+For the browser **InterPSS** tab in DeepSeek Harness, build the CLI (Step 1) and
+follow [InstallDSHPlugin.md](InstallDSHPlugin.md). The plugin package lives in
+`interpss-persistent/`; activation requires this workspace's `README.md` H1 to be
+exactly `# iPSS Agent`.
+
+Follow-on report artifacts use the Codex skills `$nerc-report-html` and
+`$nerc-report-slides` (canonical files under `.agents/skills/`). Claude Code
+slash commands `/nerc-report-html` and `/nerc-report-slides` point at the same
+skills.
 
 ### Quick Verification
 
@@ -332,7 +352,7 @@ From the project root, these commands should show the registered skill files:
 macOS / Linux:
 
 ```bash
-find .agents/skills/ipss-sim .claude/skills/ipss-sim .claude/commands -maxdepth 3 -type f | sort
+find .agents/skills/ipss-sim .claude/skills/ipss-sim .claude/commands -maxdepth 2 -type f | sort
 ```
 
 Windows PowerShell:
@@ -348,5 +368,7 @@ Expected entries include:
 .agents/skills/ipss-sim/SKILL.md
 .agents/skills/ipss-sim/agents/openai.yaml
 .claude/commands/ipss-sim.md
+.claude/commands/nerc-report-html.md
+.claude/commands/nerc-report-slides.md
 .claude/skills/ipss-sim/SKILL.md
 ```

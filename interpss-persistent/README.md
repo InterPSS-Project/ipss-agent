@@ -43,13 +43,16 @@ parameters and results, no build-time Typert compiler required.
 ## Prerequisites
 
 The tab activates only inside an **iPSS Agent** workspace (see *Activation
-gate* below). That workspace must contain the runtime the Host half shells out
-to:
+gate* below). That workspace must contain the runtime the Host half calls:
 
-- Java 17+ on `PATH`, plus the built CLI: `target/classes`, `lib/ipss_runnable.jar`, and `lib/deps/*` (the host runs `org.interpss.agent.IpssCmd aclf`)
-- `target/ipss-agent-cmd-1.0.0-uber.jar` (simulation + Markdown report generation via `IpssAgentBridge.runReport`)
+- **Java JDK 21** on `PATH`
+- `target/ipss-agent-cmd-1.0.0-uber.jar` built from the project root (`./mvnw -q clean package`; see [Setup.md](../Setup.md))
 - `wspace/data/**` case files
 - `config/aclf_run.json`
+
+The Host prefers in-process calls via `java-bridge` and the uber JAR. If the
+bridge is unavailable, it falls back to shelling out with a classpath of
+`target/classes`, `lib/ipss_runnable.jar`, and `lib/deps/*`.
 
 ## Install
 
