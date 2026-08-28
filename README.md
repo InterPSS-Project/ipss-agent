@@ -1,6 +1,6 @@
 # iPSS Agent
 
-**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop**, **Claude Code CLI**, and **DeepSeek Harness** (build and CLI details in [Setup.md](Setup.md); DSH plugin in [InstallDSHPlugin.md](InstallDSHPlugin.md)). The canonical skill is [`.agents/skills/ipss-sim/SKILL.md`](.agents/skills/ipss-sim/SKILL.md); run `./scripts/sync_ipss_skills.sh` after edits to refresh `.claude/skills/ipss-sim/SKILL.md`.
+**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop**, **Claude Code CLI**, and **DeepSeek Harness** (build and CLI details in [Setup.md](Setup.md); DSH plugin in [InstallDSHPlugin.md](InstallDSHPlugin.md)). The canonical skill is `[.agents/skills/ipss-sim/SKILL.md](.agents/skills/ipss-sim/SKILL.md)`; run `./scripts/sync_ipss_skills.sh` after edits to refresh `.claude/skills/ipss-sim/SKILL.md`.
 
 It is also integrated into DeepSeek Harness as a DSH Plugin. You can run power system simulation in the traditional step-by-step way:
 
@@ -33,8 +33,11 @@ This produces `target/ipss-agent-cmd-1.0.0-uber.jar`. See [Setup.md](Setup.md) f
 Test the setup with a sample case directory:
 
 ```text
+init  # for the first time installation
 /ipss-sim data/ieee/Ieee118Bus/ "IEEE 118-Bus Test Case"
 ```
+
+
 
 #### DSH Plugin setup
 
@@ -43,6 +46,8 @@ See [InstallDSHPlugin.md](InstallDSHPlugin.md). Prompt DeepSeek Harness to insta
 ```text
 Install the InterPSS DSH plugin
 ```
+
+
 
 ## Run simulations and generate reports
 
@@ -89,6 +94,8 @@ Run ca psse <case_file> <contingency_file> <monitor_file>
 Generate NERC TPL report "<NERC Report Name>" for <result_dir>
 ```
 
+
+
 ## Explore simulation results
 
 Results are written under `wspace/<input_parent>/result/` (relative to the project root: the folder that contains your case file, plus a `result` subfolder). You can inspect them with the LLM, for example:
@@ -101,15 +108,20 @@ Find the highest loading branch
 Find the top N-1 loaded branches
 ```
 
+
+
 ## Reference
 
-| Topic | Document |
-| --- | --- |
-| **Architecture** | [docs/architecture.md](docs/architecture.md) |
-| Layout, build, JARs, agent skills | [Setup.md](Setup.md) |
-| `IpssCmd` (Java CLI) usage | [IpssCmd.md](IpssCmd.md) |
-| Markdown report generator | [GenReport.md](GenReport.md) |
-| DeepSeek Harness DSH plugin | [InstallDSHPlugin.md](InstallDSHPlugin.md) |
-| DSH plugin package | [interpss-persistent/README.md](interpss-persistent/README.md) |
-| Interactive HTML dashboards | [`.agents/skills/nerc-report-html/SKILL.md`](.agents/skills/nerc-report-html/SKILL.md) |
-| NERC slide decks | [`.agents/skills/nerc-report-slides/SKILL.md`](.agents/skills/nerc-report-slides/SKILL.md) |
+
+| Topic                             | Document                                                                                   |
+| --------------------------------- | ------------------------------------------------------------------------------------------ |
+| **Architecture**                  | [docs/architecture.md](docs/architecture.md)                                               |
+| Layout, build, JARs, agent skills | [Setup.md](Setup.md)                                                                       |
+| `IpssCmd` (Java CLI) usage        | [IpssCmd.md](IpssCmd.md)                                                                   |
+| Markdown report generator         | [GenReport.md](GenReport.md)                                                               |
+| DeepSeek Harness DSH plugin       | [InstallDSHPlugin.md](InstallDSHPlugin.md)                                                 |
+| DSH plugin package                | [interpss-persistent/README.md](interpss-persistent/README.md)                             |
+| Interactive HTML dashboards       | `[.agents/skills/nerc-report-html/SKILL.md](.agents/skills/nerc-report-html/SKILL.md)`     |
+| NERC slide decks                  | `[.agents/skills/nerc-report-slides/SKILL.md](.agents/skills/nerc-report-slides/SKILL.md)` |
+
+
