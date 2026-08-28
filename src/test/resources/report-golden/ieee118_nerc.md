@@ -221,7 +221,7 @@ These buses are within the P0 **0.95–1.05 pu** band but below **0.98 pu**. Per
 > Run contingency analysis using:
 >
 > ```bash
-> python ../src/ipss_cmd.py ca <format> <input>
+> java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca <format> <input> [<cont_file> <monitor_file>]
 > ```
 
 ## Section 3: Assessment and Recommendations
@@ -290,7 +290,7 @@ No contingency analysis data available. The following analysis is required:
 | Transformer Tap Data | PRESENT | Ratio and tap data included in model. |
 | Load Data | PRESENT | 91 loads defined with P and Q values. |
 | Branch Composition |  | 177 lines, 9 transformers (4.8% xfmrs) |
-| Contingency Data | MISSING | Run `python ../src/ipss_cmd.py ca` to generate contingency analysis. |
+| Contingency Data | MISSING | Run `java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca` to generate contingency analysis. |
 
 ---
 

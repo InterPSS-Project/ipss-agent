@@ -16,7 +16,7 @@ import org.interpss.agent.util.ProjectPaths;
 
 /**
  * NERC TPL-001-5 compliance assessment report generator (Markdown).
- * Faithful Java port of {@code src/report/generate_nerc_tpl_report.py}.
+ * NERC TPL-001-5 compliance assessment report generator (Markdown).
  */
 public final class NercTplReportGenerator {
 
@@ -881,7 +881,7 @@ public final class NercTplReportGenerator {
             w(report, "> Run contingency analysis using:");
             w(report, ">");
             w(report, "> ```bash");
-            w(report, "> python ../src/ipss_cmd.py ca <format> <input>");
+            w(report, "> java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca <format> <input> [<cont_file> <monitor_file>]");
             w(report, "> ```");
             w(report, "");
         }
@@ -1176,7 +1176,7 @@ public final class NercTplReportGenerator {
                     contingencyResults.totalContingencies() + " contingencies evaluated."));
         } else {
             w(report, MarkdownTable.row("Contingency Data", "MISSING",
-                    "Run `python ../src/ipss_cmd.py ca` to generate contingency analysis."));
+                    "Run `java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca` to generate contingency analysis."));
         }
         w(report, "");
 

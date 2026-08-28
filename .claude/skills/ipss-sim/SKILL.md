@@ -160,8 +160,6 @@ Required CSVs in `result_dir`: `<prefix>_DF_{bus,branch,gen,load}.csv`. Optional
 
 **Output:** `NERC_TPL_001_5_Report.md` next to the CSVs.
 
-Legacy Python generators remain in `src/report/` if needed.
-
 Follow-on artifacts: use `$nerc-report-html` or `$nerc-report-slides` skills for interactive HTML or slide decks.
 
 ## Result Directory Convention

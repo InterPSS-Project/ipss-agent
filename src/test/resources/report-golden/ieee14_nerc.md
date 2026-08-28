@@ -157,7 +157,7 @@ No parallel circuits identified.
 > Run contingency analysis using:
 >
 > ```bash
-> python ../src/ipss_cmd.py ca <format> <input>
+> java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca <format> <input> [<cont_file> <monitor_file>]
 > ```
 
 ## Section 3: Assessment and Recommendations
@@ -218,7 +218,7 @@ No contingency analysis data available. The following analysis is required:
 | Transformer Tap Data | PRESENT | Ratio and tap data included in model. |
 | Load Data | PRESENT | 11 loads defined with P and Q values. |
 | Branch Composition |  | 15 lines, 5 transformers (25.0% xfmrs) |
-| Contingency Data | MISSING | Run `python ../src/ipss_cmd.py ca` to generate contingency analysis. |
+| Contingency Data | MISSING | Run `java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca` to generate contingency analysis. |
 
 ---
 
