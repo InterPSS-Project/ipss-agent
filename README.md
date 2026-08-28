@@ -1,6 +1,6 @@
 # iPSS Agent
 
-**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop**, **Claude Code CLI**, and **Deepseek Harness** (see [Setup.md](Setup.md)). Other agent CLIs can reuse the same workflow by copying the skill content from `.agents/skills/ipss-sim/` or `.claude/skills/ipss-sim/`. 
+**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop**, **Claude Code CLI**, and **Deepseek Harness** (see [Setup.md](Setup.md)). The canonical skill is [`.agents/skills/ipss-sim/SKILL.md`](.agents/skills/ipss-sim/SKILL.md); run `./scripts/sync_ipss_skills.sh` after edits to refresh `.claude/skills/ipss-sim/SKILL.md`. 
 
 It is also integrated into Deepseek Harness as a DSH Plugin. You can run power system simulation in the traditional step-by-step way:
 

@@ -345,7 +345,7 @@ or directory mode:
 
 - `.agents/skills/ipss-sim/**`, `.claude/skills/ipss-sim/**`, and `.claude/commands/ipss-sim.md` should be committed.
 - `.venv/`, `target/`, generated `lib/deps/*.jar`, `.mvn/wrapper/dists/`, and `wspace/**/result/` are local setup or output artifacts and should remain uncommitted.
-- If the skill instructions change, edit `.agents/skills/ipss-sim/SKILL.md` first, then run `./scripts/sync_ipss_skills.sh` from the project root to copy it to `.claude/skills/ipss-sim/SKILL.md` (or copy the file manually on Windows).
+- If the skill instructions change, edit `.agents/skills/ipss-sim/SKILL.md` (canonical), then run `./scripts/sync_ipss_skills.sh` from the project root to copy it to `.claude/skills/ipss-sim/SKILL.md`. Set `SYNC_CODEX=1` to also refresh `~/.codex/skills/ipss-sim/SKILL.md` when that directory exists.
 
 ### Quick Verification
 

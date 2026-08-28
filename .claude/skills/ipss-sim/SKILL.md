@@ -7,215 +7,179 @@ metadata:
 
 # InterPSS Simulation
 
-Run power system simulations (AC load flow, contingency analysis) and generate NERC TPL-001-5 compliance reports via the InterPSS native Java CLI (`IpssCmd`) and its pure-Python report generators.
+Run AC load flow (ACLF), DC contingency analysis (CA), and Markdown reports through the native Java CLI (`IpssCmd`) plus pure-Python report generators. All simulation commands run from `wspace/`.
 
 ## Prerequisites
 
 - Java JDK 21
-- Maven (the repo includes the `mvnw` wrapper)
-- `config/aclf_run.json` present for ACLF solver options (checked into the repo)
-- All simulation commands run from `wspace/`
+- Maven (`mvnw` wrapper included)
+- `config/aclf_run.json` at repo root (ACLF solver defaults)
+- Python 3 for report scripts (stdlib only; no JPype)
 
-If the CLI JAR is missing, build it from the project root first.
-
-macOS / Linux:
+Build the CLI once from the project root:
 
 ```bash
-./mvnw -q clean package
+./mvnw -q clean package          # macOS / Linux
+.\mvnw.cmd -q clean package      # Windows
 ```
 
-Windows PowerShell:
+Produces `target/ipss-agent-cmd-1.0.0-uber.jar`.
 
-```powershell
-.\mvnw.cmd -q clean package
+Run tests (optional):
+
+```bash
+./mvnw test
+open target/site/jacoco/index.html
 ```
 
-This produces the self-contained Uber JAR `target/ipss-agent-cmd-1.0.0-uber.jar`.
-
-## Input Modes
-
-The command supports two input modes:
+See [Setup.md](../../../Setup.md) for full environment details.
 
 ## Quick Decision Guide
 
-- **ACLF-only request** (base-case solve + loadflow report): run **Step 1** then **Step 3**
-- **Full TPL workflow** (ACLF + CA + NERC report): run **Step 1**, **Step 2**, then **Step 4**
-- **Contingency-only refresh** (ACLF already available): run **Step 2** then **Step 4**
+| User request | Run |
+|---|---|
+| ACLF only (base-case + loadflow report) | **Step 1** → **Step 3** |
+| Full NERC TPL workflow | **Step 1** → **Step 2** → **Step 4** |
+| Refresh CA / TPL (ACLF CSVs already exist) | **Step 2** → **Step 4** |
 
-### Single File Mode
+## Invocation Syntax
 
-Provide individual file paths for the case file, contingency JSON, and monitored branches JSON:
+Agents invoke this skill as `/ipss-sim` (Claude) or `$ipss-sim` (Codex). Paths below are relative to `wspace/` unless noted.
 
-```
-/ipss-sim <input_path> [<contingency_json> <monitored_branches_json>] in <format> "<NERC Report Name>"
-```
+### Directory mode (preferred)
 
-- `input_path` — PSS/E RAW (.raw/.RAW) or IEEE CDF (.ieee) case file
-- `contingency_json` — (optional) contingency definitions for CA
-- `monitored_branches_json` — (optional) monitored branches for CA
-- `format` — `psse` (.raw/.RAW) or `ieee` (.ieee), automatically inferred if not specified
-
-### Directory Mode
-
-Provide a directory path containing all input files. The tool auto-discovers files with the following naming conventions:
+Auto-discovers case + companion JSON files in one folder:
 
 ```
-/ipss-sim <directory_path> "<NERC Report Name>"
+/ipss-sim <directory_path> "<Report Name>"
 ```
 
-- **Case file:** any `*.RAW` or `*.raw` (PSS/E) or `*.ieee` (IEEE CDF) file in the directory
-- **Contingency JSON:** `*contingency`* or `*contingencies`* JSON file in the directory
-- **Monitored branches JSON:** `*monitor`* JSON file in the directory
+- **Case file:** `*.RAW`, `*.raw`, or `*.ieee`
+- **Contingency JSON:** filename contains `contingency` or `contingencies`
+- **Monitored branches JSON:** filename contains `monitor`
 
-**Example:**
-
-```
-# Directory containing Texas2k_series24_case1_2016summerPeak_v36.RAW,
-# 2k_contingencies_115kVAbove.json, and 2k_monitored_branches.json
-/ipss-sim data/psse/Texas2K/
-```
-
-When a directory is provided, the format is auto-detected from the case file extension.
-
-## Step 1: Run AC Load Flow (ACLF)
+Example:
 
 ```
+/ipss-sim data/psse/Texas2K/ "Texas 2K-Bus System"
+```
+
+Format is inferred from the case file extension.
+
+### Single-file mode
+
+```
+/ipss-sim <input_path> [<contingency_json> <monitored_branches_json>] [in <format>] "<Report Name>"
+```
+
+- `input_path` — IEEE CDF (`.ieee`) or PSS/E RAW (`.raw`/`.RAW`)
+- `contingency_json`, `monitored_branches_json` — optional; required for CA
+- `format` — `ieee` or `psse` (inferred from extension when omitted)
+
+### ACLF-only shortcut
+
+When the user says "Aclf only" or wants no contingency/TPL sections:
+
+```
+/ipss-sim Aclf only <directory_or_case> "<Loadflow Report Name>"
+```
+
+Run **Step 1** then **Step 3** only.
+
+## Step 1: AC Load Flow (ACLF)
+
+```bash
 cd wspace
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf <format> <input_path>
 ```
 
-**Formats:**
+Formats: `ieee` (`.ieee`) | `psse` (`.raw`/`.RAW`)
 
-- `ieee` — IEEE Common Data Format (`.ieee`)
-- `psse` — PSS/E RAW format (`.raw`, `.RAW`)
+Examples:
 
-**Examples:**
-
-```
-# IEEE 118 bus
+```bash
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf ieee data/ieee/Ieee118Bus/ieee118.ieee
-
-# PSS/E Texas 2K bus
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf psse data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
 ```
 
-**Output:** CSV files written to `<input_parent>/result/`:
+**Output** in `<input_parent>/result/`:
 
-- `<case>_DF_bus.csv` — bus voltage magnitude/angle
-- `<case>_DF_branch.csv` — branch power flows
-- `<case>_DF_gen.csv` — generator outputs
-- `<case>_DF_load.csv` — load data
-- `<case>_network_info.txt` — AclfNetwork summary and loadflow run information (included in NERC report)
+| File | Content |
+|---|---|
+| `<case>_DF_bus.csv` | Bus voltage magnitude/angle |
+| `<case>_DF_branch.csv` | Branch flows |
+| `<case>_DF_gen.csv` | Generator output |
+| `<case>_DF_load.csv` | Load data |
+| `<case>_network_info.txt` | Network summary + convergence info |
 
-**ACLF solver settings:** `IpssCmd` resolves `aclf_run.json` with a two-tier lookup:
+**ACLF config lookup** (printed as `Using config file: …`):
 
-1. **Case-specific config** (preferred): `<input_parent>/config/aclf_run.json` — e.g. `data/psse/OpenEInterconnect/config/aclf_run.json`. Place a per-case config here when a particular model needs different NR settings (more iterations, tighter tolerance, etc.).
-2. **Project default** (fallback): `config/aclf_run.json` at the repo root.
+1. Case-specific: `<input_parent>/config/aclf_run.json` (preferred)
+2. Project default: `config/aclf_run.json`
 
-The resolved config is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied with `configAclfRun(algo, polarCoordinate, includeAdjustments, False)`. The CLI prints `Using config file: <path>` to stderr so you can verify which file was used. Edit either JSON to tune NR method, `maxIterations`, tolerance, limit controls, and related options.
+Tune NR method, `maxIterations`, tolerance, and limit controls in either JSON.
 
-## Step 2: Run Contingency Analysis (CA)
+## Step 2: Contingency Analysis (CA)
 
-```
+Requires contingency and monitored-branch JSON paths (explicit or auto-discovered):
+
+```bash
 cd wspace
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca <format> <input_path> <contingency_json> <monitored_branches_json>
 ```
 
-**Format:** Use `psse` (PSS/E RAW input).
+Example:
 
-**JSON files:**
-
-- `<contingency_json>` — contingency definitions (outage scenarios)
-- `<monitored_branches_json>` — branches to monitor post-contingency
-
-**Example:**
-
-```
+```bash
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca psse \
   data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW \
   data/psse/Texas2K/2k_contingencies_115kVAbove.json \
   data/psse/Texas2K/2k_monitored_branches.json
 ```
 
-**Output:** `<case>_DF_contingency.csv` written alongside the ACLF CSVs, containing post-contingency branch loading results.
+**Output:** `<case>_DF_contingency.csv` in the same `result/` folder.
 
-## Step 3: Generate AC Load Flow (ACLF-Only) Report
+## Step 3: ACLF Report (no TPL)
 
-Use this when the user asks for an ACLF report only (no contingency/TPL sections).
-
-```
+```bash
 cd wspace
 python3 ../src/report/generate_aclf_report.py "<display_name>" <result_dir> [csv_prefix]
 ```
 
-**Parameters:**
+- `result_dir` — path relative to `wspace/` (e.g. `data/ieee/Ieee14Bus/result`)
+- `csv_prefix` — optional stem when multiple cases share one `result/` dir (e.g. `ieee14`)
 
-- `display_name` — Human-readable system name for the report header (e.g., `"IEEE 118-Bus System"`)
-- `result_dir` — Path **relative to `wspace/`** containing ACLF CSVs, e.g. `data/ieee/Ieee118Bus/result`
-- `csv_prefix` — (optional but recommended when multiple cases share one `result_dir`) CSV stem such as `ieee14` or `ieee118`
+**Output:** `AC_Loadflow_Report.md` next to the CSVs.
 
-**Examples:**
+## Step 4: NERC TPL-001-5 Report
 
-```
-# Single-case result directory
-python3 ../src/report/generate_aclf_report.py "Texas 2000-Bus System" data/psse/Texas2K/result
-
-# Shared result directory (explicit prefix avoids picking another case)
-python3 ../src/report/generate_aclf_report.py "IEEE 14-Bus System" data/ieee/Ieee14Bus/result ieee14
-```
-
-**Output:** `AC_Loadflow_Report.md` written next to the CSVs in the result directory.
-
-## Step 4: Generate NERC TPL-001-5 Report
-
-```
+```bash
 cd wspace
 python3 ../src/report/generate_nerc_tpl_report.py "<display_name>" <result_dir>
 ```
 
-**Parameters:**
+Required CSVs in `result_dir`: `<prefix>_DF_{bus,branch,gen,load}.csv`. Optional: `<prefix>_DF_contingency.csv`, `<prefix>_network_info.txt`.
 
-- `display_name` — Human-readable system name for the report header (e.g., `"Texas 2000-Bus System"`)
-- `result_dir` — Path **relative to `wspace/`** to the folder that contains the ACLF/CA CSVs (same folder the ACLF/CA CLI writes to), e.g. `data/ieee/Ieee118Bus/result` or `data/psse/Texas2K/result`. A subdirectory name under `wspace/result/` still works for older layouts.
+**Output:** `NERC_TPL_001_5_Report.md` next to the CSVs.
 
-**CSV requirements in that folder:**
+Legacy alias discovery (`ieee118`, `texas2k`, etc.) works when results live under `wspace/result/` — see [Setup.md](../../../Setup.md).
 
-- `<prefix>_DF_bus.csv`
-- `<prefix>_DF_branch.csv`
-- `<prefix>_DF_gen.csv`
-- `<prefix>_DF_load.csv`
-- `<prefix>_DF_contingency.csv` (optional, for P1–P7 assessment)
-- `<prefix>_network_info.txt` (optional, used for AclfNetwork summary section in report)
-
-**Examples:**
-
-```
-python3 ../src/report/generate_nerc_tpl_report.py "IEEE 118-Bus Test Case" data/ieee/Ieee118Bus/result
-python3 ../src/report/generate_nerc_tpl_report.py "Texas 2K-Bus System" data/psse/Texas2K/result
-```
-
-Single-argument **aliases** (`ieee118`, `texas2k`, plus short forms via `KNOWN_CASE_ALIASES` in `src/report/generate_nerc_tpl_report.py`) still work when results are under `wspace/result/` — see [Setup.md](../../../Setup.md).
-
-**Output:** `NERC_TPL_001_5_Report.md` written **next to the CSVs** (e.g. `wspace/data/psse/Texas2K/result/`).
+Follow-on artifacts: use `$nerc-report-html` or `$nerc-report-slides` skills for interactive HTML or slide decks.
 
 ## Result Directory Convention
 
-The `IpssCmd` CLI writes ACLF results based on the input file's parent directory:
+Input parent determines output location:
 
 - `data/ieee/Ieee118Bus/ieee118.ieee` → `wspace/data/ieee/Ieee118Bus/result/`
-- `data/psse/Texas2K/ieee9_v36.raw` → `wspace/data/psse/Texas2K/result/`
+- `data/psse/Texas2K/case.RAW` → `wspace/data/psse/Texas2K/result/`
 
-CA results are written to the same directory.
-
-Pass that same `.../result` path as `result_dir` to `../src/report/generate_aclf_report.py` (Step 3) or `../src/report/generate_nerc_tpl_report.py` (Step 4). Optional: keep copies or symlinks under `wspace/result/` only if you rely on single-argument alias discovery.
+Pass the same `…/result` path to report generators in Steps 3–4.
 
 ## Troubleshooting
 
-- **NR load flow does not converge**: Raise `maxIterations` (and adjust `tolerance` if needed) in `config/aclf_run.json`; large systems often need 100+ iterations
-- **`Could not find or load main class` / missing `ipss-agent-cmd-1.0.0-uber.jar`**: Build the CLI first with `./mvnw -q clean package` (or `.\mvnw.cmd -q clean package` on Windows)
-- **Results not found by report generator**: Pass the correct `result_dir` relative to `wspace/` (e.g. `data/psse/Texas2K/result`), or symlink the case under `wspace/result/` for alias-only usage
-- **OutOfMemoryError / JVM heap exhaustion for large cases (>50K buses)**: Raise the JVM max heap with the `-Xmx` flag directly on the `java` command:
-  ```bash
-  java -Xmx4g -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf psse data/psse/Texas2K/...
-  ```
-  Scale up (e.g. `-Xmx8g`) for very large cases.
+| Issue | Fix |
+|---|---|
+| NR does not converge | Raise `maxIterations` / adjust `tolerance` in `aclf_run.json` |
+| Missing uber JAR | Run `./mvnw -q clean package` |
+| Report generator can't find CSVs | Pass correct `result_dir` relative to `wspace/` |
+| OutOfMemoryError on large cases | Add heap flag: `java -Xmx4g -jar ../target/ipss-agent-cmd-1.0.0-uber.jar …` |
