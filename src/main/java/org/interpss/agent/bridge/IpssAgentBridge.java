@@ -6,8 +6,11 @@ import java.nio.file.Paths;
 
 import org.interpss.agent.input.NetworkLoader;
 import org.interpss.agent.model.SimuModelRepository;
+import org.interpss.agent.report.ReportRunner;
+import org.interpss.agent.report.ReportType;
 import org.interpss.agent.runner.AclfRunner;
 import org.interpss.agent.util.IpssNetworkInfo;
+import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.result.AclfResultAdapter;
 import org.interpss.plugin.result.AclfResultContainer;
 
@@ -111,6 +114,34 @@ public final class IpssAgentBridge {
     public synchronized void clear() {
         repo.setAclfNetBase(null);
         loadedInput = null;
+    }
+
+    /**
+     * Generate a Markdown report from CSV outputs under {@code resultDirRelative}.
+     * {@code reportType} is {@code nerc} or {@code aclf}.
+     * {@code absoluteProjectRoot} is the ipss-agent repository root (contains {@code wspace/} and {@code config/}).
+     */
+    public synchronized String runReport(
+            String reportType,
+            String displayName,
+            String absoluteProjectRoot,
+            String resultDirRelative,
+            String csvPrefix) {
+        try {
+            ProjectPaths paths = new ProjectPaths(Paths.get(absoluteProjectRoot));
+            ReportRunner runner = new ReportRunner(paths);
+            ReportType type = ReportType.parse(reportType);
+            ReportRunner.ReportOutput output = runner.run(type, displayName, resultDirRelative, csvPrefix);
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("markdown", output.markdown());
+            o.addProperty("resultDir", output.resultDirRelative());
+            o.addProperty("reportFile", output.reportFile().getFileName().toString());
+            o.addProperty("displayName", displayName);
+            return GSON.toJson(o);
+        } catch (Exception e) {
+            return error(e);
+        }
     }
 
     private AclfResultAdapter buildAdapter(String scope, String sortRule, int numRec) {

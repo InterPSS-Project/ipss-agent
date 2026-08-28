@@ -7,14 +7,14 @@ metadata:
 
 # InterPSS Simulation
 
-Run AC load flow (ACLF), DC contingency analysis (CA), and Markdown reports through the native Java CLI (`IpssCmd`) plus pure-Python report generators. All simulation commands run from `wspace/`.
+Run AC load flow (ACLF), DC contingency analysis (CA), and Markdown reports through the native Java CLI (`IpssCmd`). All simulation commands run from `wspace/`.
 
 ## Prerequisites
 
 - Java JDK 21
 - Maven (`mvnw` wrapper included)
 - `config/aclf_run.json` at repo root (ACLF solver defaults)
-- Python 3 for report scripts (stdlib only; no JPype)
+- Built uber JAR: `target/ipss-agent-cmd-1.0.0-uber.jar`
 
 Build the CLI once from the project root:
 
@@ -142,8 +142,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca psse \
 ## Step 3: ACLF Report (no TPL)
 
 ```bash
-cd wspace
-python3 ../src/report/generate_aclf_report.py "<display_name>" <result_dir> [csv_prefix]
+java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar report aclf "<display_name>" <result_dir> [csv_prefix]
 ```
 
 - `result_dir` — path relative to `wspace/` (e.g. `data/ieee/Ieee14Bus/result`)
@@ -154,15 +153,14 @@ python3 ../src/report/generate_aclf_report.py "<display_name>" <result_dir> [csv
 ## Step 4: NERC TPL-001-5 Report
 
 ```bash
-cd wspace
-python3 ../src/report/generate_nerc_tpl_report.py "<display_name>" <result_dir>
+java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar report nerc "<display_name>" <result_dir>
 ```
 
 Required CSVs in `result_dir`: `<prefix>_DF_{bus,branch,gen,load}.csv`. Optional: `<prefix>_DF_contingency.csv`, `<prefix>_network_info.txt`.
 
 **Output:** `NERC_TPL_001_5_Report.md` next to the CSVs.
 
-Legacy alias discovery (`ieee118`, `texas2k`, etc.) works when results live under `wspace/result/` — see [Setup.md](../../../Setup.md).
+Legacy Python generators remain in `src/report/` if needed.
 
 Follow-on artifacts: use `$nerc-report-html` or `$nerc-report-slides` skills for interactive HTML or slide decks.
 

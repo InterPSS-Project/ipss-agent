@@ -1,0 +1,11 @@
+
+=====Aclf Network Information:=====
+Number of Active Buses: 14
+Number of Active Branches: 20
+Total Generation (MW): 272.39
+Total Load (MW): 259.00
+PV bus limit controls: 4
+
+===== Loadflow Run Information:=====
+Loadflow converged: true
+Max mismatch: dPmax :  0.00001 at Bus : Bus5,     dQmax :  0.00006 at Bus : Bus4

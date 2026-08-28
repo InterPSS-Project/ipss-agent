@@ -563,9 +563,6 @@ return {
       },
 
       async runReport(args) {
-        const shell = ctx.get('shell')
-        if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
-
         const casePath = args && typeof args.input === 'string' ? args.input : ''
         if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
           return { ok: false, error: 'Invalid case path: ' + casePath }
@@ -574,8 +571,6 @@ return {
         const root = resolveWorkspaceRoot(args && args.sessionId)
         if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
 
-        const python = root + '/.venv/bin/python'
-        const wspace = root + '/wspace'
         const slash = casePath.lastIndexOf('/')
         const parent = slash >= 0 ? casePath.slice(0, slash) : ''
         const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
@@ -584,32 +579,25 @@ return {
         let displayName = args && typeof args.displayName === 'string' && args.displayName.trim() !== '' ? args.displayName.trim() : stem
         displayName = String(displayName).replace(/[\r\n\t'"]/g, ' ').trim()
 
-        const command = python + ' ../src/report/generate_nerc_tpl_report.py ' + shellQuote(displayName) + ' ' + resultDir
-        const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 120000, stdoutMaxBytes: 300000 })
-
-        let res
+        if (javaBridge === undefined || typeof javaBridge.runReport !== 'function') {
+          return { ok: false, error: 'in-process bridge unavailable (install the persistent InterPSS plugin)' }
+        }
         try {
-          res = await shell.run(spec)
-        } catch (e) {
-          return { ok: false, error: 'command failed to start: ' + (e && e.message ? e.message : String(e)) }
-        }
-
-        if (res.exitCode !== 0) {
-          return { ok: false, error: 'report generation failed (exit ' + res.exitCode + ')\n' + (res.stderr.text || res.stdout.text || '') }
-        }
-
-        let markdown = null
-        const fs = ctx.get('fs')
-        if (fs !== undefined) {
-          try {
-            const target = await fs.resolve(wspace + '/' + resultDir + '/NERC_TPL_001_5_Report.md')
-            markdown = await fs.readText(target)
-          } catch (e) {
-            markdown = null
+          const raw = await javaBridge.runReport('nerc', displayName, root, resultDir, null)
+          const parsed = JSON.parse(raw)
+          if (parsed && parsed.ok) {
+            return {
+              ok: true,
+              markdown: parsed.markdown || '',
+              resultDir: parsed.resultDir || resultDir,
+              input: casePath,
+              displayName: parsed.displayName || displayName,
+            }
           }
+          return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runReport failed' }
+        } catch (e) {
+          return { ok: false, error: 'bridge runReport failed: ' + (e && e.message ? e.message : String(e)) }
         }
-
-        return { ok: true, markdown: markdown, resultDir: resultDir, input: casePath, displayName: displayName }
       },
 
       async getAclfOptions(args) {

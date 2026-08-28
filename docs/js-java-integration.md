@@ -42,7 +42,7 @@ Embed a JVM inside the Node (Cordis Host) process. Node calls Java like local fu
 2. **One facade** — `org.interpss.agent.bridge.IpssAgentBridge` (name TBD). Host does not import adapters/runners piecemeal.
 3. **Host response compatibility** — keep existing `runAclf` return shape (`ok`, `networkInfo`, `files`, `resultDir`, …) so Client UI need not change in phase 1.
 4. **Filesystem conventions stay** — `wspace` paths, `aclf_run.json` resolution, writing `result/*_DF_*.csv` remain Java-side (or Host-resolved absolute paths passed in). In-process does not remove those conventions.
-5. **Out of scope for phase 1** — CA, adjust/compare, replacing Python `runReport`, exposing adapters to JS.
+5. **Phase 1 complete for reports** — `runReport` uses in-process `IpssAgentBridge.runReport()` (Java Markdown generators in `org.interpss.agent.report`).
 
 ---
 
@@ -69,6 +69,10 @@ public final class IpssAgentBridge {
 
   /** In-memory summary from cached net (MCP-style). No file I/O required. */
   public String summarize(String scope, String sortRule, int numRec);
+
+  /** Generate NERC or ACLF Markdown report from CSV outputs under wspace. */
+  public String runReport(String reportType, String displayName,
+                          String absoluteProjectRoot, String resultDirRelative, String csvPrefix);
 
   /** IpssNetworkInfo.format on cached base. */
   public String getNetworkInfo();
@@ -133,7 +137,7 @@ const bridge = await Bridge.newInstanceAsync() // or static getInstance()
 | `loadCase` *(new)*                   | `bridge.loadCase(format, absPath)` — cache only                                            |
 | `summarizeResult` *(new)*            | `bridge.summarize(scope, sort, n)` — requires prior load/run                               |
 | `readCsv` / `checkResult*`           | Unchanged (FS)                                                                             |
-| `runReport`                          | Unchanged (Python)                                                                         |
+| `runReport`                          | `bridge.runReport('nerc', displayName, projectRoot, resultDir, null)` → `{ ok, markdown, resultDir, … }` |
 | `getAclfOptions` / `saveAclfOptions` | Unchanged (JSON on disk; pass config path into `runAclf`)                                  |
 
 
@@ -187,6 +191,7 @@ Suggested `METHODS` addition: `'loadCase', 'summarizeResult'` (keep `'runAclf'`)
 - Direct JS access to `IeeeFileAdapter` / `AclfNetwork`
 - Sync ACLF on the Cordis event loop
 - Contingency analysis via bridge
-- Replacing Python NERC report generation
-- Decision to abandon process isolation entirely for production crash resilience (document risk; sidecar remains a future fallback)
+- Multi-session map
+
+Reports (`runReport`) are implemented via `IpssAgentBridge.runReport()` calling `org.interpss.agent.report.ReportRunner`.
 

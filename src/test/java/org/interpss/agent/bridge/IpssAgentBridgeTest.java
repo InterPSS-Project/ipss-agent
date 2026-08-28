@@ -131,4 +131,18 @@ class IpssAgentBridgeTest {
         String json = bridge.summarize("net", null, 5);
         assertThat(JsonParser.parseString(json).getAsJsonObject().get("ok").getAsBoolean()).isFalse();
     }
+
+    @Test
+    @org.junit.jupiter.api.condition.EnabledIf("org.interpss.agent.ReportCliTest#ieee14ResultExists")
+    void runReport_returnsMarkdownForIeee14() throws Exception {
+        org.interpss.agent.util.ProjectPaths paths = org.interpss.agent.util.ProjectPaths.discover();
+        String json = bridge.runReport(
+                "nerc", "IEEE 14-Bus System", paths.projectRoot().toString(), "data/ieee/Ieee14Bus/result", null);
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+        assertThat(o.get("ok").getAsBoolean()).isTrue();
+        assertThat(o.get("markdown").getAsString())
+                .contains("NERC TPL-001-5 Transmission System Planning Performance");
+        assertThat(o.get("reportFile").getAsString()).isEqualTo("NERC_TPL_001_5_Report.md");
+        assertThat(paths.resolveWspace("data/ieee/Ieee14Bus/result/NERC_TPL_001_5_Report.md")).exists();
+    }
 }

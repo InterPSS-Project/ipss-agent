@@ -1,0 +1,12 @@
+BusID,BusNumber,BusName,LoadID,LoadName,LoadCode,InService,PLoadTotal,QLoadTotal,PLoad,QLoad,IPLoad,IQLoad,ZPLoad,ZQLoad,DistGenP,DistGenQ,DistGenStatus,AreaNum,AreaName,ZoneNum,ZoneName,OwnerNum,OwnerName
+Bus2,2,Bus 2     HV,Bus2-L1,Bus2-L1,ConstP,true,0.217,0.127,0.217,0.127,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus3,3,Bus 3     HV,Bus3-L1,Bus3-L1,ConstP,true,0.942,0.19,0.942,0.19,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus4,4,Bus 4     HV,Bus4-L1,Bus4-L1,ConstP,true,0.478,-0.039,0.478,-0.039,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus5,5,Bus 5     HV,Bus5-L1,Bus5-L1,ConstP,true,0.076,0.016,0.076,0.016,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus6,6,Bus 6     LV,Bus6-L1,Bus6-L1,ConstP,true,0.112,0.075,0.112,0.075,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus9,9,Bus 9     LV,Bus9-L1,Bus9-L1,ConstP,true,0.295,0.166,0.295,0.166,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus10,10,Bus 10    LV,Bus10-L1,Bus10-L1,ConstP,true,0.09,0.058,0.09,0.058,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus11,11,Bus 11    LV,Bus11-L1,Bus11-L1,ConstP,true,0.035,0.018,0.035,0.018,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus12,12,Bus 12    LV,Bus12-L1,Bus12-L1,ConstP,true,0.061,0.016,0.061,0.016,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus13,13,Bus 13    LV,Bus13-L1,Bus13-L1,ConstP,true,0.135,0.058,0.135,0.058,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,
+Bus14,14,Bus 14    LV,Bus14-L1,Bus14-L1,ConstP,true,0.149,0.05,0.149,0.05,0.0,0.0,0.0,0.0,0.0,0.0,false,1,1,1,1,0,

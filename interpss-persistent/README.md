@@ -47,7 +47,7 @@ gate* below). That workspace must contain the runtime the Host half shells out
 to:
 
 - Java 17+ on `PATH`, plus the built CLI: `target/classes`, `lib/ipss_runnable.jar`, and `lib/deps/*` (the host runs `org.interpss.agent.IpssCmd aclf`)
-- `.venv/bin/python` and `src/report/generate_nerc_tpl_report.py` (NERC report generation)
+- `target/ipss-agent-cmd-1.0.0-uber.jar` (simulation + Markdown report generation via `IpssAgentBridge.runReport`)
 - `wspace/data/**` case files
 - `config/aclf_run.json`
 
