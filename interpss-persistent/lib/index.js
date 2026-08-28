@@ -747,10 +747,12 @@ class InterpssService extends TypertRemoteService {
 }
 
 export default {
-  // Apply immediately so `interpss` and `javaBridge` are provided without
-  // waiting on the `typert` registry. The Remote registration below is
-  // best-effort: it only feeds the persistent client's own /api surface, which
-  // the dynamic per-session plugin does not use.
+  // Wait for the `typert` registry before applying: loader entries activate in
+  // parallel, and without this dependency `ctx.get('typert')` can still be
+  // `undefined` here, silently skipping the Remote registration (the client
+  // tab's /api endpoints then 404). `javaBridge` is still provided
+  // unconditionally once this row applies.
+  inject: ['typert'],
   apply(ctx) {
     diag('apply reached; ctx=' + (typeof ctx) + ' hasProvide=' + (typeof ctx.provide) + ' hasReflect=' + (typeof ctx.reflect))
     console.error('[dsh-interpss] apply reached')
