@@ -1,0 +1,31 @@
+{
+  "monitored_branches": [
+    {
+      "from_bus": "Bus1",
+      "to_bus": "Bus2",
+      "circuit": "1",
+      "from_bus_area": "1",
+      "to_bus_area": "1",
+      "base_kv": 132.0,
+      "pre_contingency_flow_mw": 156.0
+    },
+    {
+      "from_bus": "Bus2",
+      "to_bus": "Bus3",
+      "circuit": "1",
+      "from_bus_area": "1",
+      "to_bus_area": "1",
+      "base_kv": 132.0,
+      "pre_contingency_flow_mw": 73.0
+    },
+    {
+      "from_bus": "Bus4",
+      "to_bus": "Bus5",
+      "circuit": "1",
+      "from_bus_area": "1",
+      "to_bus_area": "1",
+      "base_kv": 132.0,
+      "pre_contingency_flow_mw": 54.0
+    }
+  ]
+}

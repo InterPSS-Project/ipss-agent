@@ -1,0 +1,16 @@
+{
+  "contingencies": [
+    {
+      "name": "Bus1->Bus2(1)",
+      "element_type": "Branch",
+      "action_type": "OPEN",
+      "from_bus": "Bus1",
+      "to_bus": "Bus2",
+      "circuit": "1",
+      "from_bus_area": "1",
+      "to_bus_area": "1",
+      "base_kv": 132.0,
+      "pre_contingency_flow_mw": 156.0
+    }
+  ]
+}

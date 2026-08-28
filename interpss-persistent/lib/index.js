@@ -11,10 +11,20 @@
 // "iPSS Agent".
 
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { writeFileSync, appendFileSync } from 'node:fs'
+
+// Diagnostic sink inside the session workspace so the agent can read, after a
+// restart, whether this plugin's apply() ran and what it did — without access
+// to the dsh web process stderr. Cleared on module load, then appended.
+const DIAG = '/Users/mzhou/Documents/wspace/gitRepo/ipss-agent/.dsh-interpss-diagnostic.log'
+try { writeFileSync(DIAG, '', 'utf8') } catch {}
+function diag(line) {
+  try { appendFileSync(DIAG, line + '\n', 'utf8') } catch {}
+}
 
 const NAMESPACE = 'interpss'
 const PACKAGE = '@deepseek-ai/dsh-interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runReport', 'getAclfOptions', 'saveAclfOptions']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'loadCase', 'summarizeResult']
 
 function jsonParam(name, wire) {
   return { name, wire, source: 'json', codec: { mode: 'src-json' } }
@@ -107,6 +117,64 @@ async function scanCases(fs, dirTarget, relDir, out) {
   }
 }
 
+// One in-process JVM per Host process, started lazily on first bridge use.
+// `java-bridge` is loaded with a dynamic import so the plugin still loads (and
+// runAclf falls back to shell-out) when the native module is not installed.
+let bridgePromise = null
+// java-bridge default namespace (carries stdout.enableRedirect in v2.7+),
+// captured during JVM bootstrap so runAclf can intercept JVM stdout/stderr.
+let jbApi = null
+
+async function ensureBridge(root) {
+  if (bridgePromise === null) {
+    bridgePromise = (async () => {
+      const mod = await import('java-bridge')
+      // java-bridge v2.6 exports the helpers as top-level named exports; v2.7+
+      // moved them onto the module's default namespace. Pick whichever surface
+      // actually carries `appendClasspath` so either installed version works.
+      const jb = (mod.default && typeof mod.default.appendClasspath === 'function') ? mod.default : mod
+      jbApi = jb
+      // Classpath must be set before the JVM starts.
+      jb.appendClasspath([root + '/target/ipss-agent-cmd-1.0.0-uber.jar'])
+      await jb.ensureJvm({ opts: ['-Xmx4g'] })
+      const BridgeClass = await jb.importClass('org.interpss.agent.bridge.IpssAgentBridge')
+      return BridgeClass.newInstanceAsync()
+    })().catch((e) => {
+      bridgePromise = null
+      throw e
+    })
+  }
+  return bridgePromise
+}
+
+// Capture the embedded JVM's stdout/stderr into buffers for the duration of a
+// bridge call. When java-bridge exposes `stdout.enableRedirect`, the JVM's
+// native stdout/stderr are intercepted at the boundary (so log4j2 Console,
+// slf4j-simple, and direct System.out/err all land here) instead of spilling
+// into the dsh web terminal. Returns a tiny {out, err, stop} handle; callers
+// MUST stop() even on failure.
+function captureStdio() {
+  const chunksOut = []
+  const chunksErr = []
+  if (jbApi !== null && jbApi.stdout !== undefined && typeof jbApi.stdout.enableRedirect === 'function') {
+    let guard = null
+    try {
+      guard = jbApi.stdout.enableRedirect(
+        (err, data) => { if (!err && typeof data === 'string') chunksOut.push(data) },
+        (err, data) => { if (!err && typeof data === 'string') chunksErr.push(data) },
+      )
+    } catch (e) {
+      guard = null
+    }
+    return {
+      out: () => chunksOut.join(''),
+      err: () => chunksErr.join(''),
+      stop: () => { if (guard !== null) { try { guard.reset() } catch (e) {} } },
+    }
+  }
+  return { out: () => '', err: () => '', stop: () => {} }
+}
+
 class InterpssService extends TypertRemoteService {
   constructor(ctx) {
     super(ctx, NAMESPACE)
@@ -135,6 +203,31 @@ class InterpssService extends TypertRemoteService {
     const sp = ctx.get('sandboxPolicy')
     if (sp !== undefined && typeof sp.workspaceRoot === 'string' && sp.workspaceRoot !== '') return sp.workspaceRoot
     return ''
+  }
+
+  bridge() {
+    return this.ctx.get('javaBridge')
+  }
+
+  caseParts(caseInput) {
+    const slash = caseInput.lastIndexOf('/')
+    const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
+    const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+    return { parent, stem }
+  }
+
+  async resolveAclfConfigPath(root, caseInput) {
+    const fs = this.ctx.get('fs')
+    if (fs === undefined) return root + '/config/aclf_run.json'
+    const { parent } = this.caseParts(caseInput)
+    const caseCfg = root + '/wspace/' + parent + '/config/aclf_run.json'
+    const defCfg = root + '/config/aclf_run.json'
+    try {
+      const target = await fs.resolve(caseCfg)
+      const info = await fs.stat(target)
+      if (info !== undefined) return caseCfg
+    } catch (e) {}
+    return defCfg
   }
 
   async isActivated(input) {
@@ -401,9 +494,6 @@ class InterpssService extends TypertRemoteService {
       }
 
   async runAclf(input) {
-    const shell = this.ctx.get('shell')
-    if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
-
     const format = input && input.format === 'psse' ? 'psse' : 'ieee'
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
     if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
@@ -413,14 +503,54 @@ class InterpssService extends TypertRemoteService {
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
     if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
 
-    const python = root + '/.venv/bin/python'
+    const { parent, stem } = this.caseParts(caseInput)
+
+    // In-process bridge path (preferred).
+    const bridge = this.bridge()
+    if (bridge !== undefined && typeof bridge.runAclf === 'function') {
+      try {
+        const absCase = root + '/wspace/' + caseInput
+        const absCfg = await this.resolveAclfConfigPath(root, caseInput)
+        const absResults = root + '/wspace/' + parent + '/result'
+        const raw = await bridge.runAclf(format, absCase, absCfg, absResults, stem)
+        const parsed = JSON.parse(raw)
+        if (parsed && parsed.ok) {
+          return {
+            ok: true,
+            exitCode: 0,
+            timedOut: false,
+            aborted: false,
+            stdout: '',
+            stderr: '',
+            converged: !!parsed.converged,
+            networkInfo: parsed.networkInfo || null,
+            input: caseInput,
+            format: format,
+            resultDir: parent + '/result',
+            files: [
+              stem + '_DF_bus.csv',
+              stem + '_DF_branch.csv',
+              stem + '_DF_gen.csv',
+              stem + '_DF_load.csv',
+              stem + '_network_info.txt',
+            ],
+          }
+        }
+        return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runAclf failed' }
+      } catch (e) {
+        return { ok: false, error: 'bridge runAclf failed: ' + (e && e.message ? e.message : String(e)) }
+      }
+    }
+
+    // Fallback: shell out to IpssCmd.
+    const shell = this.ctx.get('shell')
+    if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
+
     const wspace = root + '/wspace'
-    const slash = caseInput.lastIndexOf('/')
-    const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
-    const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
     const infoRel = parent + '/result/' + stem + '_network_info.txt'
 
-    const command = python + ' ../src/ipss_cmd.py aclf ' + format + ' ' + caseInput
+    const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
+    const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd aclf ' + format + ' ' + caseInput
     const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
 
     let res
@@ -464,10 +594,52 @@ class InterpssService extends TypertRemoteService {
     }
   }
 
-  async runReport(input) {
-    const shell = this.ctx.get('shell')
-    if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
+  async loadCase(input) {
+    const format = input && input.format === 'psse' ? 'psse' : 'ieee'
+    const caseInput = input && typeof input.input === 'string' ? input.input : ''
+    if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+      return { ok: false, error: 'Invalid case path: ' + caseInput }
+    }
+    const bridge = this.bridge()
+    if (bridge === undefined || typeof bridge.loadCase !== 'function') {
+      return { ok: false, error: 'in-process bridge unavailable' }
+    }
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+    try {
+      const absCase = root + '/wspace/' + caseInput
+      const raw = await bridge.loadCase(format, absCase)
+      const parsed = JSON.parse(raw)
+      if (parsed && parsed.ok) {
+        return { ok: true, format: parsed.format, input: caseInput, busCount: parsed.busCount, branchCount: parsed.branchCount }
+      }
+      return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge loadCase failed' }
+    } catch (e) {
+      return { ok: false, error: 'bridge loadCase failed: ' + (e && e.message ? e.message : String(e)) }
+    }
+  }
 
+  async summarizeResult(input) {
+    const scope = input && typeof input.scope === 'string' ? input.scope : 'Net'
+    const sortRule = input && typeof input.sortRule === 'string' ? input.sortRule : ''
+    const numRec = input && typeof input.numRec === 'number' && input.numRec > 0 ? Math.floor(input.numRec) : 10
+    const bridge = this.bridge()
+    if (bridge === undefined || typeof bridge.summarize !== 'function') {
+      return { ok: false, error: 'in-process bridge unavailable' }
+    }
+    try {
+      const raw = await bridge.summarize(scope, sortRule, numRec)
+      const parsed = JSON.parse(raw)
+      if (parsed && parsed.ok) {
+        return { ok: true, scope: parsed.scope || scope, text: parsed.text || '' }
+      }
+      return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge summarize failed' }
+    } catch (e) {
+      return { ok: false, error: 'bridge summarize failed: ' + (e && e.message ? e.message : String(e)) }
+    }
+  }
+
+  async runReport(input) {
     const casePath = input && typeof input.input === 'string' ? input.input : ''
     if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
       return { ok: false, error: 'Invalid case path: ' + casePath }
@@ -476,17 +648,40 @@ class InterpssService extends TypertRemoteService {
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
     if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
 
-    const python = root + '/.venv/bin/python'
-    const wspace = root + '/wspace'
-    const slash = casePath.lastIndexOf('/')
-    const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-    const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+    const { parent, stem } = this.caseParts(casePath)
     const resultDir = parent + '/result'
 
     let displayName = input && typeof input.displayName === 'string' && input.displayName.trim() !== '' ? input.displayName.trim() : stem
     displayName = String(displayName).replace(/[\r\n\t'"]/g, ' ').trim()
 
-    const command = python + ' ../src/report/generate_nerc_tpl_report.py ' + shellQuote(displayName) + ' ' + resultDir
+    const bridge = this.bridge()
+    if (bridge !== undefined && typeof bridge.runReport === 'function') {
+      try {
+        const raw = await bridge.runReport('nerc', displayName, root, resultDir, null)
+        const parsed = JSON.parse(raw)
+        if (parsed && parsed.ok) {
+          return {
+            ok: true,
+            markdown: parsed.markdown || '',
+            resultDir: parsed.resultDir || resultDir,
+            input: casePath,
+            displayName: parsed.displayName || displayName,
+          }
+        }
+        return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runReport failed' }
+      } catch (e) {
+        // Bridge threw (e.g. stale JAR / signature mismatch): fall through
+        // to the Java CLI shell fallback below instead of failing the report.
+      }
+    }
+
+    // Fallback: shell out to the Java report subcommand (IpssCmd report nerc).
+    const shell = this.ctx.get('shell')
+    if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
+
+    const wspace = root + '/wspace'
+    const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
+    const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd report nerc ' + shellQuote(displayName) + ' ' + shellQuote(resultDir)
     const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 120000, stdoutMaxBytes: 300000 })
 
     let res
@@ -552,16 +747,76 @@ class InterpssService extends TypertRemoteService {
 }
 
 export default {
-  // Wait for the `typert` registry before applying: loader entries activate in
-  // parallel, and without this dependency `ctx.get('typert')` can still be
-  // `undefined` here, silently skipping the Remote registration.
-  inject: ['typert'],
-
+  // Apply immediately so `interpss` and `javaBridge` are provided without
+  // waiting on the `typert` registry. The Remote registration below is
+  // best-effort: it only feeds the persistent client's own /api surface, which
+  // the dynamic per-session plugin does not use.
   apply(ctx) {
+    diag('apply reached; ctx=' + (typeof ctx) + ' hasProvide=' + (typeof ctx.provide) + ' hasReflect=' + (typeof ctx.reflect))
+    console.error('[dsh-interpss] apply reached')
+    try {
     // Provide the `interpss` service (and its Typert binding) by instantiating
     // the Service. Its registration is owned by this fiber, so it unwinds with
     // the plugin.
     new InterpssService(ctx)
+
+    // Publish the in-process `javaBridge` service (lazy JVM bootstrap). Other
+    // host rows — e.g. the dynamic per-session plugin — consume it via
+    // `ctx.get('javaBridge')`. Provided unconditionally: the uber-JAR root is
+    // derived from the case path (rootFor), never from sandboxPolicy, which
+    // may not be available when this row applies early.
+    function rootFor(absCase) {
+      if (typeof absCase === 'string') {
+        // The case path is always <workspace>/wspace/data/…, but the DSH home
+        // itself may live under a directory also named "wspace" (e.g.
+        // ~/Documents/wspace/…), so anchor on the unique "/wspace/data/" marker
+        // instead of the first "/wspace/".
+        const i = absCase.indexOf('/wspace/data/')
+        if (i >= 0) return absCase.slice(0, i)
+      }
+      return ''
+    }
+
+    ctx.provide('javaBridge', {
+      async loadCase(format, absCase) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        return bridge.loadCase(format, absCase)
+      },
+      async runAclf(format, absCase, absCfg, absResults, stem) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        const cap = captureStdio()
+        let raw
+        try {
+          raw = await bridge.runAclf(format, absCase, absCfg, absResults, stem)
+        } finally {
+          cap.stop()
+        }
+        // Attach the intercepted stdout/stderr so the GUI "Show log info"
+        // panel can render them instead of the dsh terminal.
+        try {
+          const parsed = JSON.parse(raw)
+          if (parsed && typeof parsed === 'object') {
+            parsed.stdout = cap.out()
+            parsed.stderr = cap.err()
+            raw = JSON.stringify(parsed)
+          }
+        } catch (e) {}
+        return raw
+      },
+      async summarize(scope, sortRule, numRec) {
+        const bridge = await ensureBridge(rootFor(''))
+        return bridge.summarize(scope, sortRule, numRec)
+      },
+      async networkInfo() {
+        const bridge = await ensureBridge(rootFor(''))
+        return bridge.getNetworkInfo()
+      },
+      async runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix) {
+        const bridge = await ensureBridge(projectRoot || rootFor(''))
+        return bridge.runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)
+      },
+    })
+    diag('javaBridge provided unconditionally')
 
     const typert = ctx.get('typert')
     if (typert !== undefined) {
@@ -573,6 +828,12 @@ export default {
         invocations: DESCRIPTORS,
       })
       ctx.effect(() => dispose)
+    }
+    diag('apply complete; interpss=' + (ctx.get('interpss') !== undefined) + ' javaBridge=' + (ctx.get('javaBridge') !== undefined))
+    } catch (e) {
+      diag('apply FAILED: ' + (e && e.stack ? e.stack : e))
+      console.error('[dsh-interpss] apply failed:', e && e.stack ? e.stack : e)
+      throw e
     }
   },
 }

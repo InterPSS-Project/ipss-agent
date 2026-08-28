@@ -115,12 +115,17 @@ return {
       overflowY: 'auto',
     }
     const btn = {
-      padding: '7px 14px',
+      padding: '0 14px',
       borderRadius: '6px',
       border: '1px solid var(--dsw-alias-border-l1)',
       background: 'var(--dsw-alias-bg-layer-1)',
       color: 'var(--dsw-alias-label-primary)',
       cursor: 'pointer',
+      height: '34px',
+      boxSizing: 'border-box',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
     }
     const searchIcon = React.createElement('svg',
       { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
@@ -576,6 +581,11 @@ return {
       const [reportName, setReportName] = React.useState(null)
       const [reportView, setReportView] = React.useState('rendered')
       const [reportAvailable, setReportAvailable] = React.useState(false)
+      const [caseLoaded, setCaseLoaded] = React.useState(false)
+      const [caseLoading, setCaseLoading] = React.useState(false)
+      const [caseLoadError, setCaseLoadError] = React.useState(null)
+      const [caseLoadedInfo, setCaseLoadedInfo] = React.useState(null)
+      const [caseNetworkInfo, setCaseNetworkInfo] = React.useState(null)
 
       const isCustom = mode === 'custom'
 
@@ -605,6 +615,10 @@ return {
       function onCaseChanged(input) {
         const seq = ++checkSeq
         clearResults()
+        setCaseLoaded(false)
+        setCaseLoadError(null)
+        setCaseLoadedInfo(null)
+        setCaseNetworkInfo(null)
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
           (res) => {
@@ -613,7 +627,7 @@ return {
               setResult({
                 ok: true,
                 loaded: true,
-                networkInfo: res.networkInfo,
+                networkInfo: null,
                 input: input,
                 resultDir: res.resultDir,
                 files: res.files,
@@ -641,6 +655,34 @@ return {
         return { format: p.format, input: p.input, displayName: p.label }
       }
 
+      function load() {
+        const c = resolveCase()
+        if (c === null || c.input === '') return
+        setCaseLoading(true)
+        setCaseLoaded(false)
+        setCaseLoadError(null)
+        setCaseLoadedInfo(null)
+        setCaseNetworkInfo(null)
+        callRemote('loadCase', { format: c.format, input: c.input, sessionId }).then(
+          (res) => {
+            setCaseLoading(false)
+            if (res && res.ok) {
+              setCaseLoaded(true)
+              setCaseLoadError(null)
+              setCaseLoadedInfo((res.busCount != null ? res.busCount : '?') + ' buses, ' + (res.branchCount != null ? res.branchCount : '?') + ' branches')
+              callRemote('getNetworkInfo', { sessionId }).then(
+                (r2) => { if (r2 && r2.ok && r2.networkInfo) setCaseNetworkInfo(r2.networkInfo) },
+                () => {},
+              )
+            } else {
+              setCaseLoaded(false)
+              setCaseLoadError(res && res.error ? res.error : 'failed to load case')
+            }
+          },
+          (err) => { setCaseLoading(false); setCaseLoaded(false); setCaseLoadError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
       function run() {
         const c = resolveCase()
         if (c === null || c.input === '') return
@@ -651,6 +693,7 @@ return {
             setRunning(false)
             setResult(res)
             if (res && res.ok && res.exitCode === 0) {
+              if (res.networkInfo) setCaseNetworkInfo(res.networkInfo)
               callRemote('checkResultFiles', { input: c.input, sessionId }).then(
                 (r2) => { setReportAvailable(!!(r2 && r2.ok && r2.available)) },
                 () => {},
@@ -882,47 +925,49 @@ return {
       )
       options.push(React.createElement('option', { key: 'custom', value: 'custom' }, 'Select…'))
 
-      const selectStyle = { padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)' }
-      const controls = [
+      const selectStyle = { padding: '0 10px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', height: '34px', boxSizing: 'border-box', minWidth: '150px' }
+      const caseRow = [
         React.createElement('span', { key: 'case-label', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, 'Simu Case:'),
         React.createElement('select', { key: 'case', value: mode, onChange: (e) => { const m = e.target.value; lastSelection.mode = m; setMode(m); onCaseChanged(m === 'custom' ? customInput.trim() : (PRESETS[Number(m)] ? PRESETS[Number(m)].input : '')) }, style: selectStyle }, options),
+        React.createElement('button', { key: 'load', onClick: load, disabled: caseLoading, title: 'Load the selected case into the simulation model', style: { ...btn, marginLeft: '8px', opacity: caseLoading ? 0.6 : 1 } }, caseLoading ? 'Loading…' : 'Load'),
+        caseLoaded ? React.createElement('span', { key: 'caseloaded', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Loaded: ' + (caseLoadedInfo || '')) : null,
       ]
-      if (isCustom) {
-        controls.push(
-          React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: { ...selectStyle, marginLeft: '8px' } },
-            React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
-            React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
-          ),
-          React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', marginLeft: '8px', flex: '1 1 260px', minWidth: 0 } },
-            React.createElement('input', {
-              type: 'text',
-              value: customInput,
-              placeholder: 'data/ieee/Ieee118Bus/ieee118.ieee',
-              onChange: (e) => { const v = e.target.value; lastSelection.customInput = v; setCustomInput(v); onCaseChanged(v.trim()) },
-              style: { ...selectStyle, flex: '1 1 auto', minWidth: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' },
-            }),
-            React.createElement('button', {
-              onClick: openPicker,
-              title: pickerOpen ? 'Close case picker' : 'Pick a case file',
-              'aria-label': pickerOpen ? 'Close case picker' : 'Pick a case file',
-              style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '34px', padding: 0 },
-            }, searchIcon),
-          ),
-        )
-      }
-      controls.push(
-        React.createElement('div', { key: 'run-group', style: { display: 'flex', alignItems: 'center', marginLeft: '8px' } },
-          React.createElement('button', { onClick: run, disabled: running, style: { ...btn, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none', opacity: running ? 0.6 : 1 } }, running ? 'Running…' : 'ACLF'),
+      const caseInputRow = isCustom ? [
+        React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: selectStyle },
+          React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
+          React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
+        ),
+        React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', width: '380px', maxWidth: '100%' } },
+          React.createElement('input', {
+            type: 'text',
+            value: customInput,
+            placeholder: 'data/ieee/Ieee118Bus/ieee118.ieee',
+            onChange: (e) => { const v = e.target.value; lastSelection.customInput = v; setCustomInput(v); onCaseChanged(v.trim()) },
+            style: { ...selectStyle, flex: '1 1 auto', minWidth: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' },
+          }),
+          React.createElement('button', {
+            onClick: openPicker,
+            title: pickerOpen ? 'Close case picker' : 'Pick a case file',
+            'aria-label': pickerOpen ? 'Close case picker' : 'Pick a case file',
+            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '34px', padding: 0 },
+          }, searchIcon),
+        ),
+      ] : null
+      const actionRow = [
+        React.createElement('div', { key: 'run-group', style: { display: 'flex', alignItems: 'center' } },
+          React.createElement('button', { onClick: run, disabled: running || !caseLoaded, style: { ...btn, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none', opacity: (running || !caseLoaded) ? 0.6 : 1 } }, running ? 'Running…' : 'ACLF'),
           React.createElement('button', {
             onClick: openOptions,
+            disabled: !caseLoaded,
             title: 'AC Loadflow options',
             'aria-label': 'AC Loadflow options',
-            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '7px 10px' },
+            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '7px 10px', opacity: !caseLoaded ? 0.6 : 1 },
           }, gearIcon),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
         ),
+        caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
         optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Options saved') : null,
-      )
+      ]
 
       let picker = null
       if (pickerOpen) {
@@ -954,7 +999,6 @@ return {
         if (result.ok) {
           body = React.createElement('div', null,
             React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Load flow converged'),
-            result.networkInfo ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '340px' } }, result.networkInfo) : null,
             React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Results written to: ' + result.resultDir),
             React.createElement('div', { style: { marginTop: '4px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Files: ' + (result.files ? result.files.join(', ') : '')),
             React.createElement('div', { style: { marginTop: '12px' } },
@@ -1079,7 +1123,7 @@ return {
       ) : null
 
       const optInputStyle = { ...selectStyle, width: '100%' }
-      const optRow = (label, control) => React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '9px' } },
+      const optRow = (label, control, indent) => React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '9px', marginLeft: indent || 0 } },
         React.createElement('span', { style: { width: '168px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flexShrink: 0, lineHeight: '1.3' } }, label),
         React.createElement('div', { style: { flex: '1 1 auto', minWidth: 0, display: 'flex', gap: '8px', alignItems: 'center' } }, control),
       )
@@ -1104,6 +1148,16 @@ return {
         React.createElement('input', { type: 'number', step: 'any', disabled: !!disabled, value: optForm[key], onChange: (e) => setOptForm({ ...optForm, [key]: e.target.value }), style: { ...selectStyle, width: '70px', padding: '3px 6px', opacity: disabled ? 0.5 : 1 } }),
       )
 
+      const optGroup = (title, fields) => React.createElement('div', { key: title, style: { border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', padding: '12px 14px', marginBottom: '12px' } },
+        React.createElement('div', { style: { fontWeight: 600, fontSize: '13px', marginBottom: '10px', color: 'var(--dsw-alias-label-primary)' } }, title),
+        React.createElement('div', { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', columnGap: '24px', rowGap: '10px' } },
+          fields.map((f) => React.createElement('div', { key: f[0], style: { display: 'flex', alignItems: 'center', gap: '10px' } },
+            React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', flexShrink: 0 } }, f[0]),
+            f[1],
+          )),
+        ),
+      )
+
       const OPT_TABS = [['main', 'Main'], ['nr', 'NR Config'], ['adj', 'Adj/Ctrl Setting']]
 
       function renderOptTab() {
@@ -1111,35 +1165,39 @@ return {
         if (optTab === 'nr') {
           return React.createElement('div', null,
             optRow('Optimize Algorithm', optSel('optAlgo', OPT_ALGOS, undefined, '200px')),
-            optRow('Variable Update Limit', optCheckBox('variableUpdateLimit')),
-            optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit')),
-            optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit')),
-            optRow('Stop No Solution Found', optCheckBox('stopNoSolutionFound')),
-            optRow('Min Scale Factor', optNum('minScaleFactor')),
+            optCheck('variableUpdateLimit', 'Variable Update Limit'),
+            optRow('Delta Voltage Ang Limit', optNum('deltaVAngLimit', '150px'), 44),
+            optRow('Delta Voltage Mag Limit', optNum('deltaVMagLimit', '150px'), 44),
+            optCheck('stopNoSolutionFound', 'Stop No Solution Found'),
+            optRow('Min Scale Factor', optNum('minScaleFactor', '150px')),
           )
         }
         if (optTab === 'adj') {
-          return React.createElement('div', { style: { display: 'flex', gap: '28px' } },
-            React.createElement('div', { style: { flex: '1 1 0' } },
-              optRow('Limit Ctrl StartPoint', optNum('limitCtrlStartPoint', undefined, !optForm.applyLimitControl)),
-              optRow('Limit Ctrl Apply Type', optSel('limitCtrlApplyType', APPLY_TYPES, !optForm.applyLimitControl)),
-              optRow('Limit Ctrl ErrFactor', optNum('limitCtrlTolearnceFactor', undefined, !optForm.applyLimitControl)),
-              optRow('Voltage Adj StartPoint', optNum('voltAdjStartPoint', undefined, !optForm.applyVoltAdjust)),
-              optRow('Voltage Adj Apply Type', optSel('voltAdjApplyType', APPLY_TYPES, !optForm.applyVoltAdjust)),
-              optRow('Voltage Adj Tolerance (PU)', optNum('voltAdjTolearnce', undefined, !optForm.applyVoltAdjust)),
-              optRow('dQ/dV Threshold', optNum('dQ_dVThreshold', undefined, !optForm.applyVoltAdjust)),
-            ),
-            React.createElement('div', { style: { flex: '1 1 0' } },
-              optRow('Power Adj StartPoint', optNum('powerAdjStartPoint', undefined, !optForm.applyPowerAdjust)),
-              optRow('Power Adj Apply Type', optSel('powerAdjApplyType', APPLY_TYPES, !optForm.applyPowerAdjust)),
-              optRow('Power Adj ErrFactor', optNum('powerAdjTolearnceFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('PVLimit Ctrl AccFactor', optNum('pvLimitAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('ReQBus Adj AccFactor', optNum('reQBusAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('Xfr Tap Ctrl AccFactor', optNum('xfrTapAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('PQLimit Ctrl AccFactor', optNum('pqLimitAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('SVC Ctrl AccFactor', optNum('svcAccFactor', undefined, !optForm.applyPowerAdjust)),
-              optRow('PSXfr Power Ctrl AccFactor', optNum('psXfrPContrlAccFactor', undefined, !optForm.applyPowerAdjust)),
-            ),
+          return React.createElement('div', null,
+            optGroup('Limit Ctrl', [
+              ['Limit Ctrl StartPoint', optNum('limitCtrlStartPoint', '150px', !optForm.applyLimitControl)],
+              ['Limit Ctrl ErrFactor', optNum('limitCtrlTolearnceFactor', '150px', !optForm.applyLimitControl)],
+              ['Limit Ctrl Apply Type', optSel('limitCtrlApplyType', APPLY_TYPES, !optForm.applyLimitControl)],
+            ]),
+            optGroup('Voltage Adj', [
+              ['Voltage Adj StartPoint', optNum('voltAdjStartPoint', '150px', !optForm.applyVoltAdjust)],
+              ['Voltage Adj Tolerance (PU)', optNum('voltAdjTolearnce', '150px', !optForm.applyVoltAdjust)],
+              ['Voltage Adj Apply Type', optSel('voltAdjApplyType', APPLY_TYPES, !optForm.applyVoltAdjust)],
+              ['dQ/dV Threshold', optNum('dQ_dVThreshold', '150px', !optForm.applyVoltAdjust)],
+            ]),
+            optGroup('Power Adj', [
+              ['Power Adj StartPoint', optNum('powerAdjStartPoint', '150px', !optForm.applyPowerAdjust)],
+              ['Power Adj ErrFactor', optNum('powerAdjTolearnceFactor', '150px', !optForm.applyPowerAdjust)],
+              ['Power Adj Apply Type', optSel('powerAdjApplyType', APPLY_TYPES, !optForm.applyPowerAdjust)],
+            ]),
+            optGroup('Acceleration Factors', [
+              ['PVLimit Ctrl AccFactor', optNum('pvLimitAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['PQLimit Ctrl AccFactor', optNum('pqLimitAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['ReQBus Adj AccFactor', optNum('reQBusAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['SVC Ctrl AccFactor', optNum('svcAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['Xfr Tap Ctrl AccFactor', optNum('xfrTapAccFactor', '150px', !optForm.applyPowerAdjust)],
+              ['PSXfr Power Ctrl AccFactor', optNum('psXfrPContrlAccFactor', '150px', !optForm.applyPowerAdjust)],
+            ]),
           )
         }
         return React.createElement('div', null,
@@ -1273,11 +1331,21 @@ return {
         },
       }, diagramTip.text) : null
 
+      const networkInfoPanel = caseNetworkInfo ? React.createElement('div', { style: { marginTop: '16px' } },
+        React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: '6px' } }, 'Network info'),
+        React.createElement('pre', { style: { ...mono, ...panel, marginTop: 0, maxHeight: '340px' } }, caseNetworkInfo),
+      ) : null
+
       return React.createElement('div', { style: { padding: '20px', maxWidth: '860px' } },
         React.createElement('h2', { style: { margin: '0 0 4px' } }, 'InterPSS'),
         React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--dsw-alias-label-secondary)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
-        React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, controls),
+        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' } },
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, caseRow),
+          caseInputRow ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', width: '100%' } }, caseInputRow) : null,
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, actionRow),
+        ),
         picker,
+        networkInfoPanel,
         body,
         connModal,
         ctxMenuEl,
