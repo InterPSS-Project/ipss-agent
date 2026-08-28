@@ -105,6 +105,7 @@ Find the top N-1 loaded branches
 
 | Topic | Document |
 | --- | --- |
+| **Architecture** | [docs/architecture.md](docs/architecture.md) |
 | Layout, build, JARs, agent skills | [Setup.md](Setup.md) |
 | `IpssCmd` (Java CLI) usage | [IpssCmd.md](IpssCmd.md) |
 | Markdown report generator | [GenReport.md](GenReport.md) |

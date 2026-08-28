@@ -260,6 +260,8 @@ Writes `AC_Loadflow_Report.md` into the same result directory.
 
 Thresholds come from `config/gen_report.json`. See [GenReport.md](GenReport.md).
 
+For system design, see [docs/architecture.md](docs/architecture.md).
+
 ## Step 6: Verifying the `ipss-sim` Agent Skill
 
 This repository already includes agent-facing skill files so Codex and Claude can
