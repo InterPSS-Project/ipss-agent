@@ -579,25 +579,58 @@ return {
         let displayName = args && typeof args.displayName === 'string' && args.displayName.trim() !== '' ? args.displayName.trim() : stem
         displayName = String(displayName).replace(/[\r\n\t'"]/g, ' ').trim()
 
-        if (javaBridge === undefined || typeof javaBridge.runReport !== 'function') {
-          return { ok: false, error: 'in-process bridge unavailable (install the persistent InterPSS plugin)' }
-        }
-        try {
-          const raw = await javaBridge.runReport('nerc', displayName, root, resultDir, null)
-          const parsed = JSON.parse(raw)
-          if (parsed && parsed.ok) {
-            return {
-              ok: true,
-              markdown: parsed.markdown || '',
-              resultDir: parsed.resultDir || resultDir,
-              input: casePath,
-              displayName: parsed.displayName || displayName,
+        // In-process bridge path (preferred): no JVM spawn, cached network.
+        if (javaBridge !== undefined && typeof javaBridge.runReport === 'function') {
+          try {
+            const raw = await javaBridge.runReport('nerc', displayName, root, resultDir, null)
+            const parsed = JSON.parse(raw)
+            if (parsed && parsed.ok) {
+              return {
+                ok: true,
+                markdown: parsed.markdown || '',
+                resultDir: parsed.resultDir || resultDir,
+                input: casePath,
+                displayName: parsed.displayName || displayName,
+              }
             }
+            return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runReport failed' }
+          } catch (e) {
+            return { ok: false, error: 'bridge runReport failed: ' + (e && e.message ? e.message : String(e)) }
           }
-          return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runReport failed' }
-        } catch (e) {
-          return { ok: false, error: 'bridge runReport failed: ' + (e && e.message ? e.message : String(e)) }
         }
+
+        // Fallback: shell out to the Java report subcommand (IpssCmd report nerc).
+        const shell = ctx.get('shell')
+        if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
+
+        const wspace = root + '/wspace'
+        const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
+        const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd report nerc ' + shellQuote(displayName) + ' ' + shellQuote(resultDir)
+        const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 120000, stdoutMaxBytes: 300000 })
+
+        let res
+        try {
+          res = await shell.run(spec)
+        } catch (e) {
+          return { ok: false, error: 'command failed to start: ' + (e && e.message ? e.message : String(e)) }
+        }
+
+        if (res.exitCode !== 0) {
+          return { ok: false, error: 'report generation failed (exit ' + res.exitCode + ')\n' + (res.stderr.text || res.stdout.text || '') }
+        }
+
+        let markdown = null
+        const fs = ctx.get('fs')
+        if (fs !== undefined) {
+          try {
+            const target = await fs.resolve(wspace + '/' + resultDir + '/NERC_TPL_001_5_Report.md')
+            markdown = await fs.readText(target)
+          } catch (e) {
+            markdown = null
+          }
+        }
+
+        return { ok: true, markdown: markdown, resultDir: resultDir, input: casePath, displayName: displayName }
       },
 
       async getAclfOptions(args) {
