@@ -595,7 +595,8 @@ return {
             }
             return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runReport failed' }
           } catch (e) {
-            return { ok: false, error: 'bridge runReport failed: ' + (e && e.message ? e.message : String(e)) }
+            // Bridge threw (e.g. stale JAR / signature mismatch): fall through
+            // to the Java CLI shell fallback below instead of failing the report.
           }
         }
 
