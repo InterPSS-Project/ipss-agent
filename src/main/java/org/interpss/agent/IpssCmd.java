@@ -20,11 +20,13 @@ public final class IpssCmd {
     public static void main(String[] args) throws Exception {
         CliArgs cli = CliArgs.parse(args);
         ProjectPaths paths = ProjectPaths.discover();
+        execute(cli, paths);
+    }
 
+    public static void execute(CliArgs cli, ProjectPaths paths) throws Exception {
         Path caseFile = paths.resolveWspace(cli.input());
         if (!Files.isRegularFile(caseFile)) {
-            System.err.println("Case file not found: " + caseFile);
-            System.exit(1);
+            throw new IllegalArgumentException("Case file not found: " + caseFile);
         }
 
         String caseFilePath = caseFile.toString();
@@ -33,11 +35,19 @@ public final class IpssCmd {
 
         switch (cli.simutype()) {
             case "aclf" -> AclfRunner.run(paths, cli.format(), caseFilePath, cli.input(), resultsDir, stem);
-            case "ca" -> ContingencyRunner.run(paths, cli, caseFilePath, resultsDir, stem);
+            case "ca" -> {
+                try {
+                    ContingencyRunner.run(paths, cli, caseFilePath, resultsDir, stem);
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    System.err.println(e.getMessage());
+                    CliArgs.printUsage();
+                    System.exit(1);
+                }
+            }
             default -> {
                 System.err.println("Invalid simulation type");
                 System.exit(1);
             }
-        } 
+        }
     }
 }

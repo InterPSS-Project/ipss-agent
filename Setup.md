@@ -108,6 +108,27 @@ manifest declares `org.interpss.agent.IpssCmd` as the main class.
 The compiled `target/` output and downloaded Maven distribution are local build
 artifacts and are not committed.
 
+## Step 1b: Run Tests
+
+From the **project root**, run the JUnit 5 test suite and generate a JaCoCo coverage
+report:
+
+```bash
+./mvnw test
+open target/site/jacoco/index.html   # macOS — view coverage report
+```
+
+Windows PowerShell:
+
+```powershell
+.\mvnw.cmd test
+Start-Process target/site/jacoco/index.html
+```
+
+Tests use self-contained fixtures under `src/test/resources/` (IEEE-14 CDF, IEEE-9
+PSS/E RAW, minimal contingency JSON). JaCoCo reports coverage but does not enforce
+a minimum threshold.
+
 ## Step 2: JAR Dependencies
 
 The runtime dependency JARs are resolved by Maven during the build and bundled

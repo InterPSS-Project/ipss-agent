@@ -27,7 +27,11 @@ public class SimuModelRepository {
 	}
 	
 	public void setAclfNetBase(AclfNetwork baseAclfNet) {
-		log.info("Setting ACLF network base case: {}", baseAclfNet.getName());
+		if (baseAclfNet != null) {
+			log.info("Setting ACLF network base case: {}", baseAclfNet.getName());
+		} else {
+			log.info("Clearing ACLF network base case");
+		}
 		this.aclfNetBase = baseAclfNet;
 	}
 }

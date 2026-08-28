@@ -14,11 +14,7 @@ public final class NetworkLoader {
         return switch (format) {
             case "ieee" -> IeeeFileAdapter.createAclfNet(filePath);
             case "psse" -> PsseFileAdapter.createAclfNet(filePath);
-            default -> {
-                System.err.println("Invalid format");
-                System.exit(1);
-                throw new IllegalStateException();
-            }
+            default -> throw new IllegalArgumentException("Invalid format: " + format);
         };
     }
 }

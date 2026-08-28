@@ -46,32 +46,17 @@ public final class ContingencyRunner {
 
     public static void run(ProjectPaths paths, CliArgs cli, AclfNetwork net,
             Path resultsDir, String stem) throws Exception {
-        if (cli.contFile() == null || cli.monitorFile() == null) {
-            System.err.println("Contingency analysis requires cont_file and monitor_file arguments.");
-            CliArgs.printUsage();
-            System.exit(1);
-        }
+        ValidatedContingencyInputs inputs = validateInputs(paths, cli);
 
         ContingencyAnalysisAlgorithm algo = createContingencyAnalysisAlgorithm(net);
         algo.calculateDclf(DclfMethod.INC_LOSS);
 
-        Path contPath = paths.resolveWspace(cli.contFile());
-        Path monPath = paths.resolveWspace(cli.monitorFile());
-        if (!Files.isRegularFile(contPath)) {
-            System.err.println("Contingency file not found: " + contPath);
-            System.exit(1);
-        }
-        if (!Files.isRegularFile(monPath)) {
-            System.err.println("Monitor file not found: " + monPath);
-            System.exit(1);
-        }
-
         List<BranchContingencyRecord> contingencRecs =
-                ContingencyFileUtil.importContingenciesFromJson(new File(contPath.toString()));
+                ContingencyFileUtil.importContingenciesFromJson(new File(inputs.contPath().toString()));
         List<DclfBranchOutage> dclfContList = new DclfContingencyHelper(algo).createDclfContList(contingencRecs);
 
         List<MonitoredBranchRecord> monitoredBranches =
-                ContingencyFileUtil.importMonitoredBranchRecordsFromJson(new File(monPath.toString()));
+                ContingencyFileUtil.importMonitoredBranchRecordsFromJson(new File(inputs.monitorPath().toString()));
         Set<String> monitoredBranchIds = monitoredBranches.stream()
                 .map(MonitoredBranchRecord::getBranchId)
                 .collect(Collectors.toCollection(HashSet::new));
@@ -95,5 +80,25 @@ public final class ContingencyRunner {
         DclfContingencyDFrameAdapter dfAdapter = new DclfContingencyDFrameAdapter();
         DataFrame dfCaRec = dfAdapter.adapt(results);
         Csv.saver().save(dfCaRec, resultsDir.resolve(stem + "_DF_contingency.csv").toString());
+    }
+
+    public static ValidatedContingencyInputs validateInputs(ProjectPaths paths, CliArgs cli) {
+        if (cli.contFile() == null || cli.monitorFile() == null) {
+            throw new IllegalArgumentException(
+                    "Contingency analysis requires cont_file and monitor_file arguments.");
+        }
+
+        Path contPath = paths.resolveWspace(cli.contFile());
+        Path monPath = paths.resolveWspace(cli.monitorFile());
+        if (!Files.isRegularFile(contPath)) {
+            throw new IllegalStateException("Contingency file not found: " + contPath);
+        }
+        if (!Files.isRegularFile(monPath)) {
+            throw new IllegalStateException("Monitor file not found: " + monPath);
+        }
+        return new ValidatedContingencyInputs(contPath, monPath);
+    }
+
+    public record ValidatedContingencyInputs(Path contPath, Path monitorPath) {
     }
 }

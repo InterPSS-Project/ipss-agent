@@ -6,9 +6,19 @@ package org.interpss.agent.cli;
 public record CliArgs(String simutype, String format, String input, String contFile, String monitorFile) {
 
     public static CliArgs parse(String[] args) {
-        if (args.length < 3) {
+        try {
+            return parseValidated(args);
+        } catch (IllegalArgumentException e) {
+            System.err.println(e.getMessage());
             printUsage();
             System.exit(1);
+            throw new IllegalStateException();
+        }
+    }
+
+    public static CliArgs parseValidated(String[] args) {
+        if (args.length < 3) {
+            throw new IllegalArgumentException("Too few arguments: expected at least 3");
         }
         String simutype = args[0];
         String format = args[1];
@@ -17,14 +27,10 @@ public record CliArgs(String simutype, String format, String input, String contF
         String monitorFile = args.length > 4 ? args[4] : null;
 
         if (!simutype.equals("aclf") && !simutype.equals("ca")) {
-            System.err.println("Invalid simulation type: " + simutype);
-            printUsage();
-            System.exit(1);
+            throw new IllegalArgumentException("Invalid simulation type: " + simutype);
         }
         if (!format.equals("ieee") && !format.equals("psse")) {
-            System.err.println("Invalid format: " + format);
-            printUsage();
-            System.exit(1);
+            throw new IllegalArgumentException("Invalid format: " + format);
         }
         return new CliArgs(simutype, format, input, contFile, monitorFile);
     }
