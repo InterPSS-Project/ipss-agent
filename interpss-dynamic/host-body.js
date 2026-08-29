@@ -120,6 +120,19 @@ return {
     // `java-bridge`). Optional: when absent, runAclf falls back to shell-out.
     const javaBridge = ctx.get('javaBridge')
 
+    // Resolved `java` launcher for the CLI shell fallback. The persistent plugin
+    // exposes javaLauncher() on its javaBridge provider (JDK self-discovery on
+    // Windows); fall back to bare `java` when it is unavailable.
+    const javaLauncher = () => {
+      if (javaBridge !== undefined && typeof javaBridge.javaLauncher === 'function') {
+        try {
+          const j = javaBridge.javaLauncher()
+          if (typeof j === 'string' && j.trim() !== '') return j
+        } catch (e) {}
+      }
+      return 'java'
+    }
+
     function caseParts(caseInput) {
       const slash = caseInput.lastIndexOf('/')
       const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
@@ -463,7 +476,7 @@ return {
         const infoRel = parent + '/result/' + stem + '_network_info.txt'
 
         const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-        const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd aclf ' + format + ' ' + caseInput
+        const command = shellQuote(javaLauncher()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd aclf ' + format + ' ' + caseInput
         const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
 
         let res
@@ -572,7 +585,7 @@ return {
 
         const wspace = root + '/wspace'
         const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-        const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput + ' ' + shellQuote(contRel) + ' ' + shellQuote(monRel)
+        const command = shellQuote(javaLauncher()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput + ' ' + shellQuote(contRel) + ' ' + shellQuote(monRel)
         const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
 
         let res
@@ -701,7 +714,7 @@ return {
 
         const wspace = root + '/wspace'
         const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-        const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd report ' + reportType + ' ' + shellQuote(displayName) + ' ' + shellQuote(resultDir)
+        const command = shellQuote(javaLauncher()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd report ' + reportType + ' ' + shellQuote(displayName) + ' ' + shellQuote(resultDir)
         const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 120000, stdoutMaxBytes: 300000 })
 
         let res

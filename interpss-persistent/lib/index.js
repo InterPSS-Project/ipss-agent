@@ -11,12 +11,13 @@
 // "iPSS Agent".
 
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { writeFileSync, appendFileSync } from 'node:fs'
+import { writeFileSync, appendFileSync, existsSync, readdirSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 
-// Diagnostic sink inside the session workspace so the agent can read, after a
+// Diagnostic sink (portable, in the OS temp dir) so the agent can read, after a
 // restart, whether this plugin's apply() ran and what it did — without access
 // to the dsh web process stderr. Cleared on module load, then appended.
-const DIAG = '/Users/mzhou/Documents/wspace/gitRepo/ipss-agent/.dsh-interpss-diagnostic.log'
+const DIAG = tmpdir() + '/dsh-interpss-diagnostic.log'
 try { writeFileSync(DIAG, '', 'utf8') } catch {}
 function diag(line) {
   try { appendFileSync(DIAG, line + '\n', 'utf8') } catch {}
@@ -32,6 +33,61 @@ function jsonParam(name, wire) {
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
+}
+
+// --- Windows/java-bridge JVM discovery -------------------------------------
+// java-bridge locates the embedded JVM exclusively through process.env.JAVA_HOME
+// at ensureJvm() time. On Windows that variable is frequently missing from the
+// harness environment (it inherits the launching shell), so before starting the
+// JVM we self-discover a JDK and set JAVA_HOME. The same discovery feeds the
+// `java` launcher used by the CLI shell fallback.
+
+function javaHomeValid(home) {
+  if (typeof home !== 'string' || home === '') return false
+  const bin = home + '/bin'
+  return existsSync(bin + (process.platform === 'win32' ? '/java.exe' : '/java'))
+}
+
+function discoverJavaHome() {
+  if (javaHomeValid(process.env.JAVA_HOME)) return process.env.JAVA_HOME
+  const roots = []
+  if (process.platform === 'win32') {
+    const pf = process.env.ProgramFiles || 'C:\\Program Files'
+    roots.push(pf + '\\Java', pf + '\\Eclipse Adoptium')
+  } else if (process.platform === 'darwin') {
+    roots.push('/Library/Java/JavaVirtualMachines', '/System/Library/Java/JavaVirtualMachines')
+  } else {
+    roots.push('/usr/lib/jvm')
+  }
+  let best = null
+  let bestVer = -1
+  for (const root of roots) {
+    let entries = []
+    try { entries = readdirSync(root) } catch (e) { continue }
+    for (const name of entries) {
+      if (!/^jdk/i.test(name)) continue
+      const home = root + '/' + name
+      // On Windows require the server JVM library specifically (bin\server\jvm.dll)
+      // so JRE-only or broken layouts are skipped.
+      if (process.platform === 'win32') {
+        if (!existsSync(home + '\\bin\\server\\jvm.dll')) continue
+      } else if (!javaHomeValid(home)) {
+        continue
+      }
+      const m = /jdk[-_]?(\d+)/i.exec(name)
+      const ver = m ? parseInt(m[1], 10) : 0
+      if (ver > bestVer) { bestVer = ver; best = home }
+    }
+  }
+  return best
+}
+
+// Resolved `java` launcher: an absolute path under a discovered JAVA_HOME when
+// available (handles "C:\Program Files\Java\..." spaces), else the bare `java`
+// (resolved via PATH by the shell).
+function javaBin() {
+  const home = discoverJavaHome()
+  return home ? home + '/bin/java' + (process.platform === 'win32' ? '.exe' : '') : 'java'
 }
 
 const DESCRIPTORS = METHODS.map((method) => ({
@@ -128,6 +184,10 @@ let jbApi = null
 async function ensureBridge(root) {
   if (bridgePromise === null) {
     bridgePromise = (async () => {
+      // java-bridge reads JAVA_HOME at ensureJvm() time; self-discover a JDK on
+      // Windows (and friends) when the harness env lacks it, then hand it over.
+      const home = discoverJavaHome()
+      if (home) process.env.JAVA_HOME = home
       const mod = await import('java-bridge')
       // java-bridge v2.6 exports the helpers as top-level named exports; v2.7+
       // moved them onto the module's default namespace. Pick whichever surface
@@ -550,7 +610,7 @@ class InterpssService extends TypertRemoteService {
     const infoRel = parent + '/result/' + stem + '_network_info.txt'
 
     const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-    const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd aclf ' + format + ' ' + caseInput
+    const command = shellQuote(javaBin()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd aclf ' + format + ' ' + caseInput
     const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
 
     let res
@@ -660,7 +720,7 @@ class InterpssService extends TypertRemoteService {
 
     const wspace = root + '/wspace'
     const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-    const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput + ' ' + shellQuote(contRel) + ' ' + shellQuote(monRel)
+    const command = shellQuote(javaBin()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput + ' ' + shellQuote(contRel) + ' ' + shellQuote(monRel)
     const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
 
     let res
@@ -790,7 +850,7 @@ class InterpssService extends TypertRemoteService {
 
     const wspace = root + '/wspace'
     const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-    const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd report ' + reportType + ' ' + shellQuote(displayName) + ' ' + shellQuote(resultDir)
+    const command = shellQuote(javaBin()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd report ' + reportType + ' ' + shellQuote(displayName) + ' ' + shellQuote(resultDir)
     const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 120000, stdoutMaxBytes: 300000 })
 
     let res
@@ -945,6 +1005,12 @@ export default {
           }
         } catch (e) {}
         return raw
+      },
+      // Resolved `java` launcher for the dynamic plugin's CLI shell fallback.
+      // Synchronous, does NOT start the JVM; safe to call even when java-bridge
+      // is not installed (JDK discovery uses only node:fs + process).
+      javaLauncher() {
+        return javaBin()
       },
     })
     diag('javaBridge provided unconditionally')
