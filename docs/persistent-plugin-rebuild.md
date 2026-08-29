@@ -50,25 +50,41 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   getNetworkInfo`
 - `readCsv` whitelist includes `contingency`: `_DF_(bus|branch|gen|load|contingency)\.csv`
 - `javaBridge` provider exposes `runAclf`, `runContingency`, `runReport`,
-  `loadCase`, `summarize`, `getNetworkInfo`
+  `loadCase`, `summarize`, `getNetworkInfo`, and `javaLauncher()` (the resolved
+  `java` path consumed by the dynamic plugin's CLI fallback)
+- **Windows JDK discovery**: `ensureBridge()` sets `process.env.JAVA_HOME` from
+  `discoverJavaHome()` before `ensureJvm()` (java-bridge reads JAVA_HOME only at
+  that point, and it is usually missing in the Windows harness env); the CLI
+  fallbacks use `shellQuote(javaBin())` instead of bare `java`
+- Declare `@deepseek-ai/dsh-typert-protocol` in `dependencies` (it was a phantom
+  import) and keep the `DIAG` path portable (`os.tmpdir()`)
+
+The **dynamic** host (`host-body.js` / `index.js`) must stay in sync: its CLI
+fallbacks use `shellQuote(javaLauncher())`, where `javaLauncher()` reads
+`ctx.get('javaBridge').javaLauncher()` and falls back to `java`.
 
 ## 3. Pack, install, verify
 
+**Always bump a minor version before packing** (e.g. `0.2.0` → `0.2.1` in
+`package.json`). Each rebuild must ship a new version so the install picks up
+the fresh tarball instead of a cached older package.
+
 ```bash
 cd interpss-persistent
+# bump version first, e.g. 0.2.0 → 0.2.1
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.2.0.tgz
+rm -f deepseek-ai-dsh-interpss-0.2.1.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.2.0.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.2.1.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall
 cd /Users/mzhou/.dsh/profiles/web
 pnpm remove @deepseek-ai/dsh-interpss
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.2.0.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.2.1.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 
