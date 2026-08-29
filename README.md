@@ -17,7 +17,7 @@ Or in the native AI Chat way:
 Prompt Codex, Claude Code, or DeepSeek Harness to clone and build **ipss-agent**:
 
 ```text
-Install and setup ipss-agent from https://github.com/InterPSS-Project/ipss-agent
+Install(Update) and setup ipss-agent from https://github.com/InterPSS-Project/ipss-agent
 ```
 
 Depending on your network speed, it may take some time to download dependencies and build the CLI.
@@ -41,10 +41,10 @@ init  # for the first time installation
 
 #### DSH Plugin setup
 
-See [InstallDSHPlugin.md](InstallDSHPlugin.md). Prompt DeepSeek Harness to install the InterPSS DSH plugin:
+See [InstallDSHPlugin.md](InstallDSHPlugin.md). Prompt DeepSeek Harness to install InterPSS DSH plugin:
 
 ```text
-Install the InterPSS DSH plugin
+Install(update) InterPSS DSH plugin
 ```
 
 
