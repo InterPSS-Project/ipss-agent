@@ -47,19 +47,20 @@ See [InstallDSHPlugin.md](InstallDSHPlugin.md). Prompt DeepSeek Harness to insta
 Install(update) InterPSS DSH plugin
 ```
 
+## User Guide
+
+- InterPSS DSH Plugin user guide [docs/plugin_user_guide.md](docs/plugin_user_guide.md)          
+- iPSS Agent Chat user guide [docs/agent_chat_user_guide.md](docs/agent_chat_user_guide.md)
+
 ## Reference
 
 
 | Topic                             | Document                                                                                   |
 | --------------------------------- | ------------------------------------------------------------------------------------------ |
-| **Architecture**                  | [docs/architecture.md](docs/architecture.md)                                               |
 | Layout, build, JARs, agent skills | [Setup.md](Setup.md)                                                                       |
 | `IpssCmd` (Java CLI) usage        | [IpssCmd.md](IpssCmd.md)                                                                   |
 | Markdown report generator         | [GenReport.md](GenReport.md)                                                               |
 | DeepSeek Harness DSH plugin       | [InstallDSHPlugin.md](InstallDSHPlugin.md)                                                 |
-| InterPSS DSH Plugin user guide    | [docs/plugin_user_guide.md](docs/plugin_user_guide.md)                                     |
-| iPSS Agent Chat user guide        | [docs/agent_chat_user_guide.md](docs/agent_chat_user_guide.md)                             |
-| DSH plugin package                | [interpss-persistent/README.md](interpss-persistent/README.md)                             |
 | Interactive HTML dashboards       | `[.agents/skills/nerc-report-html/SKILL.md](.agents/skills/nerc-report-html/SKILL.md)`     |
 | NERC slide decks                  | `[.agents/skills/nerc-report-slides/SKILL.md](.agents/skills/nerc-report-slides/SKILL.md)` |
 
