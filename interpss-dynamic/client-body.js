@@ -579,6 +579,7 @@ return {
       const [reportError, setReportError] = React.useState(null)
       const [reportMarkdown, setReportMarkdown] = React.useState(null)
       const [reportName, setReportName] = React.useState(null)
+      const [reportType, setReportType] = React.useState('nerc')
       const [reportView, setReportView] = React.useState('rendered')
       const [reportAvailable, setReportAvailable] = React.useState(false)
       const [caseLoaded, setCaseLoaded] = React.useState(false)
@@ -749,6 +750,7 @@ return {
             if (res && res.ok) {
               setReportMarkdown(res.markdown || '')
               setReportName(res.displayName || c.displayName)
+              setReportType(res.reportType === 'aclf' ? 'aclf' : 'nerc')
               setReportError(null)
             } else {
               setReportError(res && res.error ? res.error : 'failed to generate report')
@@ -1335,7 +1337,7 @@ return {
           style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '960px', height: '82vh', display: 'flex', flexDirection: 'column' },
         },
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' } },
-            React.createElement('div', { style: { fontWeight: 600, fontSize: '15px' } }, 'NERC TPL-001-5 Report' + (reportName ? ' — ' + reportName : '')),
+            React.createElement('div', { style: { fontWeight: 600, fontSize: '15px' } }, (reportType === 'aclf' ? 'AC Loadflow Report' : 'NERC TPL-001-5 Report') + (reportName ? ' — ' + reportName : '')),
             React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
               React.createElement('button', { onClick: () => setReportView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: reportView === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered'),
               React.createElement('button', { onClick: () => setReportView('source'), style: { ...btn, padding: '4px 10px', borderColor: reportView === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source'),

@@ -654,10 +654,22 @@ class InterpssService extends TypertRemoteService {
     let displayName = input && typeof input.displayName === 'string' && input.displayName.trim() !== '' ? input.displayName.trim() : stem
     displayName = String(displayName).replace(/[\r\n\t'"]/g, ' ').trim()
 
+    // NERC when a contingency CSV is present, otherwise AC Loadflow report.
+    const fs = this.ctx.get('fs')
+    let hasContingency = false
+    if (fs !== undefined) {
+      try {
+        const target = await fs.resolve(root + '/wspace/' + resultDir + '/' + stem + '_DF_contingency.csv')
+        hasContingency = (await fs.stat(target)) !== undefined
+      } catch (e) {}
+    }
+    const reportType = hasContingency ? 'nerc' : 'aclf'
+    const reportFile = hasContingency ? 'NERC_TPL_001_5_Report.md' : 'AC_Loadflow_Report.md'
+
     const bridge = this.bridge()
     if (bridge !== undefined && typeof bridge.runReport === 'function') {
       try {
-        const raw = await bridge.runReport('nerc', displayName, root, resultDir, null)
+        const raw = await bridge.runReport(reportType, displayName, root, resultDir, null)
         const parsed = JSON.parse(raw)
         if (parsed && parsed.ok) {
           return {
@@ -666,6 +678,7 @@ class InterpssService extends TypertRemoteService {
             resultDir: parsed.resultDir || resultDir,
             input: casePath,
             displayName: parsed.displayName || displayName,
+            reportType: reportType,
           }
         }
         return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runReport failed' }
@@ -675,13 +688,13 @@ class InterpssService extends TypertRemoteService {
       }
     }
 
-    // Fallback: shell out to the Java report subcommand (IpssCmd report nerc).
+    // Fallback: shell out to the Java report subcommand.
     const shell = this.ctx.get('shell')
     if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
 
     const wspace = root + '/wspace'
     const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-    const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd report nerc ' + shellQuote(displayName) + ' ' + shellQuote(resultDir)
+    const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd report ' + reportType + ' ' + shellQuote(displayName) + ' ' + shellQuote(resultDir)
     const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 120000, stdoutMaxBytes: 300000 })
 
     let res
@@ -696,17 +709,16 @@ class InterpssService extends TypertRemoteService {
     }
 
     let markdown = null
-    const fs = this.ctx.get('fs')
     if (fs !== undefined) {
       try {
-        const target = await fs.resolve(wspace + '/' + resultDir + '/NERC_TPL_001_5_Report.md')
+        const target = await fs.resolve(wspace + '/' + resultDir + '/' + reportFile)
         markdown = await fs.readText(target)
       } catch (e) {
         markdown = null
       }
     }
 
-    return { ok: true, markdown: markdown, resultDir: resultDir, input: casePath, displayName: displayName }
+    return { ok: true, markdown: markdown, resultDir: resultDir, input: casePath, displayName: displayName, reportType: reportType }
   }
 
   async getAclfOptions(input) {
