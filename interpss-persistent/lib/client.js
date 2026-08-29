@@ -4,6 +4,12 @@
 // /plugins/@deepseek-ai/dsh-interpss/client.js. It registers the InterPSS tab
 // in the `conversation.view` slot (between Chat and Trajectory) and calls the
 // Host half through the `/api` RPC endpoints `interpss/<method>`.
+//
+// Rebuilt from interpss-dynamic/client-body.js: identical UI/behavior to the
+// dynamic plugin (Load button, case/action rows, CA button + contingency CSV
+// viewer, network-info panel, report dialog), with the persistent transport
+// (connection.rpc.call over the /api Typert gateway) substituted for the
+// dynamic host.call bridge.
 
 window.__ModuleLoader__.load({
   id: "@deepseek-ai/dsh-interpss",
@@ -13,6 +19,18 @@ window.__ModuleLoader__.load({
     Object.defineProperty(exports, Symbol.toStringTag, { value: "Module" });
 
     var React = require("react");
+module.exports = {
+  inject: ['slots'],
+  apply(ctx) {
+    const callRemote = (method, input) => {
+      const connection = ctx.get('connection')
+      if (connection === undefined) return Promise.reject(new Error('InterPSS: client connection service unavailable'))
+      return connection.rpc.call('/api', 'interpss/' + method, { args: { input: input } }).then((result) => {
+        if (result && result.ok) return result.value
+        const message = (result && result.error && result.error.message) ? result.error.message : 'remote call failed'
+        return Promise.reject(new Error(message))
+      })
+    }
     const PRESETS = [
       { label: 'IEEE 118-bus', format: 'ieee', input: 'data/ieee/Ieee118Bus/ieee118.ieee' },
       { label: 'IEEE 14-bus', format: 'ieee', input: 'data/ieee/Ieee14Bus/ieee14.ieee' },
@@ -126,12 +144,17 @@ window.__ModuleLoader__.load({
       overflowY: 'auto',
     }
     const btn = {
-      padding: '7px 14px',
+      padding: '0 14px',
       borderRadius: '6px',
       border: '1px solid var(--dsw-alias-border-l1)',
       background: 'var(--dsw-alias-bg-layer-1)',
       color: 'var(--dsw-alias-label-primary)',
       cursor: 'pointer',
+      height: '34px',
+      boxSizing: 'border-box',
+      display: 'inline-flex',
+      alignItems: 'center',
+      justifyContent: 'center',
     }
     const searchIcon = React.createElement('svg',
       { width: 15, height: 15, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' },
@@ -585,8 +608,17 @@ window.__ModuleLoader__.load({
       const [reportError, setReportError] = React.useState(null)
       const [reportMarkdown, setReportMarkdown] = React.useState(null)
       const [reportName, setReportName] = React.useState(null)
+      const [reportType, setReportType] = React.useState('nerc')
       const [reportView, setReportView] = React.useState('rendered')
       const [reportAvailable, setReportAvailable] = React.useState(false)
+      const [caseLoaded, setCaseLoaded] = React.useState(false)
+      const [caseLoading, setCaseLoading] = React.useState(false)
+      const [caseLoadError, setCaseLoadError] = React.useState(null)
+      const [caseLoadedInfo, setCaseLoadedInfo] = React.useState(null)
+      const [caseNetworkInfo, setCaseNetworkInfo] = React.useState(null)
+      const [caRunning, setCaRunning] = React.useState(false)
+      const [caError, setCaError] = React.useState(null)
+      const [caResult, setCaResult] = React.useState(null)
 
       const isCustom = mode === 'custom'
 
@@ -616,6 +648,13 @@ window.__ModuleLoader__.load({
       function onCaseChanged(input) {
         const seq = ++checkSeq
         clearResults()
+        setCaseLoaded(false)
+        setCaseLoadError(null)
+        setCaseLoadedInfo(null)
+        setCaseNetworkInfo(null)
+        setCaRunning(false)
+        setCaError(null)
+        setCaResult(null)
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
           (res) => {
@@ -624,7 +663,7 @@ window.__ModuleLoader__.load({
               setResult({
                 ok: true,
                 loaded: true,
-                networkInfo: res.networkInfo,
+                networkInfo: null,
                 input: input,
                 resultDir: res.resultDir,
                 files: res.files,
@@ -652,6 +691,34 @@ window.__ModuleLoader__.load({
         return { format: p.format, input: p.input, displayName: p.label }
       }
 
+      function load() {
+        const c = resolveCase()
+        if (c === null || c.input === '') return
+        setCaseLoading(true)
+        setCaseLoaded(false)
+        setCaseLoadError(null)
+        setCaseLoadedInfo(null)
+        setCaseNetworkInfo(null)
+        callRemote('loadCase', { format: c.format, input: c.input, sessionId }).then(
+          (res) => {
+            setCaseLoading(false)
+            if (res && res.ok) {
+              setCaseLoaded(true)
+              setCaseLoadError(null)
+              setCaseLoadedInfo((res.busCount != null ? res.busCount : '?') + ' buses, ' + (res.branchCount != null ? res.branchCount : '?') + ' branches')
+              callRemote('getNetworkInfo', { sessionId }).then(
+                (r2) => { if (r2 && r2.ok && r2.networkInfo) setCaseNetworkInfo(r2.networkInfo) },
+                () => {},
+              )
+            } else {
+              setCaseLoaded(false)
+              setCaseLoadError(res && res.error ? res.error : 'failed to load case')
+            }
+          },
+          (err) => { setCaseLoading(false); setCaseLoaded(false); setCaseLoadError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
       function run() {
         const c = resolveCase()
         if (c === null || c.input === '') return
@@ -662,6 +729,7 @@ window.__ModuleLoader__.load({
             setRunning(false)
             setResult(res)
             if (res && res.ok && res.exitCode === 0) {
+              if (res.networkInfo) setCaseNetworkInfo(res.networkInfo)
               callRemote('checkResultFiles', { input: c.input, sessionId }).then(
                 (r2) => { setReportAvailable(!!(r2 && r2.ok && r2.available)) },
                 () => {},
@@ -671,6 +739,26 @@ window.__ModuleLoader__.load({
             }
           },
           (err) => { setRunning(false); setResult({ ok: false, error: String(err && err.message ? err.message : err) }); setReportAvailable(false) },
+        )
+      }
+
+      function runCa() {
+        const c = resolveCase()
+        if (c === null || c.input === '') return
+        setCaRunning(true)
+        setCaError(null)
+        setCaResult(null)
+        callRemote('runCa', { format: c.format, input: c.input, sessionId }).then(
+          (res) => {
+            setCaRunning(false)
+            if (res && res.ok) {
+              setCaError(null)
+              setCaResult({ resultDir: res.resultDir, contingencyFile: res.contingencyFile, stdout: res.stdout || '', stderr: res.stderr || '' })
+            } else {
+              setCaError(res && res.error ? res.error : 'contingency analysis failed')
+            }
+          },
+          (err) => { setCaRunning(false); setCaError(String(err && err.message ? err.message : err)) },
         )
       }
 
@@ -691,6 +779,7 @@ window.__ModuleLoader__.load({
             if (res && res.ok) {
               setReportMarkdown(res.markdown || '')
               setReportName(res.displayName || c.displayName)
+              setReportType(res.reportType === 'aclf' ? 'aclf' : 'nerc')
               setReportError(null)
             } else {
               setReportError(res && res.error ? res.error : 'failed to generate report')
@@ -728,11 +817,19 @@ window.__ModuleLoader__.load({
         onCaseChanged(c.path)
       }
 
-      function currentCsvPath() {
-        if (csvSel === null || result === null) return null
-        const fileName = result && result.files ? result.files.find((f) => f.indexOf('_DF_' + csvSel + '.csv') !== -1) : undefined
+      function filePathForKind(kind) {
+        if (kind === 'contingency' && caResult !== null) {
+          return caResult.resultDir + '/' + caResult.contingencyFile
+        }
+        if (result === null) return null
+        const fileName = result.files ? result.files.find((f) => f.indexOf('_DF_' + kind + '.csv') !== -1) : undefined
         if (fileName === undefined) return null
         return result.resultDir + '/' + fileName
+      }
+
+      function currentCsvPath() {
+        if (csvSel === null) return null
+        return filePathForKind(csvSel)
       }
 
       function openCsv(kind) {
@@ -753,13 +850,13 @@ window.__ModuleLoader__.load({
         setCsvHasMore(false)
         setCsvError(null)
         setCsvLoading(true)
-        const fileName = result && result.files ? result.files.find((f) => f.indexOf('_DF_' + kind + '.csv') !== -1) : undefined
-        if (fileName === undefined) {
+        const path = filePathForKind(kind)
+        if (path === null) {
           setCsvLoading(false)
           setCsvError('result file not found for ' + kind)
           return
         }
-        callRemote('readCsv', { path: result.resultDir + '/' + fileName, sessionId, start: 0, limit: 200 }).then(
+        callRemote('readCsv', { path: path, sessionId, start: 0, limit: 200 }).then(
           (res) => {
             setCsvLoading(false)
             if (res && res.ok) {
@@ -893,47 +990,50 @@ window.__ModuleLoader__.load({
       )
       options.push(React.createElement('option', { key: 'custom', value: 'custom' }, 'Select…'))
 
-      const selectStyle = { padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)' }
-      const controls = [
+      const selectStyle = { padding: '0 10px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', height: '34px', boxSizing: 'border-box', minWidth: '150px' }
+      const caseRow = [
         React.createElement('span', { key: 'case-label', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, 'Simu Case:'),
         React.createElement('select', { key: 'case', value: mode, onChange: (e) => { const m = e.target.value; lastSelection.mode = m; setMode(m); onCaseChanged(m === 'custom' ? customInput.trim() : (PRESETS[Number(m)] ? PRESETS[Number(m)].input : '')) }, style: selectStyle }, options),
+        React.createElement('button', { key: 'load', onClick: load, disabled: caseLoading, title: 'Load the selected case into the simulation model', style: { ...btn, marginLeft: '8px', opacity: caseLoading ? 0.6 : 1 } }, caseLoading ? 'Loading…' : 'Load'),
+        caseLoaded ? React.createElement('span', { key: 'caseloaded', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Loaded: ' + (caseLoadedInfo || '')) : null,
       ]
-      if (isCustom) {
-        controls.push(
-          React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: { ...selectStyle, marginLeft: '8px' } },
-            React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
-            React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
-          ),
-          React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', marginLeft: '8px', flex: '1 1 260px', minWidth: 0 } },
-            React.createElement('input', {
-              type: 'text',
-              value: customInput,
-              placeholder: 'data/ieee/Ieee118Bus/ieee118.ieee',
-              onChange: (e) => { const v = e.target.value; lastSelection.customInput = v; setCustomInput(v); onCaseChanged(v.trim()) },
-              style: { ...selectStyle, flex: '1 1 auto', minWidth: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' },
-            }),
-            React.createElement('button', {
-              onClick: openPicker,
-              title: pickerOpen ? 'Close case picker' : 'Pick a case file',
-              'aria-label': pickerOpen ? 'Close case picker' : 'Pick a case file',
-              style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '34px', padding: 0 },
-            }, searchIcon),
-          ),
-        )
-      }
-      controls.push(
-        React.createElement('div', { key: 'run-group', style: { display: 'flex', alignItems: 'center', marginLeft: '8px' } },
-          React.createElement('button', { onClick: run, disabled: running, style: { ...btn, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none', opacity: running ? 0.6 : 1 } }, running ? 'Running…' : 'ACLF'),
+      const caseInputRow = isCustom ? [
+        React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: selectStyle },
+          React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
+          React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
+        ),
+        React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', width: '380px', maxWidth: '100%' } },
+          React.createElement('input', {
+            type: 'text',
+            value: customInput,
+            placeholder: 'data/ieee/Ieee118Bus/ieee118.ieee',
+            onChange: (e) => { const v = e.target.value; lastSelection.customInput = v; setCustomInput(v); onCaseChanged(v.trim()) },
+            style: { ...selectStyle, flex: '1 1 auto', minWidth: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' },
+          }),
+          React.createElement('button', {
+            onClick: openPicker,
+            title: pickerOpen ? 'Close case picker' : 'Pick a case file',
+            'aria-label': pickerOpen ? 'Close case picker' : 'Pick a case file',
+            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, borderLeft: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '34px', padding: 0 },
+          }, searchIcon),
+        ),
+      ] : null
+      const actionRow = [
+        React.createElement('div', { key: 'run-group', style: { display: 'flex', alignItems: 'center' } },
+          React.createElement('button', { onClick: run, disabled: running || !caseLoaded, style: { ...btn, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none', opacity: (running || !caseLoaded) ? 0.6 : 1 } }, running ? 'Running…' : 'ACLF'),
           React.createElement('button', {
             onClick: openOptions,
+            disabled: !caseLoaded,
             title: 'AC Loadflow options',
             'aria-label': 'AC Loadflow options',
-            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '7px 10px' },
+            style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '7px 10px', opacity: !caseLoaded ? 0.6 : 1 },
           }, gearIcon),
+          React.createElement('button', { onClick: runCa, disabled: running || caRunning || !caseLoaded, title: 'Run DC contingency analysis', style: { ...btn, marginLeft: '12px', opacity: (running || caRunning || !caseLoaded) ? 0.6 : 1 } }, caRunning ? 'Running…' : 'CA'),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
         ),
+        caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
         optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Options saved') : null,
-      )
+      ]
 
       let picker = null
       if (pickerOpen) {
@@ -960,18 +1060,30 @@ window.__ModuleLoader__.load({
         picker = React.createElement('div', { style: { marginTop: '8px', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', maxHeight: '260px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)' } }, pickerBody)
       }
 
+      const csvPanel = (csvLoading || csvError !== null || csvHeader !== null) ? React.createElement('div', null,
+        csvLoading ? React.createElement('div', { style: { marginTop: '8px', color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') : null,
+        csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
+        csvHeader !== null ? React.createElement('div', null,
+          React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
+          React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
+          csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } }, 'Loading more…') : null,
+          csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
+            React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Selected bus: ' + selectedBus),
+          ) : null,
+        ) : null,
+      ) : null
+
       let body = null
       if (result !== null) {
         if (result.ok) {
           body = React.createElement('div', null,
             React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Load flow converged'),
-            result.networkInfo ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '340px' } }, result.networkInfo) : null,
             React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Results written to: ' + result.resultDir),
             React.createElement('div', { style: { marginTop: '4px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Files: ' + (result.files ? result.files.join(', ') : '')),
             React.createElement('div', { style: { marginTop: '12px' } },
               React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: '6px' } }, 'Explore result files:'),
               React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } },
-                ['bus', 'branch', 'gen', 'load'].map((kind) =>
+                (caResult !== null ? ['bus', 'branch', 'gen', 'load', 'contingency'] : ['bus', 'branch', 'gen', 'load']).map((kind) =>
                   React.createElement('button', {
                     key: kind,
                     onClick: () => openCsv(kind),
@@ -980,16 +1092,6 @@ window.__ModuleLoader__.load({
                 ),
               ),
             ),
-            csvLoading ? React.createElement('div', { style: { marginTop: '8px', color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') : null,
-            csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
-            csvHeader !== null ? React.createElement('div', null,
-              React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
-              React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
-              csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } }, 'Loading more…') : null,
-              csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
-                React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Selected bus: ' + selectedBus),
-              ) : null,
-            ) : null,
             result.loaded ? null : React.createElement('div', null,
               React.createElement('button', { onClick: () => setShowRaw(!showRaw), style: { ...btn, marginTop: '12px' } }, showRaw ? 'Hide log info' : 'Show log info'),
               showRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + result.stdout + '\n\n--- stderr ---\n' + result.stderr) : null,
@@ -1264,7 +1366,7 @@ window.__ModuleLoader__.load({
           style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '960px', height: '82vh', display: 'flex', flexDirection: 'column' },
         },
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' } },
-            React.createElement('div', { style: { fontWeight: 600, fontSize: '15px' } }, 'NERC TPL-001-5 Report' + (reportName ? ' — ' + reportName : '')),
+            React.createElement('div', { style: { fontWeight: 600, fontSize: '15px' } }, (reportType === 'aclf' ? 'AC Loadflow Report' : 'NERC TPL-001-5 Report') + (reportName ? ' — ' + reportName : '')),
             React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
               React.createElement('button', { onClick: () => setReportView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: reportView === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered'),
               React.createElement('button', { onClick: () => setReportView('source'), style: { ...btn, padding: '4px 10px', borderColor: reportView === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source'),
@@ -1298,12 +1400,35 @@ window.__ModuleLoader__.load({
         },
       }, diagramTip.text) : null
 
+      const networkInfoPanel = caseNetworkInfo ? React.createElement('div', { style: { marginTop: '16px' } },
+        React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: '6px' } }, 'Network info'),
+        React.createElement('pre', { style: { ...mono, ...panel, marginTop: 0, maxHeight: '340px' } }, caseNetworkInfo),
+      ) : null
+
+      const caPanel = (caResult !== null || caError !== null) ? React.createElement('div', { style: { marginTop: '16px' } },
+        caResult !== null ? React.createElement('div', null,
+          React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Contingency analysis complete'),
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
+            React.createElement('button', { onClick: () => openCsv('contingency'), style: { ...btn, padding: '5px 10px', borderColor: csvSel === 'contingency' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Contingency'),
+            React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, caResult.contingencyFile || ''),
+          ),
+        ) : null,
+        caError !== null ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px', marginTop: 0 } }, '⚠ ' + caError) : null,
+      ) : null
+
       return React.createElement('div', { style: { padding: '20px', maxWidth: '860px' } },
         React.createElement('h2', { style: { margin: '0 0 4px' } }, 'InterPSS'),
         React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--dsw-alias-label-secondary)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
-        React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, controls),
+        React.createElement('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '8px' } },
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, caseRow),
+          caseInputRow ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px', width: '100%' } }, caseInputRow) : null,
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, actionRow),
+        ),
         picker,
+        networkInfoPanel,
+        caPanel,
         body,
+        csvPanel,
         connModal,
         ctxMenuEl,
         optModal,
@@ -1312,28 +1437,15 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function apply(ctx) {
-      const slots = ctx.slots
-      const callRemote = (method, input) => {
-        const connection = ctx.get('connection')
-        if (connection === undefined) return Promise.reject(new Error('InterPSS: client connection service unavailable'))
-        return connection.rpc.call('/api', 'interpss/' + method, { args: { input: input } }).then((result) => {
-          if (result && result.ok) return result.value
-          const message = (result && result.error && result.error.message) ? result.error.message : 'remote call failed'
-          return Promise.reject(new Error(message))
-        })
-      }
-      slots.inject('conversation.view', () => slots.register(
-        { name: 'conversation.view', id: 'interpss', order: 1, label: 'InterPSS' },
-        (props) => React.createElement(InterPssView, { sessionId: props && props.sessionId, callRemote: callRemote }),
-      ))
-    }
+    const slots = ctx.get('slots')
+    if (slots === undefined) return
+    slots.inject('conversation.view', () => slots.register(
+      { name: 'conversation.view', id: 'interpss', order: 1, label: 'InterPSS' },
+      (props) => React.createElement(InterPssView, { sessionId: props && props.sessionId, callRemote: callRemote }),
+    ))
+  },
+}
 
-    exports.apply = apply;
-    exports.inject = ['slots'];
     return module.exports;
   }
 });
-
-
-

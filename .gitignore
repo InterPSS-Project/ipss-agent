@@ -28,3 +28,4 @@ src/assembly/uber.xml
 build/interpss-profile-patch.yml
 build/*
 /.npm-cache-local/
+temp/*
