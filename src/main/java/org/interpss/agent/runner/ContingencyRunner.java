@@ -2,7 +2,6 @@ package org.interpss.agent.runner;
 
 import static com.interpss.core.DclfAlgoObjectFactory.createContingencyAnalysisAlgorithm;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
@@ -47,16 +46,26 @@ public final class ContingencyRunner {
     public static void run(ProjectPaths paths, CliArgs cli, AclfNetwork net,
             Path resultsDir, String stem) throws Exception {
         ValidatedContingencyInputs inputs = validateInputs(paths, cli);
+        runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.monitorPath());
+    }
 
+    /**
+     * In-process core: run DC contingency analysis on an already-loaded
+     * {@code net} using absolute {@code contPath}/{@code monitorPath}, then
+     * write {@code stem_DF_contingency.csv}. Shared by the CLI ({@code IpssCmd})
+     * and the in-process bridge ({@code IpssAgentBridge}).
+     */
+    public static void runOnNet(AclfNetwork net, Path resultsDir, String stem,
+            Path contPath, Path monitorPath) throws Exception {
         ContingencyAnalysisAlgorithm algo = createContingencyAnalysisAlgorithm(net);
         algo.calculateDclf(DclfMethod.INC_LOSS);
 
         List<BranchContingencyRecord> contingencRecs =
-                ContingencyFileUtil.importContingenciesFromJson(new File(inputs.contPath().toString()));
+                ContingencyFileUtil.importContingenciesFromJson(contPath.toFile());
         List<DclfBranchOutage> dclfContList = new DclfContingencyHelper(algo).createDclfContList(contingencRecs);
 
         List<MonitoredBranchRecord> monitoredBranches =
-                ContingencyFileUtil.importMonitoredBranchRecordsFromJson(new File(inputs.monitorPath().toString()));
+                ContingencyFileUtil.importMonitoredBranchRecordsFromJson(monitorPath.toFile());
         Set<String> monitoredBranchIds = monitoredBranches.stream()
                 .map(MonitoredBranchRecord::getBranchId)
                 .collect(Collectors.toCollection(HashSet::new));

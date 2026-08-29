@@ -817,6 +817,27 @@ export default {
         const bridge = await ensureBridge(projectRoot || rootFor(''))
         return bridge.runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)
       },
+      async runContingency(format, absCase, absCont, absMon, absResults, stem) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        const cap = captureStdio()
+        let raw
+        try {
+          raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
+        } finally {
+          cap.stop()
+        }
+        // Attach the intercepted stdout/stderr (e.g. "Using N threads…") so the
+        // GUI can surface them instead of the dsh terminal.
+        try {
+          const parsed = JSON.parse(raw)
+          if (parsed && typeof parsed === 'object') {
+            parsed.stdout = cap.out()
+            parsed.stderr = cap.err()
+            raw = JSON.stringify(parsed)
+          }
+        } catch (e) {}
+        return raw
+      },
     })
     diag('javaBridge provided unconditionally')
 

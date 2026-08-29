@@ -9,6 +9,7 @@ import org.interpss.agent.model.SimuModelRepository;
 import org.interpss.agent.report.ReportRunner;
 import org.interpss.agent.report.ReportType;
 import org.interpss.agent.runner.AclfRunner;
+import org.interpss.agent.runner.ContingencyRunner;
 import org.interpss.agent.util.IpssNetworkInfo;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.result.AclfResultAdapter;
@@ -71,6 +72,37 @@ public final class IpssAgentBridge {
             o.addProperty("ok", true);
             o.addProperty("converged", net.isLfConverged());
             o.addProperty("networkInfo", IpssNetworkInfo.format(net));
+            return GSON.toJson(o);
+        } catch (Exception e) {
+            return error(e);
+        }
+    }
+
+    /**
+     * Run DC contingency analysis on the cached base case (reusing it when the
+     * path matches), or load it first. Writes {@code stem_DF_contingency.csv}
+     * under {@code absoluteResultsDir} using the absolute {@code absoluteContPath}
+     * and {@code absoluteMonitorPath} JSON files.
+     */
+    public synchronized String runContingency(String format, String absoluteCasePath,
+            String absoluteContPath, String absoluteMonitorPath,
+            String absoluteResultsDir, String stem) {
+        try {
+            AclfNetwork net = repo.getAclfNetBase();
+            if (net == null || loadedInput == null || !loadedInput.equals(absoluteCasePath)) {
+                net = NetworkLoader.loadNetwork(format, absoluteCasePath);
+                repo.setAclfNetBase(net);
+                loadedInput = absoluteCasePath;
+            }
+            Path resultsDir = Paths.get(absoluteResultsDir);
+            Files.createDirectories(resultsDir);
+            ContingencyRunner.runOnNet(net, resultsDir, stem,
+                    Paths.get(absoluteContPath), Paths.get(absoluteMonitorPath));
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("format", format);
+            o.addProperty("input", absoluteCasePath);
+            o.addProperty("contingencyFile", stem + "_DF_contingency.csv");
             return GSON.toJson(o);
         } catch (Exception e) {
             return error(e);

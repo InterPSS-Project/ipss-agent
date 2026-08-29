@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -258,7 +258,7 @@ return {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const path = args && typeof args.path === 'string' ? args.path : ''
-        if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load)\.csv$/.test(path)) {
+        if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency)\.csv$/.test(path)) {
           return { ok: false, error: 'Invalid result path: ' + path }
         }
         const start = (args && typeof args.start === 'number' && args.start > 0) ? Math.floor(args.start) : 0
@@ -505,6 +505,88 @@ return {
             stem + '_network_info.txt',
           ],
         }
+      },
+
+      async runCa(args) {
+        const format = args && args.format === 'psse' ? 'psse' : 'ieee'
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+          return { ok: false, error: 'Invalid case path: ' + caseInput }
+        }
+
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+
+        const { parent, stem } = caseParts(caseInput)
+        const resultDir = parent + '/result'
+
+        // Discover companion contingency + monitored-branch JSONs in the case dir.
+        const fs = ctx.get('fs')
+        let contRel = null
+        let monRel = null
+        if (fs !== undefined) {
+          try {
+            const dirTarget = await fs.resolve(root + '/wspace/' + parent)
+            const entries = await fs.listDir(dirTarget)
+            for (const entry of entries) {
+              if (entry.type !== 'file' || !/\.json$/i.test(entry.name)) continue
+              const lower = entry.name.toLowerCase()
+              if (contRel === null && lower.indexOf('contingenc') !== -1) contRel = parent + '/' + entry.name
+              if (monRel === null && lower.indexOf('monitor') !== -1) monRel = parent + '/' + entry.name
+            }
+          } catch (e) {}
+        }
+        if (contRel === null || monRel === null) {
+          return { ok: false, error: 'Contingency analysis requires contingency and monitored-branches JSON files in ' + parent + '.' }
+        }
+
+        // In-process bridge path (preferred): no JVM spawn, cached network.
+        if (javaBridge !== undefined && typeof javaBridge.runContingency === 'function') {
+          try {
+            const absCase = root + '/wspace/' + caseInput
+            const absCont = root + '/wspace/' + contRel
+            const absMon = root + '/wspace/' + monRel
+            const absResults = root + '/wspace/' + resultDir
+            const raw = await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
+            const parsed = JSON.parse(raw)
+            if (parsed && parsed.ok) {
+              return {
+                ok: true,
+                resultDir: resultDir,
+                contingencyFile: parsed.contingencyFile || (stem + '_DF_contingency.csv'),
+                stdout: parsed.stdout || '',
+                stderr: parsed.stderr || '',
+                input: caseInput,
+              }
+            }
+            return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runContingency failed' }
+          } catch (e) {
+            // Bridge threw (e.g. stale JAR / signature mismatch): fall through
+            // to the Java CLI shell fallback below instead of failing CA.
+          }
+        }
+
+        // Fallback: shell out to the Java CA subcommand (IpssCmd ca).
+        const shell = ctx.get('shell')
+        if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
+
+        const wspace = root + '/wspace'
+        const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
+        const command = 'java -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput + ' ' + shellQuote(contRel) + ' ' + shellQuote(monRel)
+        const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
+
+        let res
+        try {
+          res = await shell.run(spec)
+        } catch (e) {
+          return { ok: false, error: 'command failed to start: ' + (e && e.message ? e.message : String(e)) }
+        }
+
+        if (res.exitCode !== 0) {
+          return { ok: false, error: 'contingency analysis failed (exit ' + res.exitCode + ')\n' + (res.stderr.text || res.stdout.text || '') }
+        }
+
+        return { ok: true, resultDir: resultDir, contingencyFile: stem + '_DF_contingency.csv', stdout: res.stdout.text, stderr: res.stderr.text, input: caseInput }
       },
 
       async loadCase(args) {

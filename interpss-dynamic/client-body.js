@@ -586,6 +586,9 @@ return {
       const [caseLoadError, setCaseLoadError] = React.useState(null)
       const [caseLoadedInfo, setCaseLoadedInfo] = React.useState(null)
       const [caseNetworkInfo, setCaseNetworkInfo] = React.useState(null)
+      const [caRunning, setCaRunning] = React.useState(false)
+      const [caError, setCaError] = React.useState(null)
+      const [caResult, setCaResult] = React.useState(null)
 
       const isCustom = mode === 'custom'
 
@@ -619,6 +622,9 @@ return {
         setCaseLoadError(null)
         setCaseLoadedInfo(null)
         setCaseNetworkInfo(null)
+        setCaRunning(false)
+        setCaError(null)
+        setCaResult(null)
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
           (res) => {
@@ -706,6 +712,26 @@ return {
         )
       }
 
+      function runCa() {
+        const c = resolveCase()
+        if (c === null || c.input === '') return
+        setCaRunning(true)
+        setCaError(null)
+        setCaResult(null)
+        callRemote('runCa', { format: c.format, input: c.input, sessionId }).then(
+          (res) => {
+            setCaRunning(false)
+            if (res && res.ok) {
+              setCaError(null)
+              setCaResult({ resultDir: res.resultDir, contingencyFile: res.contingencyFile, stdout: res.stdout || '', stderr: res.stderr || '' })
+            } else {
+              setCaError(res && res.error ? res.error : 'contingency analysis failed')
+            }
+          },
+          (err) => { setCaRunning(false); setCaError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
       function runReport() {
         const c = resolveCase()
         if (c === null || c.input === '' || !reportAvailable) return
@@ -760,11 +786,19 @@ return {
         onCaseChanged(c.path)
       }
 
-      function currentCsvPath() {
-        if (csvSel === null || result === null) return null
-        const fileName = result && result.files ? result.files.find((f) => f.indexOf('_DF_' + csvSel + '.csv') !== -1) : undefined
+      function filePathForKind(kind) {
+        if (kind === 'contingency' && caResult !== null) {
+          return caResult.resultDir + '/' + caResult.contingencyFile
+        }
+        if (result === null) return null
+        const fileName = result.files ? result.files.find((f) => f.indexOf('_DF_' + kind + '.csv') !== -1) : undefined
         if (fileName === undefined) return null
         return result.resultDir + '/' + fileName
+      }
+
+      function currentCsvPath() {
+        if (csvSel === null) return null
+        return filePathForKind(csvSel)
       }
 
       function openCsv(kind) {
@@ -785,13 +819,13 @@ return {
         setCsvHasMore(false)
         setCsvError(null)
         setCsvLoading(true)
-        const fileName = result && result.files ? result.files.find((f) => f.indexOf('_DF_' + kind + '.csv') !== -1) : undefined
-        if (fileName === undefined) {
+        const path = filePathForKind(kind)
+        if (path === null) {
           setCsvLoading(false)
           setCsvError('result file not found for ' + kind)
           return
         }
-        callRemote('readCsv', { path: result.resultDir + '/' + fileName, sessionId, start: 0, limit: 200 }).then(
+        callRemote('readCsv', { path: path, sessionId, start: 0, limit: 200 }).then(
           (res) => {
             setCsvLoading(false)
             if (res && res.ok) {
@@ -963,6 +997,7 @@ return {
             'aria-label': 'AC Loadflow options',
             style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '7px 10px', opacity: !caseLoaded ? 0.6 : 1 },
           }, gearIcon),
+          React.createElement('button', { onClick: runCa, disabled: running || caRunning || !caseLoaded, title: 'Run DC contingency analysis', style: { ...btn, marginLeft: '12px', opacity: (running || caRunning || !caseLoaded) ? 0.6 : 1 } }, caRunning ? 'Running…' : 'CA'),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
         ),
         caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
@@ -994,6 +1029,19 @@ return {
         picker = React.createElement('div', { style: { marginTop: '8px', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', maxHeight: '260px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)' } }, pickerBody)
       }
 
+      const csvPanel = (csvLoading || csvError !== null || csvHeader !== null) ? React.createElement('div', null,
+        csvLoading ? React.createElement('div', { style: { marginTop: '8px', color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') : null,
+        csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
+        csvHeader !== null ? React.createElement('div', null,
+          React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
+          React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
+          csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } }, 'Loading more…') : null,
+          csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
+            React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Selected bus: ' + selectedBus),
+          ) : null,
+        ) : null,
+      ) : null
+
       let body = null
       if (result !== null) {
         if (result.ok) {
@@ -1004,7 +1052,7 @@ return {
             React.createElement('div', { style: { marginTop: '12px' } },
               React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: '6px' } }, 'Explore result files:'),
               React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '6px' } },
-                ['bus', 'branch', 'gen', 'load'].map((kind) =>
+                (caResult !== null ? ['bus', 'branch', 'gen', 'load', 'contingency'] : ['bus', 'branch', 'gen', 'load']).map((kind) =>
                   React.createElement('button', {
                     key: kind,
                     onClick: () => openCsv(kind),
@@ -1013,16 +1061,6 @@ return {
                 ),
               ),
             ),
-            csvLoading ? React.createElement('div', { style: { marginTop: '8px', color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') : null,
-            csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
-            csvHeader !== null ? React.createElement('div', null,
-              React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
-              React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
-              csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } }, 'Loading more…') : null,
-              csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
-                React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Selected bus: ' + selectedBus),
-              ) : null,
-            ) : null,
             result.loaded ? null : React.createElement('div', null,
               React.createElement('button', { onClick: () => setShowRaw(!showRaw), style: { ...btn, marginTop: '12px' } }, showRaw ? 'Hide log info' : 'Show log info'),
               showRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + result.stdout + '\n\n--- stderr ---\n' + result.stderr) : null,
@@ -1336,6 +1374,17 @@ return {
         React.createElement('pre', { style: { ...mono, ...panel, marginTop: 0, maxHeight: '340px' } }, caseNetworkInfo),
       ) : null
 
+      const caPanel = (caResult !== null || caError !== null) ? React.createElement('div', { style: { marginTop: '16px' } },
+        caResult !== null ? React.createElement('div', null,
+          React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Contingency analysis complete'),
+          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
+            React.createElement('button', { onClick: () => openCsv('contingency'), style: { ...btn, padding: '5px 10px', borderColor: csvSel === 'contingency' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Contingency'),
+            React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, caResult.contingencyFile || ''),
+          ),
+        ) : null,
+        caError !== null ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px', marginTop: 0 } }, '⚠ ' + caError) : null,
+      ) : null
+
       return React.createElement('div', { style: { padding: '20px', maxWidth: '860px' } },
         React.createElement('h2', { style: { margin: '0 0 4px' } }, 'InterPSS'),
         React.createElement('p', { style: { margin: '0 0 16px', color: 'var(--dsw-alias-label-secondary)' } }, 'Power system simulation in the native AI env and a local sandbox.'),
@@ -1346,7 +1395,9 @@ return {
         ),
         picker,
         networkInfoPanel,
+        caPanel,
         body,
+        csvPanel,
         connModal,
         ctxMenuEl,
         optModal,
