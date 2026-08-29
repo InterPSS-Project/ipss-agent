@@ -49,7 +49,7 @@ Install(update) InterPSS DSH plugin
 
 ## User Guide
 
-- InterPSS DSH Plugin user guide [plugin_user_guide.md](docs/plugin_user_guide.md), [plugin_user_guide.md](docs/plugin_user_guide.pdf)           
+- InterPSS DSH Plugin user guide [plugin_user_guide.md](docs/plugin_user_guide.md), [plugin_user_guide.pdf](docs/plugin_user_guide.pdf)           
 - iPSS Agent Chat user guide [agent_chat_user_guide.md](docs/agent_chat_user_guide.md)
 
 ## Reference
