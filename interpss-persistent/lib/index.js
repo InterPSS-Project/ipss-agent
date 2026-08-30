@@ -667,7 +667,8 @@ class InterpssService extends TypertRemoteService {
     const { parent, stem } = this.caseParts(caseInput)
     const resultDir = parent + '/result'
 
-    // Discover companion contingency + monitored-branch JSONs in the case dir.
+    // Discover companion contingency + monitored-branch JSONs in the case dir
+    // when present; omit either/both to use N-1 / all-branch defaults in Java.
     const fs = this.ctx.get('fs')
     let contRel = null
     let monRel = null
@@ -683,17 +684,14 @@ class InterpssService extends TypertRemoteService {
         }
       } catch (e) {}
     }
-    if (contRel === null || monRel === null) {
-      return { ok: false, error: 'Contingency analysis requires contingency and monitored-branches JSON files in ' + parent + '.' }
-    }
 
     // In-process bridge path (preferred): no JVM spawn, cached network.
     const bridge = this.bridge()
     if (bridge !== undefined && typeof bridge.runContingency === 'function') {
       try {
         const absCase = root + '/wspace/' + caseInput
-        const absCont = root + '/wspace/' + contRel
-        const absMon = root + '/wspace/' + monRel
+        const absCont = contRel !== null ? root + '/wspace/' + contRel : null
+        const absMon = monRel !== null ? root + '/wspace/' + monRel : null
         const absResults = root + '/wspace/' + resultDir
         const raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
         const parsed = JSON.parse(raw)
@@ -720,7 +718,13 @@ class InterpssService extends TypertRemoteService {
 
     const wspace = root + '/wspace'
     const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-    const command = shellQuote(javaBin()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput + ' ' + shellQuote(contRel) + ' ' + shellQuote(monRel)
+    let command = shellQuote(javaBin()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput
+    // CLI args are positional (cont then monitor). Append independently when
+    // cont is present; monitor-only cannot be expressed without a cont slot.
+    if (contRel !== null) {
+      command += ' ' + shellQuote(contRel)
+      if (monRel !== null) command += ' ' + shellQuote(monRel)
+    }
     const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
 
     let res
