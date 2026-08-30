@@ -81,8 +81,9 @@ public final class IpssAgentBridge {
     /**
      * Run DC contingency analysis on the cached base case (reusing it when the
      * path matches), or load it first. Writes {@code stem_DF_contingency.csv}
-     * under {@code absoluteResultsDir} using the absolute {@code absoluteContPath}
-     * and {@code absoluteMonitorPath} JSON files.
+     * under {@code absoluteResultsDir}. Contingency and monitor JSON paths are
+     * independently optional: null or blank uses N-1 / all-branch defaults in
+     * {@link ContingencyRunner}.
      */
     public synchronized String runContingency(String format, String absoluteCasePath,
             String absoluteContPath, String absoluteMonitorPath,
@@ -97,7 +98,7 @@ public final class IpssAgentBridge {
             Path resultsDir = Paths.get(absoluteResultsDir);
             Files.createDirectories(resultsDir);
             ContingencyRunner.runOnNet(net, resultsDir, stem,
-                    Paths.get(absoluteContPath), Paths.get(absoluteMonitorPath));
+                    optionalPath(absoluteContPath), optionalPath(absoluteMonitorPath));
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("format", format);
@@ -107,6 +108,14 @@ public final class IpssAgentBridge {
         } catch (Exception e) {
             return error(e);
         }
+    }
+
+    /** Null or blank string → null Path (defaults in ContingencyRunner). */
+    private static Path optionalPath(String absolutePath) {
+        if (absolutePath == null || absolutePath.isBlank()) {
+            return null;
+        }
+        return Paths.get(absolutePath);
     }
 
     /**

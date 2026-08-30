@@ -109,6 +109,29 @@ class IpssAgentBridgeTest {
     }
 
     @Test
+    void runContingency_withoutContAndMonitorFiles_writesCsv() throws Exception {
+        bridge.loadCase("ieee", casePath);
+
+        String json = bridge.runContingency(
+                "ieee", casePath, null, null, resultsDir.toString(), stem);
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isTrue();
+        assertThat(o.get("contingencyFile").getAsString()).isEqualTo(stem + "_DF_contingency.csv");
+        assertThat(resultsDir.resolve(stem + "_DF_contingency.csv")).exists();
+    }
+
+    @Test
+    void runContingency_blankContAndMonitorPaths_useDefaults() throws Exception {
+        String json = bridge.runContingency(
+                "ieee", casePath, "", "  ", resultsDir.toString(), stem);
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isTrue();
+        assertThat(resultsDir.resolve(stem + "_DF_contingency.csv")).exists();
+    }
+
+    @Test
     void getNetworkInfo_returnsEmptyBeforeLoad() {
         assertThat(bridge.getNetworkInfo()).isEmpty();
     }

@@ -52,12 +52,23 @@ class ContingencyRunnerTest {
     }
 
     @Test
-    void validateInputs_rejectsMissingContAndMonitorArgs() {
+    void run_withoutContAndMonitorFiles_writesContingencyCsv() throws Exception {
+        CliArgs noFiles = new CliArgs("ca", "ieee", AgentTestSupport.IEEE14_INPUT, null, null);
+
+        ContingencyRunner.run(paths, noFiles, caseFilePath.toString(), resultsDir, stem);
+
+        assertThat(resultsDir.resolve(stem + "_DF_contingency.csv")).exists().content().isNotEmpty();
+    }
+
+    @Test
+    void validateInputs_allowsMissingContAndMonitorArgs() {
         CliArgs missingFiles = new CliArgs("ca", "ieee", AgentTestSupport.IEEE14_INPUT, null, null);
 
-        assertThatThrownBy(() -> ContingencyRunner.validateInputs(paths, missingFiles))
-                .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("cont_file and monitor_file");
+        ContingencyRunner.ValidatedContingencyInputs inputs =
+                ContingencyRunner.validateInputs(paths, missingFiles);
+
+        assertThat(inputs.contPath()).isNull();
+        assertThat(inputs.monitorPath()).isNull();
     }
 
     @Test
