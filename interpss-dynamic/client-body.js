@@ -1379,9 +1379,6 @@ return {
       const caPanel = (caResult !== null || caError !== null) ? React.createElement('div', { style: { marginTop: '16px' } },
         caResult !== null ? React.createElement('div', null,
           React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Contingency analysis complete'),
-          React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
-            React.createElement('button', { onClick: () => openCsv('contingency'), style: { ...btn, padding: '5px 10px', borderColor: csvSel === 'contingency' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Contingency'),
-          ),
         ) : null,
         caError !== null ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px', marginTop: 0 } }, '⚠ ' + caError) : null,
       ) : null
