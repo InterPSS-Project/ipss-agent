@@ -10,7 +10,7 @@
   "busLoadLowVoltAdj": true,
   "vConstPMin": 0.7,
   "vConstIMin": 0.5,
-  "includeAdjustments": false,
+  "includeAdjustments": true,
   "activateAllAdjCtrl": false,
   "applyLimitControl": true,
   "pvBusLimitControl": true,
