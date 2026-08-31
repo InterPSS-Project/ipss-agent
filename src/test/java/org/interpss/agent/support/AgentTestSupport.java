@@ -18,6 +18,12 @@ public final class AgentTestSupport {
     public static final String PSSE9_CASE = "cases/psse/ieee9_v33.raw";
     public static final String TEXAS2K_CASE =
             "wspace/data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW";
+    public static final String TEXAS2K_INPUT =
+            "data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW";
+    public static final String TEXAS2K_CONT =
+            "data/psse/Texas2K/2k_contingencies_115kVAbove.json";
+    public static final String TEXAS2K_MONITOR =
+            "data/psse/Texas2K/2k_monitored_branches.json";
     public static final String DEFAULT_ACLF_CONFIG = "config/aclf_run.json";
 
     private AgentTestSupport() {
@@ -73,5 +79,27 @@ public final class AgentTestSupport {
         copyResourceToWspace(paths, "cases/ieee14/ieee14_monitored.json", IEEE14_MONITOR);
         copyResourceToWspace(paths, IEEE14_ACLF_CONFIG,
                 "data/ieee/Ieee14Bus/config/aclf_run.json");
+    }
+
+    /**
+     * Copy Texas 2K PSS/E case files from the project {@code wspace/} into the
+     * ephemeral test project layout (files are not on the test classpath).
+     */
+    public static void setupTexas2KCase(ProjectPaths paths) throws IOException {
+        copyProjectFileToWspace(paths, TEXAS2K_CASE, TEXAS2K_INPUT);
+        copyProjectFileToWspace(paths, "wspace/" + TEXAS2K_CONT, TEXAS2K_CONT);
+        copyProjectFileToWspace(paths, "wspace/" + TEXAS2K_MONITOR, TEXAS2K_MONITOR);
+    }
+
+    public static Path copyProjectFileToWspace(ProjectPaths paths, String projectRelative,
+            String wspaceRelative) throws IOException {
+        Path source = projectRootPath(projectRelative);
+        if (!Files.isRegularFile(source)) {
+            throw new IOException("Project file not found: " + source);
+        }
+        Path target = paths.resolveWspace(wspaceRelative);
+        Files.createDirectories(target.getParent());
+        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+        return target;
     }
 }

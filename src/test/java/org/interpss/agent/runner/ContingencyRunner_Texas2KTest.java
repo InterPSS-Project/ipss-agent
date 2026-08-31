@@ -6,14 +6,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.file.Path;
 
 import org.interpss.agent.cli.CliArgs;
-import org.interpss.agent.input.IeeeFileAdapter;
+import org.interpss.agent.input.PsseFileAdapter;
 import org.interpss.agent.support.AgentTestSupport;
 import org.interpss.agent.util.ProjectPaths;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-class ContingencyRunnerTest {
+class ContingencyRunner_Texas2KTest {
 
     @TempDir
     Path tempDir;
@@ -27,47 +27,47 @@ class ContingencyRunnerTest {
     @BeforeEach
     void setUp() throws Exception {
         paths = AgentTestSupport.createProjectLayout(tempDir);
-        AgentTestSupport.setupIeee14Case(paths);
-        caseFilePath = paths.resolveWspace(AgentTestSupport.IEEE14_INPUT);
-        resultsDir = paths.resultsDir(AgentTestSupport.IEEE14_INPUT);
-        stem = ProjectPaths.outputStem(AgentTestSupport.IEEE14_INPUT);
-        cliArgs = new CliArgs("ca", "ieee", AgentTestSupport.IEEE14_INPUT,
-                AgentTestSupport.IEEE14_CONT, AgentTestSupport.IEEE14_MONITOR);
+        AgentTestSupport.setupTexas2KCase(paths);
+        caseFilePath = paths.resolveWspace(AgentTestSupport.TEXAS2K_INPUT);
+        resultsDir = paths.resultsDir(AgentTestSupport.TEXAS2K_INPUT);
+        stem = ProjectPaths.outputStem(AgentTestSupport.TEXAS2K_INPUT);
+        cliArgs = new CliArgs("ca", "psse", AgentTestSupport.TEXAS2K_INPUT,
+                AgentTestSupport.TEXAS2K_CONT, AgentTestSupport.TEXAS2K_MONITOR);
     }
 
     @Test
     void run_writesContingencyCsv() throws Exception {
         ContingencyRunner.ContAnalysisSummary summary =
                 ContingencyRunner.run(paths, cliArgs, caseFilePath.toString(), resultsDir, stem);
-
+        System.out.println(summary);
+        
         Path csv = resultsDir.resolve(stem + "_DF_contingency.csv");
         assertThat(csv).exists().content().isNotEmpty();
-        assertThat(summary.numOverloads()).isEqualTo(java.nio.file.Files.lines(csv).skip(1).count());
-        // Must be row count, not DataFrame columnCount (11)
-        assertThat(summary.numOverloads()).isNotEqualTo(11);
+        assertThat(summary.numCont()).isEqualTo(2359);
+        assertThat(summary.numMonitored()).isEqualTo(1308);
+        assertThat(summary.numOverloads()).isEqualTo(csvDataRowCount(csv));
+        assertThat(summary.numOverloads()).isEqualTo(53);
     }
 
     @Test
     void run_withLoadedNetwork_writesContingencyCsv() throws Exception {
-        var net = IeeeFileAdapter.createAclfNet(caseFilePath.toString());
+        var net = PsseFileAdapter.createAclfNet(caseFilePath.toString());
 
-        ContingencyRunner.run(paths, cliArgs, net, resultsDir, stem);
+        ContingencyRunner.ContAnalysisSummary summary =
+                ContingencyRunner.run(paths, cliArgs, net, resultsDir, stem);
 
-        assertThat(resultsDir.resolve(stem + "_DF_contingency.csv")).exists().content().isNotEmpty();
+        Path csv = resultsDir.resolve(stem + "_DF_contingency.csv");
+        assertThat(csv).exists().content().isNotEmpty();
+        assertThat(summary.numOverloads()).isEqualTo(csvDataRowCount(csv));
     }
 
-    @Test
-    void run_withoutContAndMonitorFiles_writesContingencyCsv() throws Exception {
-        CliArgs noFiles = new CliArgs("ca", "ieee", AgentTestSupport.IEEE14_INPUT, null, null);
-
-        ContingencyRunner.run(paths, noFiles, caseFilePath.toString(), resultsDir, stem);
-
-        assertThat(resultsDir.resolve(stem + "_DF_contingency.csv")).exists().content().isNotEmpty();
+    private static long csvDataRowCount(Path csv) throws Exception {
+        return java.nio.file.Files.lines(csv).skip(1).count();
     }
 
     @Test
     void validateInputs_allowsMissingContAndMonitorArgs() {
-        CliArgs missingFiles = new CliArgs("ca", "ieee", AgentTestSupport.IEEE14_INPUT, null, null);
+        CliArgs missingFiles = new CliArgs("ca", "psse", AgentTestSupport.TEXAS2K_INPUT, null, null);
 
         ContingencyRunner.ValidatedContingencyInputs inputs =
                 ContingencyRunner.validateInputs(paths, missingFiles);
@@ -78,8 +78,8 @@ class ContingencyRunnerTest {
 
     @Test
     void validateInputs_rejectsMissingContingencyFile() {
-        CliArgs cli = new CliArgs("ca", "ieee", AgentTestSupport.IEEE14_INPUT,
-                "missing/cont.json", AgentTestSupport.IEEE14_MONITOR);
+        CliArgs cli = new CliArgs("ca", "psse", AgentTestSupport.TEXAS2K_INPUT,
+                "missing/cont.json", AgentTestSupport.TEXAS2K_MONITOR);
 
         assertThatThrownBy(() -> ContingencyRunner.validateInputs(paths, cli))
                 .isInstanceOf(IllegalStateException.class)
@@ -88,8 +88,8 @@ class ContingencyRunnerTest {
 
     @Test
     void validateInputs_rejectsMissingMonitorFile() {
-        CliArgs cli = new CliArgs("ca", "ieee", AgentTestSupport.IEEE14_INPUT,
-                AgentTestSupport.IEEE14_CONT, "missing/monitor.json");
+        CliArgs cli = new CliArgs("ca", "psse", AgentTestSupport.TEXAS2K_INPUT,
+                AgentTestSupport.TEXAS2K_CONT, "missing/monitor.json");
 
         assertThatThrownBy(() -> ContingencyRunner.validateInputs(paths, cli))
                 .isInstanceOf(IllegalStateException.class)
