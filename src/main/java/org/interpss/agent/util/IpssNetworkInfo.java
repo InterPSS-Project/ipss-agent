@@ -4,7 +4,6 @@ import org.interpss.numeric.datatype.Unit.UnitType;
 
 import com.interpss.core.aclf.AclfNetwork;
 import com.interpss.core.aclf.hvdc.HvdcLine2T;
-import com.interpss.core.algo.AclfMethodType;
 import com.interpss.core.funcImpl.AclfAdjCtrlFunction;
 
 /**
@@ -39,7 +38,6 @@ public final class IpssNetworkInfo {
 
         sb.append("\n===== Loadflow Run Information:=====\n");
         sb.append("Loadflow converged: ").append(net.isLfConverged()).append('\n');
-        sb.append("Max mismatch: ").append(net.maxMismatch(AclfMethodType.NR)).append('\n');
         return sb.toString();
     }
 
