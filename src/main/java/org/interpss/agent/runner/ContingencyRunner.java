@@ -3,6 +3,7 @@ package org.interpss.agent.runner;
 import static com.interpss.core.DclfAlgoObjectFactory.createCaOutageBranch;
 import static com.interpss.core.DclfAlgoObjectFactory.createContingency;
 import static com.interpss.core.DclfAlgoObjectFactory.createContingencyAnalysisAlgorithm;
+import static org.dflib.Exp.$double;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -43,16 +44,16 @@ public final class ContingencyRunner {
     private ContingencyRunner() {
     }
 
-    public static void run(ProjectPaths paths, CliArgs cli, String caseFilePath,
+    public static ContAnalysisSummary run(ProjectPaths paths, CliArgs cli, String caseFilePath,
             Path resultsDir, String stem) throws Exception {
         AclfNetwork net = NetworkLoader.loadNetwork(cli.format(), caseFilePath);
-        run(paths, cli, net, resultsDir, stem);
+        return run(paths, cli, net, resultsDir, stem);
     }
 
-    public static void run(ProjectPaths paths, CliArgs cli, AclfNetwork net,
+    public static ContAnalysisSummary run(ProjectPaths paths, CliArgs cli, AclfNetwork net,
             Path resultsDir, String stem) throws Exception {
         ValidatedContingencyInputs inputs = validateInputs(paths, cli);
-        runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.monitorPath());
+        return runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.monitorPath());
     }
 
     /**
@@ -65,7 +66,7 @@ public final class ContingencyRunner {
      * branch not connected to the reference bus. When {@code monitorPath} is
      * null, monitors all network branch ids.
      */
-    public static void runOnNet(AclfNetwork net, Path resultsDir, String stem,
+    public static ContAnalysisSummary runOnNet(AclfNetwork net, Path resultsDir, String stem,
             Path contPath, Path monitorPath) throws Exception {
         ContingencyAnalysisAlgorithm algo = createContingencyAnalysisAlgorithm(net);
         algo.calculateDclf(DclfMethod.INC_LOSS);
@@ -111,6 +112,12 @@ public final class ContingencyRunner {
         DclfContingencyDFrameAdapter dfAdapter = new DclfContingencyDFrameAdapter();
         DataFrame dfCaRec = dfAdapter.adapt(results);
         Csv.saver().save(dfCaRec, resultsDir.resolve(stem + "_DF_contingency.csv").toString());
+
+        return new ContAnalysisSummary(dclfConfig.getOverloadThreshold(),
+                dclfContList.size(),
+                monitoredBranchIds.size(),
+                dfCaRec.height());
+                    
     }
 
     /**
@@ -158,4 +165,17 @@ public final class ContingencyRunner {
 
     public record ValidatedContingencyInputs(Path contPath, Path monitorPath) {
     }
+
+    public static record ContAnalysisSummary(double threshold, 
+        int numCont,        // number of contingencies applied
+        int numMonitored, // number of monitored branches
+        int numOverloads) { // number of overloads
+        public String toString() {
+                return "ContAnalysisSummary:\n" + 
+                "Threshold=" + threshold + "\n" +
+                "Contingencies=" + numCont + "\n" +
+                "Monitored Branches=" + numMonitored + "\n" +
+                "Overloading Branches=" + numOverloads + "\n";
+    }
+}
 }
