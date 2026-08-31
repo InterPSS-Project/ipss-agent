@@ -16,6 +16,9 @@ public final class AgentTestSupport {
     public static final String IEEE14_MONITOR = "data/ieee/Ieee14Bus/ieee14_monitored.json";
     public static final String IEEE14_ACLF_CONFIG = "cases/ieee14/config/aclf_run.json";
     public static final String PSSE9_CASE = "cases/psse/ieee9_v33.raw";
+    public static final String TEXAS2K_CASE =
+            "wspace/data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW";
+    public static final String DEFAULT_ACLF_CONFIG = "config/aclf_run.json";
 
     private AgentTestSupport() {
     }
@@ -37,6 +40,10 @@ public final class AgentTestSupport {
 
     public static Path resourcePath(String resourcePath) {
         return Path.of("src/test/resources", resourcePath);
+    }
+
+    public static Path projectRootPath(String relativePath) {
+        return Path.of(relativePath).toAbsolutePath().normalize();
     }
 
     public static Path absoluteResourcePath(String resourcePath) throws IOException {
