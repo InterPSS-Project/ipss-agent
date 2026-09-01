@@ -141,7 +141,8 @@ return {
     const tdStyle = { padding: '3px 8px', border: '1px solid var(--dsw-alias-border-l1)', whiteSpace: 'nowrap' }
     const tableStyle = { borderCollapse: 'collapse', fontSize: '12px', marginTop: '8px', width: '100%' }
 
-    function formatValue(v) {
+    function formatValue(v, decimals) {
+      const d = decimals != null ? decimals : 4
       const s = v == null ? '' : String(v)
       const t = s.trim()
       if (t === '') return s
@@ -150,10 +151,10 @@ return {
       const mantissa = t.split(/[eE]/)[0]
       const dot = mantissa.indexOf('.')
       if (dot === -1) return s
-      if (mantissa.length - dot - 1 <= 4) return s
+      if (mantissa.length - dot - 1 <= d) return s
       const n = Number(t)
       if (!Number.isFinite(n)) return s
-      return String(parseFloat(n.toFixed(4)))
+      return String(parseFloat(n.toFixed(d)))
     }
 
     function fmt(v, d) {
@@ -221,7 +222,7 @@ return {
       return lines.join('\n')
     }
 
-    function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatNumbers) {
+    function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatDecimals) {
       if (!header) return null
       const headerCols = header.split(',')
       const isBusCol = (ci) => busCols && onBusDoubleClick && busCols.indexOf(ci) !== -1
@@ -231,7 +232,7 @@ return {
         ),
         React.createElement('tbody', null,
           (rows || []).map((r, ri) => React.createElement('tr', { key: ri }, r.split(',').map((c, ci) => {
-            const display = formatNumbers ? formatValue(c) : c
+            const display = formatDecimals != null ? formatValue(c, formatDecimals) : c
             if (isBusCol(ci)) {
               return React.createElement('td', {
                 key: ci,
@@ -1039,7 +1040,7 @@ return {
         csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
         csvHeader !== null ? React.createElement('div', null,
           React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
-          React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
+          React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, csvSel === 'contingency' ? 2 : 4)),
           csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } }, 'Loading more…') : null,
           csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
             React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Selected bus: ' + selectedBus),
