@@ -565,6 +565,7 @@ return {
                 ok: true,
                 resultDir: resultDir,
                 contingencyFile: parsed.contingencyFile || (stem + '_DF_contingency.csv'),
+                caSummary: typeof parsed.caSummary === 'string' ? parsed.caSummary : null,
                 stdout: parsed.stdout || '',
                 stderr: parsed.stderr || '',
                 input: caseInput,
@@ -603,7 +604,10 @@ return {
           return { ok: false, error: 'contingency analysis failed (exit ' + res.exitCode + ')\n' + (res.stderr.text || res.stdout.text || '') }
         }
 
-        return { ok: true, resultDir: resultDir, contingencyFile: stem + '_DF_contingency.csv', stdout: res.stdout.text, stderr: res.stderr.text, input: caseInput }
+        let caSummary = null
+        const m = /ContAnalysisSummary:[\s\S]*?Overloading Branches=\d+/.exec(res.stdout.text || '')
+        if (m) caSummary = m[0].trim()
+        return { ok: true, resultDir: resultDir, contingencyFile: stem + '_DF_contingency.csv', caSummary: caSummary, stdout: res.stdout.text, stderr: res.stderr.text, input: caseInput }
       },
 
       async loadCase(args) {

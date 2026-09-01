@@ -590,6 +590,7 @@ return {
       const [caRunning, setCaRunning] = React.useState(false)
       const [caError, setCaError] = React.useState(null)
       const [caResult, setCaResult] = React.useState(null)
+      const [infoTab, setInfoTab] = React.useState('network')
 
       const isCustom = mode === 'custom'
 
@@ -626,6 +627,7 @@ return {
         setCaRunning(false)
         setCaError(null)
         setCaResult(null)
+        setInfoTab('network')
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
           (res) => {
@@ -724,7 +726,8 @@ return {
             setCaRunning(false)
             if (res && res.ok) {
               setCaError(null)
-              setCaResult({ resultDir: res.resultDir, contingencyFile: res.contingencyFile, stdout: res.stdout || '', stderr: res.stderr || '' })
+              setCaResult({ resultDir: res.resultDir, contingencyFile: res.contingencyFile, caSummary: res.caSummary || null, stdout: res.stdout || '', stderr: res.stderr || '' })
+              if (res.caSummary) setInfoTab('ca')
             } else {
               setCaError(res && res.error ? res.error : 'contingency analysis failed')
             }
@@ -1371,9 +1374,22 @@ return {
         },
       }, diagramTip.text) : null
 
-      const networkInfoPanel = caseNetworkInfo ? React.createElement('div', { style: { marginTop: '16px' } },
-        React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: '6px' } }, 'Network info'),
-        React.createElement('pre', { style: { ...mono, ...panel, marginTop: 0, maxHeight: '340px' } }, caseNetworkInfo),
+      const caSummary = caResult && typeof caResult.caSummary === 'string' ? caResult.caSummary : null
+      const hasNetworkInfo = !!caseNetworkInfo
+      const hasCaInfo = !!caSummary
+      const showInfoTabs = hasNetworkInfo || hasCaInfo
+      const activeInfoTab = (infoTab === 'ca' && hasCaInfo) || !hasNetworkInfo ? 'ca' : 'network'
+      const infoTabButton = (key, label) => React.createElement('button', {
+        key: key,
+        onClick: () => setInfoTab(key),
+        style: { ...btn, padding: '5px 12px', border: 'none', borderBottom: activeInfoTab === key ? '2px solid var(--dsw-alias-brand-primary)' : '2px solid transparent', borderRadius: 0, background: 'transparent', color: activeInfoTab === key ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-primary)', fontWeight: activeInfoTab === key ? 600 : 400 },
+      }, label)
+      const infoTabsPanel = showInfoTabs ? React.createElement('div', { style: { marginTop: '16px' } },
+        React.createElement('div', { style: { display: 'flex', gap: '2px', borderBottom: '1px solid var(--dsw-alias-border-l1)', marginBottom: '8px' } },
+          hasNetworkInfo ? infoTabButton('network', 'Network info') : null,
+          hasCaInfo ? infoTabButton('ca', 'CA info') : null,
+        ),
+        React.createElement('pre', { style: { ...mono, ...panel, marginTop: 0, maxHeight: '340px' } }, activeInfoTab === 'ca' ? caSummary : caseNetworkInfo),
       ) : null
 
       const caPanel = (caResult !== null || caError !== null) ? React.createElement('div', { style: { marginTop: '16px' } },
@@ -1392,7 +1408,7 @@ return {
           React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, actionRow),
         ),
         picker,
-        networkInfoPanel,
+        infoTabsPanel,
         caPanel,
         body,
         csvPanel,

@@ -97,13 +97,14 @@ public final class IpssAgentBridge {
             }
             Path resultsDir = Paths.get(absoluteResultsDir);
             Files.createDirectories(resultsDir);
-            ContingencyRunner.runOnNet(net, resultsDir, stem,
+            ContingencyRunner.ContAnalysisSummary summary = ContingencyRunner.runOnNet(net, resultsDir, stem,
                     optionalPath(absoluteContPath), optionalPath(absoluteMonitorPath));
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("format", format);
             o.addProperty("input", absoluteCasePath);
             o.addProperty("contingencyFile", stem + "_DF_contingency.csv");
+            o.addProperty("caSummary", summary.toString());
             return GSON.toJson(o);
         } catch (Exception e) {
             return error(e);
