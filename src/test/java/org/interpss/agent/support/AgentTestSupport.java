@@ -78,7 +78,7 @@ public final class AgentTestSupport {
         copyResourceToWspace(paths, "cases/ieee14/ieee14_contingencies.json", IEEE14_CONT);
         copyResourceToWspace(paths, "cases/ieee14/ieee14_monitored.json", IEEE14_MONITOR);
         copyResourceToWspace(paths, IEEE14_ACLF_CONFIG,
-                "data/ieee/Ieee14Bus/config/aclf_run.json");
+                "data/ieee/Ieee14Bus/aclf_run.json");
     }
 
     /**

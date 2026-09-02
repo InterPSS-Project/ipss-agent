@@ -140,13 +140,13 @@ return {
       return { parent: parent, stem: stem }
     }
 
-    // Replicates ProjectPaths.resolveAclfRunConfig: case-specific config wins,
-    // then the project default.
+    // Case-specific aclf_run.json wins (same folder as the case), then the
+    // project default config/aclf_run.json.
     async function resolveAclfConfigPath(root, caseInput) {
       const fs = ctx.get('fs')
       if (fs === undefined) return root + '/config/aclf_run.json'
       const { parent } = caseParts(caseInput)
-      const caseCfg = root + '/wspace/' + parent + '/config/aclf_run.json'
+      const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
       const defCfg = root + '/config/aclf_run.json'
       try {
         const target = await fs.resolve(caseCfg)

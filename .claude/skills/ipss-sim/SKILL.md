@@ -114,7 +114,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf psse data/psse/Texas2K/Te
 
 **ACLF config lookup** (printed as `Using config file: …`):
 
-1. Case-specific: `<input_parent>/config/aclf_run.json` (preferred)
+1. Case-specific: `<input_parent>/aclf_run.json` (preferred)
 2. Project default: `config/aclf_run.json`
 
 Tune NR method, `maxIterations`, tolerance, and limit controls in either JSON.

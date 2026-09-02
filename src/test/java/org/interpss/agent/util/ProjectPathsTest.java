@@ -51,7 +51,7 @@ class ProjectPathsTest {
 
         Path config = paths.resolveAclfRunConfig(AgentTestSupport.IEEE14_INPUT);
         assertThat(config).isRegularFile();
-        assertThat(config.toString()).contains("data/ieee/Ieee14Bus/config/aclf_run.json");
+        assertThat(config.toString()).contains("data/ieee/Ieee14Bus/aclf_run.json");
     }
 
     @Test

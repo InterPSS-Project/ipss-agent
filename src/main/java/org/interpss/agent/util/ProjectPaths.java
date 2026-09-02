@@ -82,9 +82,9 @@ public final class ProjectPaths {
     public Path caseAclfRunConfig(String inputRelative) {
         String parent = inputParentRelative(inputRelative);
         if (parent.isEmpty()) {
-            return wspaceDir.resolve("config").resolve("aclf_run.json");
+            return wspaceDir.resolve("aclf_run.json");
         }
-        return wspaceDir.resolve(parent).resolve("config").resolve("aclf_run.json");
+        return wspaceDir.resolve(parent).resolve("aclf_run.json");
     }
 
     public Path resolveAclfRunConfig(String inputRelative) {
