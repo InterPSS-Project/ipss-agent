@@ -754,14 +754,26 @@ return {
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const root = resolveWorkspaceRoot(args && args.sessionId)
         if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        const defCfg = root + '/config/aclf_run.json'
+        let cfgPath = defCfg
+        if (caseInput !== '') {
+          const { parent } = caseParts(caseInput)
+          const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+          try {
+            const target = await fs.resolve(caseCfg)
+            const info = await fs.stat(target)
+            if (info !== undefined) cfgPath = caseCfg
+          } catch (e) {}
+        }
         try {
-          const target = await fs.resolve(root + '/config/aclf_run.json')
+          const target = await fs.resolve(cfgPath)
           const text = await fs.readText(target)
           let config = null
           try {
             config = JSON.parse(text)
           } catch (e) {
-            return { ok: false, error: 'config/aclf_run.json is not valid JSON' }
+            return { ok: false, error: cfgPath + ' is not valid JSON' }
           }
           return { ok: true, config: config && typeof config === 'object' ? config : {} }
         } catch (e) {
@@ -776,12 +788,16 @@ return {
         if (config === null) return { ok: false, error: 'missing options payload' }
         const root = resolveWorkspaceRoot(args && args.sessionId)
         if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        if (caseInput === '') return { ok: false, error: 'no case selected' }
+        const { parent } = caseParts(caseInput)
+        const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
         try {
-          const target = await fs.resolve(root + '/config/aclf_run.json')
+          const target = await fs.resolve(caseCfg)
           await fs.writeText(target, JSON.stringify(config, null, 2) + '\n')
           return { ok: true }
         } catch (e) {
-          return { ok: false, error: 'failed to write config/aclf_run.json: ' + (e && e.message ? e.message : String(e)) }
+          return { ok: false, error: 'failed to write ' + caseCfg + ': ' + (e && e.message ? e.message : String(e)) }
         }
       },
     }

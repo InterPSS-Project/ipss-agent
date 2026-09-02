@@ -927,7 +927,8 @@ return {
         setOptConfig(null)
         setOptForm(null)
         setOptLoading(true)
-        callRemote('getAclfOptions', { sessionId }).then(
+        const c = resolveCase()
+        callRemote('getAclfOptions', { input: c && c.input ? c.input : '', sessionId }).then(
           (res) => {
             setOptLoading(false)
             if (res && res.ok && res.config) {
@@ -946,7 +947,8 @@ return {
         setOptSaving(true)
         setOptError(null)
         const next = Object.assign({}, optConfig, configFromForm(optForm))
-        callRemote('saveAclfOptions', { config: next, sessionId }).then(
+        const c = resolveCase()
+        callRemote('saveAclfOptions', { config: next, input: c && c.input ? c.input : '', sessionId }).then(
           (res) => {
             setOptSaving(false)
             if (res && res.ok) {
