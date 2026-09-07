@@ -170,7 +170,8 @@ module.exports = {
     const tdStyle = { padding: '3px 8px', border: '1px solid var(--dsw-alias-border-l1)', whiteSpace: 'nowrap' }
     const tableStyle = { borderCollapse: 'collapse', fontSize: '12px', marginTop: '8px', width: '100%' }
 
-    function formatValue(v) {
+    function formatValue(v, decimals) {
+      const d = decimals != null ? decimals : 4
       const s = v == null ? '' : String(v)
       const t = s.trim()
       if (t === '') return s
@@ -179,10 +180,10 @@ module.exports = {
       const mantissa = t.split(/[eE]/)[0]
       const dot = mantissa.indexOf('.')
       if (dot === -1) return s
-      if (mantissa.length - dot - 1 <= 4) return s
+      if (mantissa.length - dot - 1 <= d) return s
       const n = Number(t)
       if (!Number.isFinite(n)) return s
-      return String(parseFloat(n.toFixed(4)))
+      return String(parseFloat(n.toFixed(d)))
     }
 
     function fmt(v, d) {
@@ -250,7 +251,7 @@ module.exports = {
       return lines.join('\n')
     }
 
-    function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatNumbers) {
+    function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatDecimals) {
       if (!header) return null
       const headerCols = header.split(',')
       const isBusCol = (ci) => busCols && onBusDoubleClick && busCols.indexOf(ci) !== -1
@@ -260,7 +261,7 @@ module.exports = {
         ),
         React.createElement('tbody', null,
           (rows || []).map((r, ri) => React.createElement('tr', { key: ri }, r.split(',').map((c, ci) => {
-            const display = formatNumbers ? formatValue(c) : c
+            const display = formatDecimals != null ? formatValue(c, formatDecimals) : c
             if (isBusCol(ci)) {
               return React.createElement('td', {
                 key: ci,
@@ -619,6 +620,7 @@ module.exports = {
       const [caRunning, setCaRunning] = React.useState(false)
       const [caError, setCaError] = React.useState(null)
       const [caResult, setCaResult] = React.useState(null)
+      const [infoTab, setInfoTab] = React.useState('network')
 
       const isCustom = mode === 'custom'
 
@@ -655,6 +657,7 @@ module.exports = {
         setCaRunning(false)
         setCaError(null)
         setCaResult(null)
+        setInfoTab('network')
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
           (res) => {
@@ -753,7 +756,8 @@ module.exports = {
             setCaRunning(false)
             if (res && res.ok) {
               setCaError(null)
-              setCaResult({ resultDir: res.resultDir, contingencyFile: res.contingencyFile, stdout: res.stdout || '', stderr: res.stderr || '' })
+              setCaResult({ resultDir: res.resultDir, contingencyFile: res.contingencyFile, caSummary: res.caSummary || null, stdout: res.stdout || '', stderr: res.stderr || '' })
+              if (res.caSummary) setInfoTab('ca')
             } else {
               setCaError(res && res.error ? res.error : 'contingency analysis failed')
             }
@@ -952,7 +956,8 @@ module.exports = {
         setOptConfig(null)
         setOptForm(null)
         setOptLoading(true)
-        callRemote('getAclfOptions', { sessionId }).then(
+        const c = resolveCase()
+        callRemote('getAclfOptions', { input: c && c.input ? c.input : '', sessionId }).then(
           (res) => {
             setOptLoading(false)
             if (res && res.ok && res.config) {
@@ -971,7 +976,8 @@ module.exports = {
         setOptSaving(true)
         setOptError(null)
         const next = Object.assign({}, optConfig, configFromForm(optForm))
-        callRemote('saveAclfOptions', { config: next, sessionId }).then(
+        const c = resolveCase()
+        callRemote('saveAclfOptions', { config: next, input: c && c.input ? c.input : '', sessionId }).then(
           (res) => {
             setOptSaving(false)
             if (res && res.ok) {
@@ -1065,7 +1071,7 @@ module.exports = {
         csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
         csvHeader !== null ? React.createElement('div', null,
           React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
-          React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, true)),
+          React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, csvSel === 'contingency' ? 2 : 4)),
           csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } }, 'Loading more…') : null,
           csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
             React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Selected bus: ' + selectedBus),
@@ -1400,9 +1406,22 @@ module.exports = {
         },
       }, diagramTip.text) : null
 
-      const networkInfoPanel = caseNetworkInfo ? React.createElement('div', { style: { marginTop: '16px' } },
-        React.createElement('div', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)', marginBottom: '6px' } }, 'Network info'),
-        React.createElement('pre', { style: { ...mono, ...panel, marginTop: 0, maxHeight: '340px' } }, caseNetworkInfo),
+      const caSummary = caResult && typeof caResult.caSummary === 'string' ? caResult.caSummary : null
+      const hasNetworkInfo = !!caseNetworkInfo
+      const hasCaInfo = !!caSummary
+      const showInfoTabs = hasNetworkInfo || hasCaInfo
+      const activeInfoTab = (infoTab === 'ca' && hasCaInfo) || !hasNetworkInfo ? 'ca' : 'network'
+      const infoTabButton = (key, label) => React.createElement('button', {
+        key: key,
+        onClick: () => setInfoTab(key),
+        style: { ...btn, padding: '5px 12px', border: 'none', borderBottom: activeInfoTab === key ? '2px solid var(--dsw-alias-brand-primary)' : '2px solid transparent', borderRadius: 0, background: 'transparent', color: activeInfoTab === key ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-primary)', fontWeight: activeInfoTab === key ? 600 : 400 },
+      }, label)
+      const infoTabsPanel = showInfoTabs ? React.createElement('div', { style: { marginTop: '16px' } },
+        React.createElement('div', { style: { display: 'flex', gap: '2px', borderBottom: '1px solid var(--dsw-alias-border-l1)', marginBottom: '8px' } },
+          hasNetworkInfo ? infoTabButton('network', 'Network info') : null,
+          hasCaInfo ? infoTabButton('ca', 'CA info') : null,
+        ),
+        React.createElement('pre', { style: { ...mono, ...panel, marginTop: 0, maxHeight: '340px' } }, activeInfoTab === 'ca' ? caSummary : caseNetworkInfo),
       ) : null
 
       const caPanel = (caResult !== null || caError !== null) ? React.createElement('div', { style: { marginTop: '16px' } },
@@ -1421,7 +1440,7 @@ module.exports = {
           React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } }, actionRow),
         ),
         picker,
-        networkInfoPanel,
+        infoTabsPanel,
         caPanel,
         body,
         csvPanel,
