@@ -1,10 +1,13 @@
 package org.interpss.agent.util;
 
+import org.apache.commons.math3.complex.Complex;
 import org.interpss.numeric.datatype.Unit.UnitType;
 
+import com.interpss.core.aclf.AclfBus;
 import com.interpss.core.aclf.AclfNetwork;
 import com.interpss.core.aclf.hvdc.HvdcLine2T;
 import com.interpss.core.algo.AclfMethodType;
+import com.interpss.core.datatype.Mismatch;
 import com.interpss.core.funcImpl.AclfAdjCtrlFunction;
 
 /**
@@ -39,8 +42,46 @@ public final class IpssNetworkInfo {
 
         sb.append("\n===== Loadflow Run Information:=====\n");
         sb.append("Loadflow converged: ").append(net.isLfConverged()).append('\n');
-        sb.append("Max mismatch: ").append(net.maxMismatch(AclfMethodType.NR)).append('\n');
+        sb.append("Max Mismatch: ").append(reportingMaxMismatch(net, AclfMethodType.NR)).append('\n');
         return sb.toString();
+    }
+
+    /**
+     * Post-LF {@code net.maxMismatch()} can disagree with the last NR iteration log
+     * when a PV bus with shunt/capacitor equipment is converted to PQ during the
+     * final {@code needAdjustment()} pass. Use scheduled-vs-net generation for those
+     * GenPQ buses so the summary matches the converged NR residuals.
+     */
+    static Mismatch reportingMaxMismatch(AclfNetwork net, AclfMethodType lfMethod) {
+        net.calExternalPowerIntoNet();
+
+        Mismatch max = new Mismatch();
+        double re = -1.0;
+        double im = -1.0;
+
+        for (AclfBus bus : net.getBusList()) {
+            Complex mis = reportingMismatch(bus, lfMethod);
+            double absP = Math.abs(mis.getReal());
+            double absQ = Math.abs(mis.getImaginary());
+            if (absP > re) {
+                re = absP;
+                max.maxPBus = bus;
+            }
+            if (absQ > im) {
+                im = absQ;
+                max.maxQBus = bus;
+            }
+        }
+        max.maxMis = new Complex(re, im);
+        return max;
+    }
+
+    private static Complex reportingMismatch(AclfBus bus, AclfMethodType lfMethod) {
+        if (bus.isGenPQ() && bus.isPVBusLimit() && (bus.isSwitchedShunt() || bus.isCapacitor())) {
+            Complex netPq = bus.calNetPQResults();
+            return new Complex(bus.getGenP(), bus.getGenQ()).subtract(netPq);
+        }
+        return bus.mismatch(lfMethod);
     }
 
     private static void appendIfPositive(StringBuilder sb, String label, long count) {

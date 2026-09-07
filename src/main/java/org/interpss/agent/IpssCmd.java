@@ -53,7 +53,7 @@ public final class IpssCmd {
             case "aclf" -> AclfRunner.run(paths, cli.format(), caseFilePath, cli.input(), resultsDir, stem);
             case "ca" -> {
                 try {
-                    ContingencyRunner.run(paths, cli, caseFilePath, resultsDir, stem);
+                    System.out.println(ContingencyRunner.run(paths, cli, caseFilePath, resultsDir, stem));
                 } catch (IllegalArgumentException | IllegalStateException e) {
                     System.err.println(e.getMessage());
                     CliArgs.printUsage();

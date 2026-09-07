@@ -49,7 +49,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf psse data/psse/Texas2K/Te
 
 For ACLF, `IpssCmd` resolves `aclf_run.json` with a two-tier lookup:
 
-1. **Case-specific (preferred):** `wspace/<input_parent>/config/aclf_run.json` if it exists.
+1. **Case-specific (preferred):** `wspace/<input_parent>/aclf_run.json` if it exists.
 2. **Project default (fallback):** `config/aclf_run.json` at the project root.
 
 It loads the file with `AclfRunConfigRec.loadAclfRunConfig` and applies it with

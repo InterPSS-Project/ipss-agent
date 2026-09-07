@@ -3,7 +3,7 @@
   "polarCoordinate": true,
   "tolerance": 0.0001,
   "tolUnitType": "PU",
-  "maxIterations": 100,
+  "maxIterations": 25,
   "autoSetZeroZBranch": true,
   "turnOffIslandBus": true,
   "autoTurnLine2Xfr": true,

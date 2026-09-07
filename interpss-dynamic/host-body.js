@@ -140,13 +140,13 @@ return {
       return { parent: parent, stem: stem }
     }
 
-    // Replicates ProjectPaths.resolveAclfRunConfig: case-specific config wins,
-    // then the project default.
+    // Case-specific aclf_run.json wins (same folder as the case), then the
+    // project default config/aclf_run.json.
     async function resolveAclfConfigPath(root, caseInput) {
       const fs = ctx.get('fs')
       if (fs === undefined) return root + '/config/aclf_run.json'
       const { parent } = caseParts(caseInput)
-      const caseCfg = root + '/wspace/' + parent + '/config/aclf_run.json'
+      const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
       const defCfg = root + '/config/aclf_run.json'
       try {
         const target = await fs.resolve(caseCfg)
@@ -533,7 +533,8 @@ return {
         const { parent, stem } = caseParts(caseInput)
         const resultDir = parent + '/result'
 
-        // Discover companion contingency + monitored-branch JSONs in the case dir.
+        // Discover companion contingency + monitored-branch JSONs in the case dir
+        // when present; omit either/both to use N-1 / all-branch defaults in Java.
         const fs = ctx.get('fs')
         let contRel = null
         let monRel = null
@@ -549,16 +550,13 @@ return {
             }
           } catch (e) {}
         }
-        if (contRel === null || monRel === null) {
-          return { ok: false, error: 'Contingency analysis requires contingency and monitored-branches JSON files in ' + parent + '.' }
-        }
 
         // In-process bridge path (preferred): no JVM spawn, cached network.
         if (javaBridge !== undefined && typeof javaBridge.runContingency === 'function') {
           try {
             const absCase = root + '/wspace/' + caseInput
-            const absCont = root + '/wspace/' + contRel
-            const absMon = root + '/wspace/' + monRel
+            const absCont = contRel !== null ? root + '/wspace/' + contRel : null
+            const absMon = monRel !== null ? root + '/wspace/' + monRel : null
             const absResults = root + '/wspace/' + resultDir
             const raw = await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
             const parsed = JSON.parse(raw)
@@ -567,6 +565,7 @@ return {
                 ok: true,
                 resultDir: resultDir,
                 contingencyFile: parsed.contingencyFile || (stem + '_DF_contingency.csv'),
+                caSummary: typeof parsed.caSummary === 'string' ? parsed.caSummary : null,
                 stdout: parsed.stdout || '',
                 stderr: parsed.stderr || '',
                 input: caseInput,
@@ -585,7 +584,13 @@ return {
 
         const wspace = root + '/wspace'
         const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
-        const command = shellQuote(javaLauncher()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput + ' ' + shellQuote(contRel) + ' ' + shellQuote(monRel)
+        let command = shellQuote(javaLauncher()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd ca ' + format + ' ' + caseInput
+        // CLI args are positional (cont then monitor). Append independently when
+        // cont is present; monitor-only cannot be expressed without a cont slot.
+        if (contRel !== null) {
+          command += ' ' + shellQuote(contRel)
+          if (monRel !== null) command += ' ' + shellQuote(monRel)
+        }
         const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
 
         let res
@@ -599,7 +604,10 @@ return {
           return { ok: false, error: 'contingency analysis failed (exit ' + res.exitCode + ')\n' + (res.stderr.text || res.stdout.text || '') }
         }
 
-        return { ok: true, resultDir: resultDir, contingencyFile: stem + '_DF_contingency.csv', stdout: res.stdout.text, stderr: res.stderr.text, input: caseInput }
+        let caSummary = null
+        const m = /ContAnalysisSummary:[\s\S]*?Overloading Branches=\d+/.exec(res.stdout.text || '')
+        if (m) caSummary = m[0].trim()
+        return { ok: true, resultDir: resultDir, contingencyFile: stem + '_DF_contingency.csv', caSummary: caSummary, stdout: res.stdout.text, stderr: res.stderr.text, input: caseInput }
       },
 
       async loadCase(args) {
@@ -746,14 +754,26 @@ return {
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const root = resolveWorkspaceRoot(args && args.sessionId)
         if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        const defCfg = root + '/config/aclf_run.json'
+        let cfgPath = defCfg
+        if (caseInput !== '') {
+          const { parent } = caseParts(caseInput)
+          const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+          try {
+            const target = await fs.resolve(caseCfg)
+            const info = await fs.stat(target)
+            if (info !== undefined) cfgPath = caseCfg
+          } catch (e) {}
+        }
         try {
-          const target = await fs.resolve(root + '/config/aclf_run.json')
+          const target = await fs.resolve(cfgPath)
           const text = await fs.readText(target)
           let config = null
           try {
             config = JSON.parse(text)
           } catch (e) {
-            return { ok: false, error: 'config/aclf_run.json is not valid JSON' }
+            return { ok: false, error: cfgPath + ' is not valid JSON' }
           }
           return { ok: true, config: config && typeof config === 'object' ? config : {} }
         } catch (e) {
@@ -768,12 +788,16 @@ return {
         if (config === null) return { ok: false, error: 'missing options payload' }
         const root = resolveWorkspaceRoot(args && args.sessionId)
         if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        if (caseInput === '') return { ok: false, error: 'no case selected' }
+        const { parent } = caseParts(caseInput)
+        const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
         try {
-          const target = await fs.resolve(root + '/config/aclf_run.json')
+          const target = await fs.resolve(caseCfg)
           await fs.writeText(target, JSON.stringify(config, null, 2) + '\n')
           return { ok: true }
         } catch (e) {
-          return { ok: false, error: 'failed to write config/aclf_run.json: ' + (e && e.message ? e.message : String(e)) }
+          return { ok: false, error: 'failed to write ' + caseCfg + ': ' + (e && e.message ? e.message : String(e)) }
         }
       },
     }

@@ -184,7 +184,7 @@ artifacts).
 `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For
 ACLF, `IpssCmd` resolves the file with a **two-tier lookup**:
 
-1. **Case-specific (preferred):** `<input_parent>/config/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/config/aclf_run.json` for input under that folder).
+1. **Case-specific (preferred):** `<input_parent>/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/aclf_run.json` for input under that folder).
 2. **Project default (fallback):** `config/aclf_run.json` at the project root.
 
 The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied

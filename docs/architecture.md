@@ -158,7 +158,7 @@ AclfRunner.runOnNet(net, configPath, resultsDir, stem)
 
 **ACLF config resolution** (two-tier, printed as `Using config file: …`):
 
-1. Case-specific: `wspace/<input_parent>/config/aclf_run.json`
+1. Case-specific: `wspace/<input_parent>/aclf_run.json`
 2. Project default: `config/aclf_run.json`
 
 ### Step 3 — Contingency analysis (CA, optional)
@@ -417,7 +417,7 @@ Used at runtime by agent code:
 3. **CSV-driven reports** — Markdown generators analyze exported DataFrames; they never re-run load flow.
 4. **Agent skills as orchestration** — LLM skills shell out to the CLI; they do not embed simulation logic.
 5. **JSON bridge boundary** — Node/DSH code never traverses Java EMF objects; only paths and JSON cross the boundary.
-6. **Case-specific overrides** — per-case `aclf_run.json` under `<input_parent>/config/` overrides project defaults.
+6. **Case-specific overrides** — per-case `aclf_run.json` under `<input_parent>/` overrides project defaults.
 
 ---
 
