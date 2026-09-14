@@ -124,5 +124,6 @@ Find the top N-1 loaded branches
 | Interactive HTML dashboards       | `[.agents/skills/nerc-report-html/SKILL.md](.agents/skills/nerc-report-html/SKILL.md)`     |
 | NERC slide decks                  | `[.agents/skills/nerc-report-slides/SKILL.md](.agents/skills/nerc-report-slides/SKILL.md)` |
 | Current case network info         | [.agents/skills/ipss-sim-info/SKILL.md](.agents/skills/ipss-sim-info/SKILL.md)             |
+| Run ACLF for the current case     | [.agents/skills/ipss-sim-aclf/SKILL.md](.agents/skills/ipss-sim-aclf/SKILL.md)             |
 
 

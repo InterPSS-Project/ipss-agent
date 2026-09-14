@@ -34,7 +34,8 @@ parameters and results, no build-time Typert compiler required.
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
 - Remembers the last selected case across tab switches.
-- **Chat tools** — `interpss_network_info` exposes the selected case's network info to the chat agent (see *Chat tools*).
+- **Chat tools** — `interpss_network_info` and `interpss_run_aclf` expose the selected case's network info and AC load flow to the chat agent (see *Chat tools*).
+- **ACLF result explorer in chat** — the `interpss_run_aclf` card offers Bus / Branch / Gen / Load tables, paged through the same `readCsv` RPC as the tab.
 
 ## Host RPC methods
 
@@ -51,10 +52,11 @@ iPSS Agent workspace activation check.
 | Tool | Purpose |
 | --- | --- |
 | `interpss_network_info` | Show the InterPSS network information (active buses and branches, total generation and load, load-flow convergence, max mismatch) of a simulation case. |
+| `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 
-`interpss_network_info` resolves the target case in this order:
+Both tools resolve the target case through one shared helper, in this order:
 
-1. its optional `case` argument — a workspace-relative `data/…` path, an
+1. the optional `case` argument — a workspace-relative `data/…` path, an
    absolute path containing `/wspace/data/`, or a preset label (`IEEE 118-bus`,
    `IEEE 14-bus`, `Texas 2K-bus`);
 2. the case currently selected in the InterPSS tab — the tab reports every
@@ -62,13 +64,35 @@ iPSS Agent workspace activation check.
    `checkResult` RPC, which the Host records per session;
 3. the case the embedded bridge already holds.
 
-A case the bridge already holds is reused instead of reloaded, so a converged AC
-load flow is preserved; loading a case into the bridge is part of the call. The
-result reports which source was used, the bus/branch counts, and the load-flow
-convergence parsed from the network-info text.
+The result names the case and which of those sources produced it.
 
-Adding a tool needs no new Typert endpoint and no Client change: the host-side
-definition and registration live in `lib/index.js` (`networkInfoTool`).
+`interpss_network_info` loads the case into the embedded bridge as part of the
+call. A case the bridge already holds is reused instead of reloaded, so a
+converged AC load flow is preserved rather than replaced by base-case values.
+
+`interpss_run_aclf` solves the case and writes
+`<stem>_DF_{bus,branch,gen,load}.csv` plus `<stem>_network_info.txt` under
+`wspace/<case dir>/result/`, so the report tools can consume them. Solver options
+come from the case-folder `aclf_run.json` when present, otherwise
+`config/aclf_run.json` — the same two-tier rule as `ProjectPaths`. A run that
+does not converge is still a successful call (`converged: false`); large cases
+can take minutes.
+
+### Result explorer on the ACLF card
+
+`runAclfTool` projects a small `presentationMeta` (`case`, `source`, `resultDir`,
+`converged`, `files`) that the harness persists to the tool card's `block.meta`.
+The Client half registers `tool.call.toolview` under the `interpss_run_aclf` key
+and renders Bus / Branch / Gen / Load tables from that metadata, fetching rows in
+100-row pages through the existing `interpss/readCsv` RPC — the same endpoint the
+tab's explorer uses, so both stay consistent. The card declines to the generic
+tool row when it is still running, errored, or carries no usable metadata (a
+replayed log from an older version), instead of rendering an empty explorer.
+
+Adding a tool needs no new Typert endpoint: host-side definitions live in
+`lib/index.js` (`networkInfoTool`, `runAclfTool`) and are registered together at
+the end of `apply()`. A tool that wants a custom card adds one
+`tool.call.toolview` registration in `lib/client.js`, keyed by its wire name.
 
 ## Prerequisites
 

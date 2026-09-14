@@ -213,6 +213,47 @@ async function isIpssWorkspace(ctx, root) {
   }
 }
 
+// Split a workspace-relative case path into its result-directory parent and stem.
+function casePartsOf(caseInput) {
+  const slash = caseInput.lastIndexOf('/')
+  const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
+  const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+  return { parent, stem }
+}
+
+// Case-specific aclf_run.json (same folder as the case) wins, then the project
+// default config/aclf_run.json. Shared by the `interpss` service and `runAclfTool`.
+async function resolveAclfConfigPath(ctx, root, caseInput) {
+  const fs = ctx.get('fs')
+  if (fs === undefined) return root + '/config/aclf_run.json'
+  const { parent } = casePartsOf(caseInput)
+  const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+  const defCfg = root + '/config/aclf_run.json'
+  try {
+    const target = await fs.resolve(caseCfg)
+    const info = await fs.stat(target)
+    if (info !== undefined) return caseCfg
+  } catch (e) {}
+  return defCfg
+}
+
+// Resolve the case a chat tool should act on: explicit argument first, then the
+// case selected in the InterPSS tab, then the case the bridge already holds.
+// Returns { target, source } with target null when nothing is available.
+function resolveToolCase(sessionId, requested) {
+  if (typeof requested === 'string' && requested.trim() !== '') {
+    const resolved = resolveCaseArgument(requested)
+    if (resolved.ok !== true) return { target: null, source: 'argument', error: resolved.error }
+    return { target: resolved, source: 'argument' }
+  }
+  const selected = selectedCaseFor(sessionId)
+  if (selected !== null) return { target: selected, source: 'selection' }
+  if (lastLoadedAbs !== null) {
+    return { target: { input: relativeCasePath(lastLoadedAbs), format: formatOfCasePath(lastLoadedAbs) }, source: 'bridge' }
+  }
+  return { target: null, source: 'none' }
+}
+
 // Default ACLF run options, mirroring the project's config/aclf_run.json, used
 // when that file is absent so the Options dialog always has values to edit.
 const DEFAULT_ACLF_CONFIG = {
@@ -375,26 +416,11 @@ class InterpssService extends TypertRemoteService {
   }
 
   caseParts(caseInput) {
-    const slash = caseInput.lastIndexOf('/')
-    const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
-    const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
-    return { parent, stem }
+    return casePartsOf(caseInput)
   }
 
   async resolveAclfConfigPath(root, caseInput) {
-    const fs = this.ctx.get('fs')
-    if (fs === undefined) return root + '/config/aclf_run.json'
-    // Case-specific aclf_run.json wins (same folder as the case), then the
-    // project default config/aclf_run.json.
-    const { parent } = this.caseParts(caseInput)
-    const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
-    const defCfg = root + '/config/aclf_run.json'
-    try {
-      const target = await fs.resolve(caseCfg)
-      const info = await fs.stat(target)
-      if (info !== undefined) return caseCfg
-    } catch (e) {}
-    return defCfg
+    return resolveAclfConfigPath(this.ctx, root, caseInput)
   }
 
   async isActivated(input) {
@@ -1100,21 +1126,10 @@ function networkInfoTool(ctx) {
       if (!(await isIpssWorkspace(ctx, root))) {
         return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
       }
-      let target = null
-      let source = 'bridge'
-      const requested = args && typeof args.case === 'string' ? args.case : ''
-      if (String(requested).trim() !== '') {
-        const resolved = resolveCaseArgument(requested)
-        if (resolved.ok !== true) return fail(resolved.error, 'argument')
-        target = resolved
-        source = 'argument'
-      } else {
-        const selected = selectedCaseFor(sessionId)
-        if (selected !== null) {
-          target = selected
-          source = 'selection'
-        }
-      }
+      const resolvedCase = resolveToolCase(sessionId, args && typeof args.case === 'string' ? args.case : '')
+      if (resolvedCase.error !== undefined) return fail(resolvedCase.error, 'argument')
+      const target = resolvedCase.target
+      const source = resolvedCase.source
       const bridge = ctx.get('javaBridge')
       if (bridge === undefined || typeof bridge.caseInfo !== 'function') {
         return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
@@ -1141,6 +1156,142 @@ function networkInfoTool(ctx) {
         return value
       } catch (e) {
         return fail('InterPSS bridge call failed: ' + (e && e.message ? e.message : String(e)), source)
+      }
+    },
+  }
+}
+
+// --- Chat tool: interpss_run_aclf -------------------------------------------
+// Runs AC load flow on a case and reports convergence plus the resulting
+// network information. Writes the result CSVs and network-info file under
+// wspace/<case dir>/result/, so a following report tool can consume them.
+function runAclfTool(ctx) {
+  return {
+    name: 'interpss_run_aclf',
+    description:
+      'Run an InterPSS AC load flow (ACLF) on a power-system simulation case and report convergence plus ' +
+      'the resulting network information. Writes <case>_DF_bus.csv, <case>_DF_branch.csv, <case>_DF_gen.csv, ' +
+      '<case>_DF_load.csv and <case>_network_info.txt under wspace/<case dir>/result/. The case comes from ' +
+      'the `case` argument when given, otherwise from the case selected in the InterPSS tab, otherwise from ' +
+      'the case the bridge already holds. Solver options come from the case folder aclf_run.json when ' +
+      'present, otherwise config/aclf_run.json. Large cases can take minutes.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        case: {
+          type: 'string',
+          description:
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
+            "'Texas 2K-bus'). Omit it to run the case selected in the InterPSS tab, then the case already " +
+            'held by the bridge.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          format: { type: 'string' },
+          converged: { type: 'boolean' },
+          busCount: { type: 'number' },
+          branchCount: { type: 'number' },
+          resultDir: { type: 'string' },
+          files: { type: 'array', items: { type: 'string' } },
+          networkInfo: { type: 'string' },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (value && value.ok === true) {
+          const head = [
+            'InterPSS AC load flow \u2014 ' + String(value.case || '') + ' (source: ' + String(value.source || '') + ')',
+            'Converged: ' + (value.converged === true ? 'true' : 'false'),
+            'Results: wspace/' + String(value.resultDir || ''),
+          ].join('\n')
+          return [{ type: 'text', text: head + '\n' + String(value.networkInfo || '') }]
+        }
+        return [{ type: 'text', text: 'InterPSS AC load flow failed: ' + String((value && value.error) || 'unknown error') }]
+      },
+      // Persisted to the tool card's block.meta. The client-side result explorer
+      // reads it to fetch rows over the existing `interpss/readCsv` RPC instead
+      // of re-deriving paths from the rendered text; keep it small, lossless
+      // JSON — never rows or live objects.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          source: String(value.source || ''),
+          resultDir: String(value.resultDir || ''),
+          converged: value.converged === true,
+          files: Array.isArray(value.files) ? value.files.map((name) => String(name)) : [],
+        }
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS AC load flow', kind: 'execute', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      const resolvedCase = resolveToolCase(sessionId, args && typeof args.case === 'string' ? args.case : '')
+      if (resolvedCase.error !== undefined) return fail(resolvedCase.error, 'argument')
+      if (resolvedCase.target === null) {
+        return fail('no simulation case is selected: pick one in the InterPSS tab, or pass `case` (a data/... path, an absolute path containing /wspace/data/, or a preset label)', 'none')
+      }
+      const target = resolvedCase.target
+      const source = resolvedCase.source
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.runAclf !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
+      }
+      try {
+        const { parent, stem } = casePartsOf(target.input)
+        const absCase = root + '/wspace/' + target.input
+        const absCfg = await resolveAclfConfigPath(ctx, root, target.input)
+        const absResults = root + '/wspace/' + parent + '/result'
+        const raw = await bridge.runAclf(target.format, absCase, absCfg, absResults, stem)
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          return fail(String((parsed && parsed.error) || 'bridge runAclf failed'), source)
+        }
+        const info = typeof parsed.networkInfo === 'string' ? parsed.networkInfo : ''
+        const value = {
+          ok: true,
+          case: target.input,
+          source: source,
+          format: target.format,
+          converged: parsed.converged === true,
+          resultDir: parent + '/result',
+          files: [
+            stem + '_DF_bus.csv',
+            stem + '_DF_branch.csv',
+            stem + '_DF_gen.csv',
+            stem + '_DF_load.csv',
+            stem + '_network_info.txt',
+          ],
+          networkInfo: info,
+        }
+        // Only include counts when the run reported them: output.schema
+        // declares numbers, and null would fail output validation.
+        const bus = /Number of Active Buses:\s*(\d+)/.exec(info)
+        const branch = /Number of Active Branches:\s*(\d+)/.exec(info)
+        if (bus) value.busCount = Number(bus[1])
+        if (branch) value.branchCount = Number(branch[1])
+        return value
+      } catch (e) {
+        return fail('InterPSS AC load flow failed: ' + (e && e.message ? e.message : String(e)), source)
       }
     },
   }
@@ -1307,8 +1458,11 @@ export default {
     // call is gated on the iPSS Agent workspace activation check.
     const tools = ctx.get('tools')
     if (tools !== undefined) {
-      ctx.effect(() => tools.register(networkInfoTool(ctx)))
-      diag('chat tool registered: interpss_network_info')
+      const chatToolDefs = [networkInfoTool(ctx), runAclfTool(ctx)]
+      for (const definition of chatToolDefs) {
+        ctx.effect(() => tools.register(definition))
+      }
+      diag('chat tools registered: ' + chatToolDefs.map((definition) => definition.name).join(', '))
     } else {
       diag('chat tools NOT registered: the tools service is unavailable in this context')
     }

@@ -1452,11 +1452,233 @@ module.exports = {
       )
     }
 
+    // --- ACLF tool-card result explorer ---------------------------------------
+    // Owns the whole card for the `interpss_run_aclf` Tool through the
+    // session-scoped `tool.call.toolview` slot (keyed by the wire Tool name).
+    // A registered key REPLACES the generic tool row, so this renders in every
+    // state — running, error, or a replayed log with no usable metadata — and
+    // adds the Bus / Branch / Gen / Load explorer when that metadata allows.
+    // Rows come from the same `interpss/readCsv` RPC the tab's explorer uses.
+    const EXPLORER_KINDS = [
+      { kind: 'bus', label: 'Bus' },
+      { kind: 'branch', label: 'Branch' },
+      { kind: 'gen', label: 'Gen' },
+      { kind: 'load', label: 'Load' },
+    ]
+    const EXPLORER_PAGE = 100
+
+    // Narrow the persisted metadata. Anything unexpected simply means "no
+    // explorer" rather than a throw: replay may carry an older shape, and a
+    // running call has no metadata yet.
+    function aclfCardMeta(block) {
+      if (block === null || block === undefined) return null
+      if (!('kind' in block)) return null // still running
+      if (block.isError === true) return null
+      const meta = block.meta
+      if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return null
+      if (meta.ok !== true) return null
+      if (typeof meta.resultDir !== 'string' || meta.resultDir === '') return null
+      if (!Array.isArray(meta.files)) return null
+      const files = meta.files.filter((name) => typeof name === 'string')
+      if (files.length === 0) return null
+      return {
+        case: typeof meta.case === 'string' ? meta.case : '',
+        resultDir: meta.resultDir,
+        files: files,
+        converged: meta.converged === true,
+      }
+    }
+
+    function explorerPathForKind(meta, kind) {
+      const name = meta.files.filter((f) => f.indexOf('_DF_' + kind + '.csv') !== -1)[0]
+      return name === undefined ? null : meta.resultDir + '/' + name
+    }
+
+    // The call head sits on the block itself while running and on `block.call`
+    // once settled. Arguments are model-produced JSON: parse defensively and
+    // fall back to an empty object.
+    function aclfCallArgs(block) {
+      if (block === null || block === undefined) return {}
+      const call = 'kind' in block ? block.call : block
+      if (call === null || call === undefined || typeof call.argsRaw !== 'string') return {}
+      try {
+        const parsed = JSON.parse(call.argsRaw)
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+      } catch (e) {}
+      return {}
+    }
+
+    // The settled result's single text block, when that is the content layout.
+    function aclfResultText(block) {
+      if (block === null || block === undefined || !('kind' in block)) return null
+      if (!Array.isArray(block.content) || block.content.length !== 1) return null
+      const only = block.content[0]
+      if (only === null || typeof only !== 'object' || only.type !== 'text' || typeof only.text !== 'string') return null
+      return only.text
+    }
+
+    // Gate (deliberately hook-free so the panel's hook order never depends on
+    // the running -> settled transition).
+    function AclfResultCard(props) {
+      const block = props === null || props === undefined ? null : props.block
+      const settled = block !== null && block !== undefined && ('kind' in block)
+      return React.createElement(AclfResultPanel, {
+        settled: settled,
+        isError: settled && block.isError === true,
+        meta: aclfCardMeta(block),
+        args: aclfCallArgs(block),
+        text: aclfResultText(block),
+        sessionId: props === null || props === undefined ? undefined : props.sessionId,
+        callRemote: props === null || props === undefined ? undefined : props.callRemote,
+      })
+    }
+
+    function AclfResultPanel(props) {
+      const meta = props.meta
+      const callRemote = props.callRemote
+      const sessionId = props.sessionId
+      const [kind, setKind] = React.useState(null)
+      const [header, setHeader] = React.useState(null)
+      const [rows, setRows] = React.useState([])
+      const [total, setTotal] = React.useState(0)
+      const [hasMore, setHasMore] = React.useState(false)
+      const [loading, setLoading] = React.useState(false)
+      const [loadingMore, setLoadingMore] = React.useState(false)
+      const [error, setError] = React.useState(null)
+
+      function openKind(next) {
+        setHeader(null)
+        setRows([])
+        setTotal(0)
+        setHasMore(false)
+        setError(null)
+        if (kind === next) { setKind(null); return }
+        setKind(next)
+        if (meta === null) { setError('result metadata is unavailable for this card'); return }
+        const path = explorerPathForKind(meta, next)
+        if (path === null) { setError('result file not found for ' + next); return }
+        setLoading(true)
+        callRemote('readCsv', { path: path, sessionId: sessionId, start: 0, limit: EXPLORER_PAGE }).then(
+          (res) => {
+            setLoading(false)
+            if (res && res.ok) {
+              setHeader(res.header || null)
+              setRows(res.rows || [])
+              setTotal(res.totalRows || 0)
+              setHasMore(!!res.hasMore)
+            } else {
+              setError(res && res.error ? res.error : 'failed to read the ' + next + ' results')
+            }
+          },
+          (err) => { setLoading(false); setError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
+      function loadMore() {
+        if (loadingMore || !hasMore || meta === null) return
+        const path = explorerPathForKind(meta, kind)
+        if (path === null) return
+        setLoadingMore(true)
+        callRemote('readCsv', { path: path, sessionId: sessionId, start: rows.length, limit: EXPLORER_PAGE }).then(
+          (res) => {
+            setLoadingMore(false)
+            if (res && res.ok) {
+              setRows((prev) => prev.concat(res.rows || []))
+              setTotal(res.totalRows || 0)
+              setHasMore(!!res.hasMore)
+            }
+          },
+          () => { setLoadingMore(false) },
+        )
+      }
+
+      const args = props.args === null || props.args === undefined ? {} : props.args
+      const caseArg = typeof args.case === 'string' ? args.case : ''
+      const caseLabel = meta !== null && meta.case !== '' ? meta.case : caseArg
+      const failed = props.isError === true
+      const smallBtn = { ...btn, height: '26px', padding: '0 10px', fontSize: '12px' }
+
+      const children = []
+      if (typeof props.text === 'string' && props.text !== '') {
+        // The rendered result already names the case and the convergence state.
+        children.push(React.createElement('pre', {
+          key: 'text',
+          style: {
+            ...mono,
+            ...panel,
+            marginTop: 0,
+            maxHeight: '260px',
+            color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-primary)',
+          },
+        }, props.text))
+      } else {
+        children.push(React.createElement('div', {
+          key: 'title',
+          style: {
+            fontSize: '12px',
+            fontWeight: 600,
+            color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)',
+          },
+        }, (failed ? 'InterPSS AC load flow failed' : 'InterPSS AC load flow') +
+          (caseLabel === '' ? '' : ' — ' + caseLabel) +
+          (props.settled === true ? '' : ' · running…')))
+      }
+      if (meta !== null) {
+        children.push(React.createElement('div', { key: 'head', style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginTop: '8px' } },
+          React.createElement('span', { key: 'explore', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, 'Explore results'),
+          EXPLORER_KINDS.map((entry) => React.createElement('button', {
+            key: entry.kind,
+            onClick: () => openKind(entry.kind),
+            style: { ...smallBtn, borderColor: kind === entry.kind ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' },
+          }, entry.label)),
+        ))
+      }
+      if (kind !== null) {
+        const status = error !== null
+          ? String(error)
+          : (loading ? 'loading…' : (total > 0 ? rows.length + ' of ' + total + ' rows' : 'no rows'))
+        children.push(React.createElement('div', {
+          key: 'status',
+          style: { ...mono, fontSize: '11px', marginTop: '6px', color: error !== null ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-tertiary)' },
+        }, status))
+      }
+      if (header && rows.length > 0) {
+        const headerCols = String(header).split(',')
+        children.push(React.createElement('div', {
+          key: 'table',
+          style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' },
+        }, React.createElement('table', { style: { ...tableStyle, marginTop: 0 } },
+          React.createElement('thead', null,
+            React.createElement('tr', null, headerCols.map((h, i) => React.createElement('th', { key: i, style: thStyle }, h)))),
+          React.createElement('tbody', null,
+            rows.map((line, ri) => React.createElement('tr', { key: ri },
+              String(line).split(',').map((cell, ci) => React.createElement('td', { key: ci, style: tdStyle }, formatValue(cell)))))),
+        )))
+        if (hasMore) {
+          children.push(React.createElement('button', {
+            key: 'more',
+            onClick: loadMore,
+            disabled: loadingMore,
+            style: { ...smallBtn, marginTop: '6px', alignSelf: 'flex-start', opacity: loadingMore ? 0.6 : 1 },
+          }, loadingMore ? 'Loading…' : 'Load more'))
+        }
+      }
+      return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', margin: '4px 0 4px 4px' } }, children)
+    }
+
     const slots = ctx.get('slots')
     if (slots === undefined) return
     slots.inject('conversation.view', () => slots.register(
       { name: 'conversation.view', id: 'interpss', order: 1, label: 'InterPSS' },
       (props) => React.createElement(InterPssView, { sessionId: props && props.sessionId, callRemote: callRemote }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_run_aclf' },
+      (props) => React.createElement(AclfResultCard, {
+        block: props && props.block,
+        sessionId: props && props.sessionId,
+        callRemote: callRemote,
+      }),
     ))
   },
 }

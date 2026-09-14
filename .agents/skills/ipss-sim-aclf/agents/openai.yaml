@@ -1,0 +1,6 @@
+interface:
+  display_name: "InterPSS AC Load Flow"
+  short_description: "Run ACLF for the selected case"
+  default_prompt: "Use $ipss-sim-aclf to run an AC load flow for the current InterPSS simulation case and report convergence."
+policy:
+  allow_implicit_invocation: true
