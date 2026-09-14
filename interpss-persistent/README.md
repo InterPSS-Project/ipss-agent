@@ -34,11 +34,41 @@ parameters and results, no build-time Typert compiler required.
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
 - Remembers the last selected case across tab switches.
+- **Chat tools** — `interpss_network_info` exposes the selected case's network info to the chat agent (see *Chat tools*).
 
 ## Host RPC methods
 
 `isActivated`, `checkResult`, `checkResultFiles`, `listCases`, `readCsv`,
 `busConnections`, `runAclf`, `runReport`, `getAclfOptions`, `saveAclfOptions`.
+
+## Chat tools
+
+The Host half also registers model Tools, so the same capability is reachable
+from the chat agent instead of only from the tab. Registration is global to the
+host process (this row applies at the host level) and each call is gated on the
+iPSS Agent workspace activation check.
+
+| Tool | Purpose |
+| --- | --- |
+| `interpss_network_info` | Show the InterPSS network information (active buses and branches, total generation and load, load-flow convergence, max mismatch) of a simulation case. |
+
+`interpss_network_info` resolves the target case in this order:
+
+1. its optional `case` argument — a workspace-relative `data/…` path, an
+   absolute path containing `/wspace/data/`, or a preset label (`IEEE 118-bus`,
+   `IEEE 14-bus`, `Texas 2K-bus`);
+2. the case currently selected in the InterPSS tab — the tab reports every
+   selection change (preset, custom path, file picker, remount) through the
+   `checkResult` RPC, which the Host records per session;
+3. the case the embedded bridge already holds.
+
+A case the bridge already holds is reused instead of reloaded, so a converged AC
+load flow is preserved; loading a case into the bridge is part of the call. The
+result reports which source was used, the bus/branch counts, and the load-flow
+convergence parsed from the network-info text.
+
+Adding a tool needs no new Typert endpoint and no Client change: the host-side
+definition and registration live in `lib/index.js` (`networkInfoTool`).
 
 ## Prerequisites
 

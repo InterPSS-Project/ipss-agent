@@ -50,8 +50,19 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   getNetworkInfo`
 - `readCsv` whitelist includes `contingency`: `_DF_(bus|branch|gen|load|contingency)\.csv`
 - `javaBridge` provider exposes `runAclf`, `runContingency`, `runReport`,
-  `loadCase`, `summarize`, `getNetworkInfo`, and `javaLauncher()` (the resolved
-  `java` path consumed by the dynamic plugin's CLI fallback)
+  `loadCase`, `summarize`, `getNetworkInfo`, `caseInfo`, and `javaLauncher()`
+  (the resolved `java` path consumed by the dynamic plugin's CLI fallback).
+  `caseInfo(format, absCase)` returns the network info of a case, loading it only
+  when the embedded JVM does not already hold it; the module-level `lastLoadedAbs`
+  mirrors `IpssAgentBridge.loadedInput` (set by `loadCase`, `runAclf`, and
+  `runContingency`) so a converged load flow is reused rather than discarded
+- **Chat tools**: `apply()` registers `networkInfoTool(ctx)` on the host tool
+  registry via `ctx.effect(() => tools.register(...))`, guarded by
+  `ctx.get('tools')` (the row only injects `typert`) with a `diag()` line either
+  way. `METHODS` is unchanged — tools add no `/api` endpoint
+- The InterPSS tab's case selection reaches the tools through the existing
+  `checkResult` RPC, which records the selection per session; do not add a Client
+  call or a new endpoint for it
 - **Windows JDK discovery**: `ensureBridge()` sets `process.env.JAVA_HOME` from
   `discoverJavaHome()` before `ensureJvm()` (java-bridge reads JAVA_HOME only at
   that point, and it is usually missing in the Windows harness env); the CLI
@@ -65,26 +76,26 @@ fallbacks use `shellQuote(javaLauncher())`, where `javaLauncher()` reads
 
 ## 3. Pack, install, verify
 
-**Always bump a minor version before packing** (e.g. `0.2.0` → `0.2.1` in
+**Always bump a minor version before packing** (e.g. `0.2.3` → `0.3.0` in
 `package.json`). Each rebuild must ship a new version so the install picks up
 the fresh tarball instead of a cached older package.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.2.0 → 0.2.1
+# bump version first, e.g. 0.2.3 → 0.3.0
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.2.1.tgz
+rm -f deepseek-ai-dsh-interpss-0.3.0.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.2.1.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.3.0.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall
 cd /Users/mzhou/.dsh/profiles/web
 pnpm remove @deepseek-ai/dsh-interpss
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.2.1.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.0.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 
@@ -99,3 +110,9 @@ Restart `dsh web` on :3080, then:
   - `isActivated`, `listCases`, `getAclfOptions`, `runCa`, `getNetworkInfo` → `200`, `ok:true`
   - unknown method → `404` (proves only registered endpoints respond)
 - Composition row present: `dsh --profile web --dump-config` → `- id: interpss`
+- **Chat tools**: the tool registry lists `interpss_network_info`, the plugin's
+  `$TMPDIR/dsh-interpss-diagnostic.log` contains
+  `chat tool registered: interpss_network_info` and `tools=true`, and in an iPSS
+  Agent workspace a chat call with no argument returns the case selected in the
+  InterPSS tab (result `source: selection`). Select a case **without** pressing
+  Load first to prove the selection path rather than the bridge path.

@@ -1,0 +1,6 @@
+interface:
+  display_name: "InterPSS Network Info"
+  short_description: "Show the current case's network info"
+  default_prompt: "Use $ipss-sim-info to show the network information of the current InterPSS simulation case."
+policy:
+  allow_implicit_invocation: true

@@ -100,6 +100,119 @@ const DESCRIPTORS = METHODS.map((method) => ({
   result: { mode: 'src-json' },
 }))
 
+// --- Chat tools: shared helpers ---------------------------------------------
+// The InterPSS tab owns "the current simulation case". Every selection change
+// in the tab (preset switch, custom path, file picker, remount) already calls
+// the `checkResult` RPC, so the Host records the selection there instead of
+// adding a client-side call or a new Typert endpoint.
+const CASE_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/
+// Anchor on the unique "/wspace/data/" marker: the DSH home itself may live
+// under a directory also named "wspace" (e.g. ~/Documents/wspace/…).
+const WS_DATA_MARKER = '/wspace/data/'
+
+const selectedCaseBySession = new Map()
+
+function sessionKey(sessionId) {
+  return typeof sessionId === 'string' && sessionId !== '' ? sessionId : ''
+}
+
+function formatOfCasePath(casePath) {
+  return /\.raw$/i.test(casePath) ? 'psse' : 'ieee'
+}
+
+// Record (or clear, for an empty path) the case selected in the InterPSS tab.
+function rememberSelectedCase(sessionId, casePath, format) {
+  const key = sessionKey(sessionId)
+  if (typeof casePath !== 'string' || casePath === '') {
+    selectedCaseBySession.delete(key)
+    return
+  }
+  selectedCaseBySession.set(key, {
+    input: casePath,
+    format: format === 'psse' ? 'psse' : formatOfCasePath(casePath),
+  })
+}
+
+function selectedCaseFor(sessionId) {
+  return selectedCaseBySession.get(sessionKey(sessionId)) || null
+}
+
+// Host-side mirror of the tab's preset list (lib/client.js `PRESETS`).
+const IPSS_PRESETS = [
+  { label: 'ieee 118-bus', format: 'ieee', input: 'data/ieee/Ieee118Bus/ieee118.ieee' },
+  { label: 'ieee 14-bus', format: 'ieee', input: 'data/ieee/Ieee14Bus/ieee14.ieee' },
+  { label: 'texas 2k-bus', format: 'psse', input: 'data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW' },
+]
+
+// Accept a workspace-relative data/… path, an absolute path containing
+// /wspace/data/, or an exact preset label.
+function resolveCaseArgument(raw) {
+  const value = String(raw).trim()
+  if (value === '') return { ok: false, error: 'empty case selector' }
+  for (const preset of IPSS_PRESETS) {
+    if (preset.label === value.toLowerCase()) return { ok: true, input: preset.input, format: preset.format }
+  }
+  if (CASE_PATH_RE.test(value)) return { ok: true, input: value, format: formatOfCasePath(value) }
+  const marker = value.indexOf(WS_DATA_MARKER)
+  if (marker >= 0) {
+    const rel = 'data/' + value.slice(marker + WS_DATA_MARKER.length)
+    if (CASE_PATH_RE.test(rel)) return { ok: true, input: rel, format: formatOfCasePath(rel) }
+  }
+  return {
+    ok: false,
+    error: 'unrecognized case selector "' + value + '"; expected a data/... case path, an absolute path containing ' +
+      WS_DATA_MARKER + ', or a preset label (' + IPSS_PRESETS.map((preset) => preset.label).join(', ') + ')',
+  }
+}
+
+function relativeCasePath(absPath) {
+  const marker = String(absPath).indexOf(WS_DATA_MARKER)
+  return marker >= 0 ? 'data/' + String(absPath).slice(marker + WS_DATA_MARKER.length) : String(absPath)
+}
+
+// Resolve the calling session's workspace root. Shared by the `interpss`
+// service (browser RPCs) and the chat tools (which carry the agent id).
+function resolveWorkspaceRoot(ctx, sessionId) {
+  if (typeof sessionId === 'string' && sessionId !== '') {
+    const sessions = ctx.get('sessions')
+    if (sessions !== undefined) {
+      try {
+        const session = sessions.get(sessionId)
+        const cwd = session && session.header ? session.header.cwd : undefined
+        if (typeof cwd === 'string' && cwd !== '') return cwd
+      } catch (e) {}
+    }
+  }
+  const agents = ctx.get('agents')
+  if (agents !== undefined) {
+    try {
+      const agent = agents.currentInitiator()
+      const cwd = agent && agent.session && agent.session.header ? agent.session.header.cwd : undefined
+      if (typeof cwd === 'string' && cwd !== '') return cwd
+    } catch (e) {}
+  }
+  const sp = ctx.get('sandboxPolicy')
+  if (sp !== undefined && typeof sp.workspaceRoot === 'string' && sp.workspaceRoot !== '') return sp.workspaceRoot
+  return ''
+}
+
+// The activation gate: the workspace README.md's first H1 must be "iPSS Agent".
+async function isIpssWorkspace(ctx, root) {
+  const fs = ctx.get('fs')
+  if (fs === undefined || root === '') return false
+  try {
+    const target = await fs.resolve(root + '/README.md')
+    const text = await fs.readText(target)
+    for (const line of String(text).replace(/\r\n/g, '\n').split('\n')) {
+      const trimmed = line.trim()
+      if (trimmed.indexOf('# ') === 0) return trimmed.slice(2).trim() === 'iPSS Agent'
+    }
+    return false
+  } catch (e) {
+    return false
+  }
+}
+
 // Default ACLF run options, mirroring the project's config/aclf_run.json, used
 // when that file is absent so the Options dialog always has values to edit.
 const DEFAULT_ACLF_CONFIG = {
@@ -180,6 +293,19 @@ let bridgePromise = null
 // java-bridge default namespace (carries stdout.enableRedirect in v2.7+),
 // captured during JVM bootstrap so runAclf can intercept JVM stdout/stderr.
 let jbApi = null
+// Absolute path of the case the embedded JVM currently holds. Mirrors
+// IpssAgentBridge.loadedInput; every JVM load goes through this module's
+// javaBridge provider, so the two cannot drift. Used by `caseInfo` to reuse a
+// loaded case (and preserve a converged AC load flow) instead of reloading.
+let lastLoadedAbs = null
+
+// Update `lastLoadedAbs` from a bridge load result (JSON string, `{ok:true,…}`).
+function rememberLoadedCase(raw, absCase) {
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && parsed.ok === true && typeof absCase === 'string' && absCase !== '') lastLoadedAbs = absCase
+  } catch (e) {}
+}
 
 async function ensureBridge(root) {
   if (bridgePromise === null) {
@@ -241,28 +367,7 @@ class InterpssService extends TypertRemoteService {
   }
 
   resolveWorkspaceRoot(sessionId) {
-    const ctx = this.ctx
-    if (typeof sessionId === 'string' && sessionId !== '') {
-      const sessions = ctx.get('sessions')
-      if (sessions !== undefined) {
-        try {
-          const session = sessions.get(sessionId)
-          const cwd = session && session.header ? session.header.cwd : undefined
-          if (typeof cwd === 'string' && cwd !== '') return cwd
-        } catch (e) {}
-      }
-    }
-    const agents = ctx.get('agents')
-    if (agents !== undefined) {
-      try {
-        const agent = agents.currentInitiator()
-        const cwd = agent && agent.session && agent.session.header ? agent.session.header.cwd : undefined
-        if (typeof cwd === 'string' && cwd !== '') return cwd
-      } catch (e) {}
-    }
-    const sp = ctx.get('sandboxPolicy')
-    if (sp !== undefined && typeof sp.workspaceRoot === 'string' && sp.workspaceRoot !== '') return sp.workspaceRoot
-    return ''
+    return resolveWorkspaceRoot(this.ctx, sessionId)
   }
 
   bridge() {
@@ -293,32 +398,21 @@ class InterpssService extends TypertRemoteService {
   }
 
   async isActivated(input) {
-    const fs = this.ctx.get('fs')
-    if (fs === undefined) return { activated: false }
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
-    if (root === '') return { activated: false }
-    try {
-      const target = await fs.resolve(root + '/README.md')
-      const text = await fs.readText(target)
-      const lines = String(text).replace(/\r\n/g, '\n').split('\n')
-      let title = ''
-      for (const line of lines) {
-        const t = line.trim()
-        if (t.indexOf('# ') === 0) { title = t.slice(2).trim(); break }
-      }
-      return { activated: title === 'iPSS Agent' }
-    } catch (e) {
-      return { activated: false }
-    }
+    return { activated: await isIpssWorkspace(this.ctx, root) }
   }
 
   async checkResult(input) {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
     const casePath = input && typeof input.input === 'string' ? input.input : ''
-    if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+    if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
       return { ok: false, error: 'Invalid case path: ' + casePath }
     }
+    // The tab calls checkResult on mount and on every selection change, so this
+    // is also where "the case currently selected in the InterPSS tab" is
+    // recorded for chat tools (interpss_network_info).
+    rememberSelectedCase(input && input.sessionId, casePath)
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
     if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
     const wspace = root + '/wspace'
@@ -750,9 +844,11 @@ class InterpssService extends TypertRemoteService {
   async loadCase(input) {
     const format = input && input.format === 'psse' ? 'psse' : 'ieee'
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
-    if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+    if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
+    // Loading is the definitive "this is the active simulation case" action.
+    rememberSelectedCase(input && input.sessionId, caseInput, format)
     const bridge = this.bridge()
     if (bridge === undefined || typeof bridge.loadCase !== 'function') {
       return { ok: false, error: 'in-process bridge unavailable' }
@@ -940,6 +1036,116 @@ class InterpssService extends TypertRemoteService {
   }
 }
 
+// --- Chat tool: interpss_network_info ---------------------------------------
+// Model-facing Tool over the embedded bridge. Registered once on the host tool
+// registry; per-call it resolves the target case (argument → tab selection →
+// case held by the bridge) and is gated on the iPSS Agent workspace.
+function networkInfoTool(ctx) {
+  return {
+    name: 'interpss_network_info',
+    description:
+      'Show the InterPSS network information (active buses and branches, total generation and load, ' +
+      'load-flow convergence, max mismatch) of a power-system simulation case handled by the embedded ' +
+      'InterPSS bridge. The case comes from the `case` argument when given, otherwise from the case ' +
+      'selected in the InterPSS tab, otherwise from the case already held by the bridge. A case held by ' +
+      'the bridge is reused, so a converged AC load flow is preserved; loading a case into the bridge is ' +
+      'part of the call.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        case: {
+          type: 'string',
+          description:
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
+            "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
+            'loaded in the bridge.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          busCount: { type: 'number' },
+          branchCount: { type: 'number' },
+          lfConverged: { type: 'boolean' },
+          reused: { type: 'boolean' },
+          networkInfo: { type: 'string' },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (value && value.ok === true) {
+          const head = 'InterPSS network info \u2014 ' + String(value.case || '') +
+            ' (source: ' + String(value.source || '') + ')'
+          return [{ type: 'text', text: head + '\n' + String(value.networkInfo || '') }]
+        }
+        return [{ type: 'text', text: 'InterPSS network info failed: ' + String((value && value.error) || 'unknown error') }]
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS network info', kind: 'read', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      let target = null
+      let source = 'bridge'
+      const requested = args && typeof args.case === 'string' ? args.case : ''
+      if (String(requested).trim() !== '') {
+        const resolved = resolveCaseArgument(requested)
+        if (resolved.ok !== true) return fail(resolved.error, 'argument')
+        target = resolved
+        source = 'argument'
+      } else {
+        const selected = selectedCaseFor(sessionId)
+        if (selected !== null) {
+          target = selected
+          source = 'selection'
+        }
+      }
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.caseInfo !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
+      }
+      try {
+        const absCase = target !== null ? root + '/wspace/' + target.input : ''
+        const raw = await bridge.caseInfo(target !== null ? target.format : '', absCase)
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          return fail(String((parsed && parsed.error) || 'bridge caseInfo failed'), source)
+        }
+        const value = {
+          ok: true,
+          case: target !== null ? target.input : relativeCasePath(parsed.input),
+          source: source,
+          lfConverged: parsed.lfConverged === true,
+          reused: parsed.reused === true,
+          networkInfo: typeof parsed.networkInfo === 'string' ? parsed.networkInfo : '',
+        }
+        // Only include counts when the bridge reported them: output.schema
+        // declares numbers, and null would fail output validation.
+        if (typeof parsed.busCount === 'number') value.busCount = parsed.busCount
+        if (typeof parsed.branchCount === 'number') value.branchCount = parsed.branchCount
+        return value
+      } catch (e) {
+        return fail('InterPSS bridge call failed: ' + (e && e.message ? e.message : String(e)), source)
+      }
+    },
+  }
+}
+
 export default {
   // Wait for the `typert` registry before applying: loader entries activate in
   // parallel, and without this dependency `ctx.get('typert')` can still be
@@ -976,7 +1182,9 @@ export default {
     ctx.provide('javaBridge', {
       async loadCase(format, absCase) {
         const bridge = await ensureBridge(rootFor(absCase))
-        return bridge.loadCase(format, absCase)
+        const raw = await bridge.loadCase(format, absCase)
+        rememberLoadedCase(raw, absCase)
+        return raw
       },
       async runAclf(format, absCase, absCfg, absResults, stem) {
         const bridge = await ensureBridge(rootFor(absCase))
@@ -992,6 +1200,7 @@ export default {
         try {
           const parsed = JSON.parse(raw)
           if (parsed && typeof parsed === 'object') {
+            if (parsed.ok === true) lastLoadedAbs = absCase
             parsed.stdout = cap.out()
             parsed.stderr = cap.err()
             raw = JSON.stringify(parsed)
@@ -1006,6 +1215,45 @@ export default {
       async networkInfo() {
         const bridge = await ensureBridge(rootFor(''))
         return bridge.getNetworkInfo()
+      },
+      // Network info for one case, or for whatever the JVM already holds when
+      // `absCase` is blank. Loading is part of the call; a case the JVM already
+      // holds is reused so a converged AC load flow is preserved. Returns a JSON
+      // string like the other bridge methods.
+      async caseInfo(format, absCase) {
+        const want = typeof absCase === 'string' ? absCase.trim() : ''
+        if (want === '' && lastLoadedAbs === null) {
+          return JSON.stringify({ ok: false, error: 'no simulation case is loaded in the InterPSS bridge' })
+        }
+        const target = want === '' ? lastLoadedAbs : want
+        // `target` is always an absolute case path here, so the JVM (if this is
+        // the first bridge call) boots with the real workspace classpath.
+        const bridge = await ensureBridge(rootFor(target))
+        let reused = true
+        if (target !== lastLoadedAbs) {
+          const raw = await bridge.loadCase(format === 'psse' ? 'psse' : 'ieee', target)
+          let parsed = null
+          try { parsed = JSON.parse(raw) } catch (e) {}
+          if (!parsed || parsed.ok !== true) return raw
+          lastLoadedAbs = target
+          reused = false
+        }
+        const info = await bridge.getNetworkInfo()
+        const text = typeof info === 'string' ? info : ''
+        if (text === '') {
+          return JSON.stringify({ ok: false, error: 'the InterPSS bridge returned no network information for ' + target })
+        }
+        const bus = /Number of Active Buses:\s*(\d+)/.exec(text)
+        const branch = /Number of Active Branches:\s*(\d+)/.exec(text)
+        return JSON.stringify({
+          ok: true,
+          input: target,
+          reused: reused,
+          busCount: bus ? Number(bus[1]) : null,
+          branchCount: branch ? Number(branch[1]) : null,
+          lfConverged: /Loadflow converged:\s*true/i.test(text),
+          networkInfo: text,
+        })
       },
       async runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix) {
         const bridge = await ensureBridge(projectRoot || rootFor(''))
@@ -1025,6 +1273,7 @@ export default {
         try {
           const parsed = JSON.parse(raw)
           if (parsed && typeof parsed === 'object') {
+            if (parsed.ok === true) lastLoadedAbs = absCase
             parsed.stdout = cap.out()
             parsed.stderr = cap.err()
             raw = JSON.stringify(parsed)
@@ -1052,7 +1301,18 @@ export default {
       })
       ctx.effect(() => dispose)
     }
-    diag('apply complete; interpss=' + (ctx.get('interpss') !== undefined) + ' javaBridge=' + (ctx.get('javaBridge') !== undefined))
+
+    // Expose the InterPSS capability to the chat agent as model tools. This row
+    // applies at the host level, so the registration is global and each tool
+    // call is gated on the iPSS Agent workspace activation check.
+    const tools = ctx.get('tools')
+    if (tools !== undefined) {
+      ctx.effect(() => tools.register(networkInfoTool(ctx)))
+      diag('chat tool registered: interpss_network_info')
+    } else {
+      diag('chat tools NOT registered: the tools service is unavailable in this context')
+    }
+    diag('apply complete; interpss=' + (ctx.get('interpss') !== undefined) + ' javaBridge=' + (ctx.get('javaBridge') !== undefined) + ' tools=' + (tools !== undefined))
     } catch (e) {
       diag('apply FAILED: ' + (e && e.stack ? e.stack : e))
       console.error('[dsh-interpss] apply failed:', e && e.stack ? e.stack : e)
