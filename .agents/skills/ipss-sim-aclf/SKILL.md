@@ -87,7 +87,7 @@ On non-convergence, do not re-run the identical call and do not report the case 
 
 ### Result explorer on the card
 
-With plugin 0.3.2+ the settled card shows an **Explore results** row with **Bus / Branch / Gen / Load**, paging rows through the same endpoint the tab uses. Clicking a scope loads the first 100 rows and **Load more** appends the rest. Cards from an older plugin version carry no explorer metadata and render the result text only — that is expected, not a failed run.
+With plugin 0.3.2+ the settled card shows an **Explore results** row with **Bus / Branch / Gen / Load**, paging rows through the same endpoint the tab uses. Clicking a scope loads the first 100 rows and **Load more** appends the rest. A **Report** button in the same row (0.3.3+, next to Load) generates the AC Loadflow Markdown report from the run's CSVs and opens it in the file surface — point the user at it rather than regenerating the report by hand. Cards from an older plugin version carry no explorer metadata and render the result text only — that is expected, not a failed run.
 
 ### Replying after a run
 

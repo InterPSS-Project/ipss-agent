@@ -942,17 +942,22 @@ class InterpssService extends TypertRemoteService {
     let displayName = input && typeof input.displayName === 'string' && input.displayName.trim() !== '' ? input.displayName.trim() : stem
     displayName = String(displayName).replace(/[\r\n\t'"]/g, ' ').trim()
 
-    // NERC when a contingency CSV is present, otherwise AC Loadflow report.
+    // An explicit `reportType` ("aclf" | "nerc") wins; otherwise NERC when a
+    // contingency CSV is present, else the AC Loadflow report.
     const fs = this.ctx.get('fs')
-    let hasContingency = false
-    if (fs !== undefined) {
-      try {
-        const target = await fs.resolve(root + '/wspace/' + resultDir + '/' + stem + '_DF_contingency.csv')
-        hasContingency = (await fs.stat(target)) !== undefined
-      } catch (e) {}
+    const requestedType = input && typeof input.reportType === 'string' ? input.reportType.trim().toLowerCase() : ''
+    let reportType = requestedType === 'aclf' || requestedType === 'nerc' ? requestedType : ''
+    if (reportType === '') {
+      let hasContingency = false
+      if (fs !== undefined) {
+        try {
+          const target = await fs.resolve(root + '/wspace/' + resultDir + '/' + stem + '_DF_contingency.csv')
+          hasContingency = (await fs.stat(target)) !== undefined
+        } catch (e) {}
+      }
+      reportType = hasContingency ? 'nerc' : 'aclf'
     }
-    const reportType = hasContingency ? 'nerc' : 'aclf'
-    const reportFile = hasContingency ? 'NERC_TPL_001_5_Report.md' : 'AC_Loadflow_Report.md'
+    const reportFile = reportType === 'nerc' ? 'NERC_TPL_001_5_Report.md' : 'AC_Loadflow_Report.md'
 
     const bridge = this.bridge()
     if (bridge !== undefined && typeof bridge.runReport === 'function') {

@@ -79,6 +79,13 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   a hook-free gate (`aclfCardMeta`) in front of a hook-using table so its hook
   order cannot depend on the running → settled transition, and it declines to the
   generic row on any malformed or missing metadata
+- **Report button** (Client half): next to the explorer scopes, calling
+  `interpss/runReport` with an explicit `reportType: 'aclf'` and then
+  `props.openFile('wspace/' + resultDir + '/AC_Loadflow_Report.md')`. The Host
+  `runReport` treats an explicit `reportType` (`aclf` | `nerc`) as authoritative
+  and only falls back to the contingency-CSV auto rule when it is absent or
+  unrecognized, so the tab's own Report button is unchanged. `METHODS` still has
+  no new endpoint — `reportType` is an added optional input field
 - **Windows JDK discovery**: `ensureBridge()` sets `process.env.JAVA_HOME` from
   `discoverJavaHome()` before `ensureJvm()` (java-bridge reads JAVA_HOME only at
   that point, and it is usually missing in the Windows harness env); the CLI
@@ -92,26 +99,29 @@ fallbacks use `shellQuote(javaLauncher())`, where `javaLauncher()` reads
 
 ## 3. Pack, install, verify
 
-**Always bump a minor version before packing** (e.g. `0.3.1` → `0.3.2` in
+**Always bump a minor version before packing** (e.g. `0.3.2` → `0.3.3` in
 `package.json`). Each rebuild must ship a new version so the install picks up
-the fresh tarball instead of a cached older package.
+the fresh tarball instead of a cached older package. Re-packing the *same*
+version is silently skipped by pnpm — the installed copy stays stale; if that
+happens, `pnpm remove` then `dsh plugin add` forces the relink, and comparing
+the installed file's SHA-256 against the source is the check that catches it.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.3.1 → 0.3.2
+# bump version first, e.g. 0.3.2 → 0.3.3
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.3.2.tgz
+rm -f deepseek-ai-dsh-interpss-0.3.3.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.3.2.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.3.3.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall
 cd /Users/mzhou/.dsh/profiles/web
 pnpm remove @deepseek-ai/dsh-interpss
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.2.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.3.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 
@@ -140,3 +150,7 @@ served with the plugin bundle, so the reload is what picks it up):
   *Explore results* row with Bus / Branch / Gen / Load; each opens a paged table
   (`N of M rows`, Load more). A failed run, a replayed pre-0.3.2 log, or an
   errored card falls back to the generic tool row.
+- **Report button**: the button next to Load generates
+  `wspace/<case dir>/result/AC_Loadflow_Report.md` and opens it in the file
+  surface — even for a case that also has a contingency CSV (the point of the
+  explicit `reportType`).

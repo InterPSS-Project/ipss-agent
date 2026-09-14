@@ -35,7 +35,7 @@ parameters and results, no build-time Typert compiler required.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
 - Remembers the last selected case across tab switches.
 - **Chat tools** — `interpss_network_info` and `interpss_run_aclf` expose the selected case's network info and AC load flow to the chat agent (see *Chat tools*).
-- **ACLF result explorer in chat** — the `interpss_run_aclf` card offers Bus / Branch / Gen / Load tables, paged through the same `readCsv` RPC as the tab.
+- **ACLF result explorer in chat** — the `interpss_run_aclf` card offers Bus / Branch / Gen / Load tables, paged through the same `readCsv` RPC as the tab, plus a **Report** button that generates the AC Loadflow report.
 
 ## Host RPC methods
 
@@ -88,6 +88,12 @@ and renders Bus / Branch / Gen / Load tables from that metadata, fetching rows i
 tab's explorer uses, so both stay consistent. The card declines to the generic
 tool row when it is still running, errored, or carries no usable metadata (a
 replayed log from an older version), instead of rendering an empty explorer.
+
+A **Report** button sits next to those scopes. It generates the AC Loadflow
+Markdown report from the run's CSVs and opens the file in the harness file
+surface. It passes `reportType: 'aclf'` explicitly, so a case that also has a
+`*_DF_contingency.csv` still gets the load-flow report rather than the NERC one;
+the tab's own Report button keeps its contingency-based auto-selection.
 
 Adding a tool needs no new Typert endpoint: host-side definitions live in
 `lib/index.js` (`networkInfoTool`, `runAclfTool`) and are registered together at

@@ -1530,7 +1530,14 @@ module.exports = {
         text: aclfResultText(block),
         sessionId: props === null || props === undefined ? undefined : props.sessionId,
         callRemote: props === null || props === undefined ? undefined : props.callRemote,
+        openFile: props === null || props === undefined ? undefined : props.openFile,
       })
+    }
+
+    // Report heading text for a case path: its file stem.
+    function aclfReportName(casePath) {
+      const slash = String(casePath).lastIndexOf('/')
+      return String(casePath).slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
     }
 
     function AclfResultPanel(props) {
@@ -1545,6 +1552,35 @@ module.exports = {
       const [loading, setLoading] = React.useState(false)
       const [loadingMore, setLoadingMore] = React.useState(false)
       const [error, setError] = React.useState(null)
+      const [reportRunning, setReportRunning] = React.useState(false)
+      const [reportError, setReportError] = React.useState(null)
+
+      // Generate the AC Loadflow Markdown report from this run's CSVs, then open
+      // it in the file surface. `reportType: 'aclf'` is explicit so a case that
+      // also has a contingency CSV still yields the load-flow report.
+      function generateReport() {
+        if (reportRunning || meta === null) return
+        setReportRunning(true)
+        setReportError(null)
+        callRemote('runReport', {
+          input: meta.case,
+          displayName: aclfReportName(meta.case),
+          reportType: 'aclf',
+          sessionId: sessionId,
+        }).then(
+          (res) => {
+            setReportRunning(false)
+            if (res && res.ok) {
+              if (typeof props.openFile === 'function') {
+                props.openFile('wspace/' + (res.resultDir || meta.resultDir) + '/AC_Loadflow_Report.md')
+              }
+              return
+            }
+            setReportError(res && res.error ? res.error : 'failed to generate the AC Loadflow report')
+          },
+          (err) => { setReportRunning(false); setReportError(String(err && err.message ? err.message : err)) },
+        )
+      }
 
       function openKind(next) {
         setHeader(null)
@@ -1631,6 +1667,17 @@ module.exports = {
             onClick: () => openKind(entry.kind),
             style: { ...smallBtn, borderColor: kind === entry.kind ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' },
           }, entry.label)),
+          React.createElement('span', {
+            key: 'sep',
+            style: { width: '1px', alignSelf: 'stretch', margin: '2px 4px', background: 'var(--dsw-alias-border-l1)' },
+          }),
+          React.createElement('button', {
+            key: 'report',
+            onClick: generateReport,
+            disabled: reportRunning,
+            title: 'Generate the AC Loadflow report from this run',
+            style: { ...smallBtn, opacity: reportRunning ? 0.6 : 1 },
+          }, reportRunning ? 'Generating…' : 'Report'),
         ))
       }
       if (kind !== null) {
@@ -1663,6 +1710,12 @@ module.exports = {
           }, loadingMore ? 'Loading…' : 'Load more'))
         }
       }
+      if (reportError !== null) {
+        children.push(React.createElement('div', {
+          key: 'report-error',
+          style: { ...mono, fontSize: '11px', marginTop: '6px', color: 'var(--dsw-alias-state-error-primary)' },
+        }, 'AC Loadflow report failed: ' + String(reportError)))
+      }
       return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', margin: '4px 0 4px 4px' } }, children)
     }
 
@@ -1678,6 +1731,7 @@ module.exports = {
         block: props && props.block,
         sessionId: props && props.sessionId,
         callRemote: callRemote,
+        openFile: props && props.openFile,
       }),
     ))
   },
