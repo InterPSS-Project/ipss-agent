@@ -1,5 +1,5 @@
 ---
-name: ipss-sim-aclf
+name: ipss-case-aclf
 description: Use when asked to run an AC load flow (ACLF) for the current InterPSS simulation case — the case selected in the InterPSS tab — or for a named IEEE CDF / PSS/E RAW case, and to report convergence plus the result files the run writes.
 metadata:
   short-description: Run ACLF for the selected case
@@ -87,7 +87,7 @@ On non-convergence, do not re-run the identical call and do not report the case 
 
 ### Result explorer on the card
 
-With plugin 0.3.2+ the settled card shows an **Explore results** row with **Bus / Branch / Gen / Load**, paging rows through the same endpoint the tab uses. Clicking a scope loads the first 100 rows and **Load more** appends the rest. A **Report** button in the same row (0.3.3+, next to Load) generates the AC Loadflow Markdown report from the run's CSVs and opens it in the file surface — point the user at it rather than regenerating the report by hand. Cards from an older plugin version carry no explorer metadata and render the result text only — that is expected, not a failed run.
+With plugin 0.3.2+ the settled card shows an **Explore results** row with **Bus / Branch / Gen / Load**, paging rows through the same endpoint the tab uses. Clicking a scope loads the first 100 rows, and scrolling the table to the bottom appends the next page automatically (there is no *Load more* control). A **Report** button in the same row (0.3.3+, next to Load) generates the AC Loadflow Markdown report from the run's CSVs and opens it in the file surface — point the user at it rather than regenerating the report by hand. Cards from an older plugin version carry no explorer metadata and render the result text only — that is expected, not a failed run.
 
 ### Replying after a run
 

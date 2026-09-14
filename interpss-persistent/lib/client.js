@@ -1508,13 +1508,16 @@ module.exports = {
       return {}
     }
 
-    // The settled result's single text block, when that is the content layout.
-    function aclfResultText(block) {
+    // The settled result's text, joined across every text block so a card never
+    // silently loses its summary when the content layout is not exactly one block.
+    function toolResultText(block) {
       if (block === null || block === undefined || !('kind' in block)) return null
-      if (!Array.isArray(block.content) || block.content.length !== 1) return null
-      const only = block.content[0]
-      if (only === null || typeof only !== 'object' || only.type !== 'text' || typeof only.text !== 'string') return null
-      return only.text
+      if (!Array.isArray(block.content)) return null
+      const parts = []
+      for (const part of block.content) {
+        if (part !== null && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string') parts.push(part.text)
+      }
+      return parts.length === 0 ? null : parts.join('\n')
     }
 
     // Gate (deliberately hook-free so the panel's hook order never depends on
@@ -1527,11 +1530,66 @@ module.exports = {
         isError: settled && block.isError === true,
         meta: aclfCardMeta(block),
         args: aclfCallArgs(block),
-        text: aclfResultText(block),
+        text: toolResultText(block),
         sessionId: props === null || props === undefined ? undefined : props.sessionId,
         callRemote: props === null || props === undefined ? undefined : props.callRemote,
         openFile: props === null || props === undefined ? undefined : props.openFile,
       })
+    }
+
+    // --- Network-info tool-card view ------------------------------------------
+    // Owns the card for `interpss_network_info`. The shipped generic row hides a
+    // tool's output behind an expand toggle, which left the network summary
+    // invisible in the conversation; this renders it directly. Hook-free, and it
+    // always renders (a registered key replaces the generic row, so returning
+    // null would leave an empty cell).
+    function networkInfoCardMeta(block) {
+      if (block === null || block === undefined) return null
+      if (!('kind' in block)) return null
+      if (block.isError === true) return null
+      const meta = block.meta
+      if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return null
+      if (meta.ok !== true) return null
+      return {
+        case: typeof meta.case === 'string' ? meta.case : '',
+        source: typeof meta.source === 'string' ? meta.source : '',
+        lfConverged: meta.lfConverged === true,
+      }
+    }
+
+    function NetworkInfoCard(props) {
+      const block = props === null || props === undefined ? null : props.block
+      const settled = block !== null && block !== undefined && ('kind' in block)
+      const failed = settled && block.isError === true
+      const meta = networkInfoCardMeta(block)
+      const text = toolResultText(block)
+      const children = []
+      if (typeof text === 'string' && text !== '') {
+        // The rendered result already names the case and its source.
+        children.push(React.createElement('pre', {
+          key: 'text',
+          style: {
+            ...mono,
+            ...panel,
+            marginTop: 0,
+            maxHeight: '340px',
+            color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-primary)',
+          },
+        }, text))
+      } else {
+        const caseLabel = meta !== null && meta.case !== '' ? meta.case : ''
+        children.push(React.createElement('div', {
+          key: 'title',
+          style: {
+            fontSize: '12px',
+            fontWeight: 600,
+            color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)',
+          },
+        }, (failed ? 'InterPSS network info failed' : 'InterPSS network info') +
+          (caseLabel === '' ? '' : ' — ' + caseLabel) +
+          (settled ? '' : ' · running…')))
+      }
+      return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', margin: '4px 0 4px 4px' } }, children)
     }
 
     // Report heading text for a case path: its file stem.
@@ -1554,6 +1612,10 @@ module.exports = {
       const [error, setError] = React.useState(null)
       const [reportRunning, setReportRunning] = React.useState(false)
       const [reportError, setReportError] = React.useState(null)
+      // Scroll fires repeatedly while a page is in flight; the state guard alone
+      // re-renders a frame later, so a ref also gates the fetch to avoid
+      // appending the same page twice.
+      const loadingMoreRef = React.useRef(false)
 
       // Generate the AC Loadflow Markdown report from this run's CSVs, then open
       // it in the file surface. `reportType: 'aclf'` is explicit so a case that
@@ -1611,12 +1673,14 @@ module.exports = {
       }
 
       function loadMore() {
-        if (loadingMore || !hasMore || meta === null) return
+        if (loadingMoreRef.current || !hasMore || meta === null) return
         const path = explorerPathForKind(meta, kind)
         if (path === null) return
+        loadingMoreRef.current = true
         setLoadingMore(true)
         callRemote('readCsv', { path: path, sessionId: sessionId, start: rows.length, limit: EXPLORER_PAGE }).then(
           (res) => {
+            loadingMoreRef.current = false
             setLoadingMore(false)
             if (res && res.ok) {
               setRows((prev) => prev.concat(res.rows || []))
@@ -1624,8 +1688,15 @@ module.exports = {
               setHasMore(!!res.hasMore)
             }
           },
-          () => { setLoadingMore(false) },
+          () => { loadingMoreRef.current = false; setLoadingMore(false) },
         )
+      }
+
+      // Auto-load the next page when the table is scrolled to the bottom,
+      // matching the InterPSS tab's explorer (no explicit Load more control).
+      function handleTableScroll(e) {
+        const el = e.currentTarget
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore()
       }
 
       const args = props.args === null || props.args === undefined ? {} : props.args
@@ -1683,7 +1754,7 @@ module.exports = {
       if (kind !== null) {
         const status = error !== null
           ? String(error)
-          : (loading ? 'loading…' : (total > 0 ? rows.length + ' of ' + total + ' rows' : 'no rows'))
+          : (loading || loadingMore ? 'loading…' : (total > 0 ? rows.length + ' of ' + total + ' rows' : 'no rows'))
         children.push(React.createElement('div', {
           key: 'status',
           style: { ...mono, fontSize: '11px', marginTop: '6px', color: error !== null ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-tertiary)' },
@@ -1694,6 +1765,7 @@ module.exports = {
         children.push(React.createElement('div', {
           key: 'table',
           style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' },
+          onScroll: handleTableScroll,
         }, React.createElement('table', { style: { ...tableStyle, marginTop: 0 } },
           React.createElement('thead', null,
             React.createElement('tr', null, headerCols.map((h, i) => React.createElement('th', { key: i, style: thStyle }, h)))),
@@ -1701,14 +1773,6 @@ module.exports = {
             rows.map((line, ri) => React.createElement('tr', { key: ri },
               String(line).split(',').map((cell, ci) => React.createElement('td', { key: ci, style: tdStyle }, formatValue(cell)))))),
         )))
-        if (hasMore) {
-          children.push(React.createElement('button', {
-            key: 'more',
-            onClick: loadMore,
-            disabled: loadingMore,
-            style: { ...smallBtn, marginTop: '6px', alignSelf: 'flex-start', opacity: loadingMore ? 0.6 : 1 },
-          }, loadingMore ? 'Loading…' : 'Load more'))
-        }
       }
       if (reportError !== null) {
         children.push(React.createElement('div', {
@@ -1733,6 +1797,10 @@ module.exports = {
         callRemote: callRemote,
         openFile: props && props.openFile,
       }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_network_info' },
+      (props) => React.createElement(NetworkInfoCard, { block: props && props.block }),
     ))
   },
 }

@@ -1,5 +1,5 @@
 ---
-name: ipss-sim-info
+name: ipss-case-info
 description: Use when asked to show the current InterPSS simulation case's network information — active bus and branch counts, total generation and load, load-flow convergence, and maximum mismatch — for the case selected in the InterPSS tab or for a named IEEE CDF / PSS/E RAW case.
 metadata:
   short-description: Show the current case's network info
@@ -67,6 +67,12 @@ Max Mismatch: dPmax :  0.07201 at Bus : Bus30,     dQmax : 1.29678 at Bus : Bus3
 | `Max Mismatch` | Largest P/Q mismatch and its bus — non-zero on an unsolved case |
 
 A `converged: false` result is not an error and needs no retry. To report solved values, run ACLF first (see `$ipss-sim`), then ask again — the tool reuses the solved model instead of reloading the case.
+
+### Replying after the call
+
+With plugin 0.3.4+ the card renders this summary directly (earlier versions hid it behind the generic row's expand toggle). Report the case and whether it is a solved or base-case model, and stop — do not paste the network-info block, the bus/branch counts table, or the result-file path into the assistant message.
+
+Add prose only where the card cannot carry it: the resolved case differs from the one the user expects, `converged: false` when they asked about solved values, or a next step needing a decision (running ACLF to solve it).
 
 ## Fallbacks
 

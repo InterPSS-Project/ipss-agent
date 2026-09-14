@@ -1119,6 +1119,18 @@ function networkInfoTool(ctx) {
         }
         return [{ type: 'text', text: 'InterPSS network info failed: ' + String((value && value.error) || 'unknown error') }]
       },
+      // Persisted to the card's block.meta for the client-side card view: the
+      // shipped generic row hides a tool's output behind an expand toggle, so
+      // the summary would otherwise be invisible in the conversation.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          source: String(value.source || ''),
+          lfConverged: value.lfConverged === true,
+        }
+      },
     },
     presentCall(args) {
       return { card: 'generic', title: 'InterPSS network info', kind: 'read', rawInput: args }

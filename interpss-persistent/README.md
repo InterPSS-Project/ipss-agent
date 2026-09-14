@@ -36,6 +36,7 @@ parameters and results, no build-time Typert compiler required.
 - Remembers the last selected case across tab switches.
 - **Chat tools** — `interpss_network_info` and `interpss_run_aclf` expose the selected case's network info and AC load flow to the chat agent (see *Chat tools*).
 - **ACLF result explorer in chat** — the `interpss_run_aclf` card offers Bus / Branch / Gen / Load tables, paged through the same `readCsv` RPC as the tab, plus a **Report** button that generates the AC Loadflow report.
+- **Network-info card in chat** — the `interpss_network_info` card shows the network summary directly, instead of behind the generic row's expand toggle.
 
 ## Host RPC methods
 
@@ -85,7 +86,9 @@ can take minutes.
 The Client half registers `tool.call.toolview` under the `interpss_run_aclf` key
 and renders Bus / Branch / Gen / Load tables from that metadata, fetching rows in
 100-row pages through the existing `interpss/readCsv` RPC — the same endpoint the
-tab's explorer uses, so both stay consistent. The card declines to the generic
+tab's explorer uses, so both stay consistent. The next page is appended
+automatically when the table is scrolled to the bottom (the same 40 px threshold
+the tab uses), with no explicit *Load more* control. The card declines to the generic
 tool row when it is still running, errored, or carries no usable metadata (a
 replayed log from an older version), instead of rendering an empty explorer.
 
@@ -99,6 +102,16 @@ Adding a tool needs no new Typert endpoint: host-side definitions live in
 `lib/index.js` (`networkInfoTool`, `runAclfTool`) and are registered together at
 the end of `apply()`. A tool that wants a custom card adds one
 `tool.call.toolview` registration in `lib/client.js`, keyed by its wire name.
+
+### Network-info card
+
+`interpss_network_info` also owns a card (key `interpss_network_info`). The
+shipped generic tool row hides a tool's output behind an expand toggle, which
+left the network summary invisible in the conversation, so this card renders the
+result text directly — and, like the ACLF card, it renders in every state
+(running, error, replayed log) because a registered key *replaces* the generic
+row rather than falling back to it. Its `presentationMeta` carries
+`{ ok, case, source, lfConverged }` for the title line.
 
 ## Prerequisites
 

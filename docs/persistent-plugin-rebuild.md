@@ -86,6 +86,13 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   and only falls back to the contingency-CSV auto rule when it is absent or
   unrecognized, so the tab's own Report button is unchanged. `METHODS` still has
   no new endpoint — `reportType` is an added optional input field
+- **Network-info card** (Client half): `networkInfoTool.output.presentationMeta`
+  projects `{ ok, case, source, lfConverged }` and `lib/client.js` registers
+  `tool.call.toolview` with `key: 'interpss_network_info'`. The shipped generic
+  `ToolRow` keeps its output behind `expanded` (default false), so without this
+  card the network summary is invisible in the conversation. `toolResultText()`
+  is shared with the ACLF card and joins **every** text block — requiring exactly
+  one silently dropped the summary whenever the content layout differed
 - **Windows JDK discovery**: `ensureBridge()` sets `process.env.JAVA_HOME` from
   `discoverJavaHome()` before `ensureJvm()` (java-bridge reads JAVA_HOME only at
   that point, and it is usually missing in the Windows harness env); the CLI
@@ -99,7 +106,7 @@ fallbacks use `shellQuote(javaLauncher())`, where `javaLauncher()` reads
 
 ## 3. Pack, install, verify
 
-**Always bump a minor version before packing** (e.g. `0.3.2` → `0.3.3` in
+**Always bump a minor version before packing** (e.g. `0.3.4` → `0.3.5` in
 `package.json`). Each rebuild must ship a new version so the install picks up
 the fresh tarball instead of a cached older package. Re-packing the *same*
 version is silently skipped by pnpm — the installed copy stays stale; if that
@@ -108,20 +115,20 @@ the installed file's SHA-256 against the source is the check that catches it.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.3.2 → 0.3.3
+# bump version first, e.g. 0.3.4 → 0.3.5
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.3.3.tgz
+rm -f deepseek-ai-dsh-interpss-0.3.5.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.3.3.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.3.5.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall
 cd /Users/mzhou/.dsh/profiles/web
 pnpm remove @deepseek-ai/dsh-interpss
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.3.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.5.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 
@@ -148,9 +155,14 @@ served with the plugin bundle, so the reload is what picks it up):
     `wspace/<case dir>/result/` CSVs and `_network_info.txt` are rewritten.
 - **Result explorer**: the settled `interpss_run_aclf` card shows an
   *Explore results* row with Bus / Branch / Gen / Load; each opens a paged table
-  (`N of M rows`, Load more). A failed run, a replayed pre-0.3.2 log, or an
-  errored card falls back to the generic tool row.
+  (`N of M rows`) that appends the next 100 rows when scrolled to the bottom —
+  the same 40 px threshold as the tab, with a ref gating the in-flight fetch so a
+  burst of scroll events cannot append a page twice. A failed run, a replayed
+  pre-0.3.2 log, or an errored card falls back to the generic tool row.
 - **Report button**: the button next to Load generates
   `wspace/<case dir>/result/AC_Loadflow_Report.md` and opens it in the file
   surface — even for a case that also has a contingency CSV (the point of the
   explicit `reportType`).
+- **Network-info card**: the settled `interpss_network_info` card shows the
+  network summary text directly, with no expand toggle to click — the symptom of
+  a missing card here is a summary visible only after expanding a generic row.
