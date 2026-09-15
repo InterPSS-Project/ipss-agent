@@ -1452,11 +1452,383 @@ module.exports = {
       )
     }
 
+    // --- ACLF tool-card result explorer ---------------------------------------
+    // Owns the whole card for the `interpss_run_aclf` Tool through the
+    // session-scoped `tool.call.toolview` slot (keyed by the wire Tool name).
+    // A registered key REPLACES the generic tool row, so this renders in every
+    // state — running, error, or a replayed log with no usable metadata — and
+    // adds the Bus / Branch / Gen / Load explorer when that metadata allows.
+    // Rows come from the same `interpss/readCsv` RPC the tab's explorer uses.
+    const EXPLORER_KINDS = [
+      { kind: 'bus', label: 'Bus' },
+      { kind: 'branch', label: 'Branch' },
+      { kind: 'gen', label: 'Gen' },
+      { kind: 'load', label: 'Load' },
+    ]
+    const EXPLORER_PAGE = 100
+
+    // Narrow the persisted metadata. Anything unexpected simply means "no
+    // explorer" rather than a throw: replay may carry an older shape, and a
+    // running call has no metadata yet.
+    function aclfCardMeta(block) {
+      if (block === null || block === undefined) return null
+      if (!('kind' in block)) return null // still running
+      if (block.isError === true) return null
+      const meta = block.meta
+      if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return null
+      if (meta.ok !== true) return null
+      if (typeof meta.resultDir !== 'string' || meta.resultDir === '') return null
+      if (!Array.isArray(meta.files)) return null
+      const files = meta.files.filter((name) => typeof name === 'string')
+      if (files.length === 0) return null
+      return {
+        case: typeof meta.case === 'string' ? meta.case : '',
+        resultDir: meta.resultDir,
+        files: files,
+        converged: meta.converged === true,
+      }
+    }
+
+    function explorerPathForKind(meta, kind) {
+      const name = meta.files.filter((f) => f.indexOf('_DF_' + kind + '.csv') !== -1)[0]
+      return name === undefined ? null : meta.resultDir + '/' + name
+    }
+
+    // The call head sits on the block itself while running and on `block.call`
+    // once settled. Arguments are model-produced JSON: parse defensively and
+    // fall back to an empty object.
+    function aclfCallArgs(block) {
+      if (block === null || block === undefined) return {}
+      const call = 'kind' in block ? block.call : block
+      if (call === null || call === undefined || typeof call.argsRaw !== 'string') return {}
+      try {
+        const parsed = JSON.parse(call.argsRaw)
+        if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+      } catch (e) {}
+      return {}
+    }
+
+    // The settled result's text, joined across every text block so a card never
+    // silently loses its summary when the content layout is not exactly one block.
+    function toolResultText(block) {
+      if (block === null || block === undefined || !('kind' in block)) return null
+      if (!Array.isArray(block.content)) return null
+      const parts = []
+      for (const part of block.content) {
+        if (part !== null && typeof part === 'object' && part.type === 'text' && typeof part.text === 'string') parts.push(part.text)
+      }
+      return parts.length === 0 ? null : parts.join('\n')
+    }
+
+    // Gate (deliberately hook-free so the panel's hook order never depends on
+    // the running -> settled transition).
+    function AclfResultCard(props) {
+      const block = props === null || props === undefined ? null : props.block
+      const settled = block !== null && block !== undefined && ('kind' in block)
+      return React.createElement(AclfResultPanel, {
+        settled: settled,
+        isError: settled && block.isError === true,
+        meta: aclfCardMeta(block),
+        args: aclfCallArgs(block),
+        text: toolResultText(block),
+        sessionId: props === null || props === undefined ? undefined : props.sessionId,
+        callRemote: props === null || props === undefined ? undefined : props.callRemote,
+        openFile: props === null || props === undefined ? undefined : props.openFile,
+      })
+    }
+
+    // --- Simple text tool-card views ------------------------------------------
+    // Owns the cards for the InterPSS tools whose whole result is a short text
+    // block (`interpss_case_load`, `interpss_network_info`). The shipped generic
+    // row hides a tool's output behind an expand toggle, which left these
+    // summaries invisible in the conversation. Hook-free, and it always renders
+    // (a registered key replaces the generic row, so returning null would leave
+    // an empty cell).
+    function simpleCardMeta(block) {
+      if (block === null || block === undefined) return null
+      if (!('kind' in block)) return null
+      if (block.isError === true) return null
+      const meta = block.meta
+      if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return null
+      if (meta.ok !== true) return null
+      return {
+        case: typeof meta.case === 'string' ? meta.case : '',
+        source: typeof meta.source === 'string' ? meta.source : '',
+      }
+    }
+
+    function toolTextCard(label) {
+      return function ToolTextCard(props) {
+        const block = props === null || props === undefined ? null : props.block
+        const settled = block !== null && block !== undefined && ('kind' in block)
+        const failed = settled && block.isError === true
+        const meta = simpleCardMeta(block)
+        const text = toolResultText(block)
+        const children = []
+        if (typeof text === 'string' && text !== '') {
+          // The rendered result already names the case and its source.
+          children.push(React.createElement('pre', {
+            key: 'text',
+            style: {
+              ...mono,
+              ...panel,
+              marginTop: 0,
+              maxHeight: '340px',
+              color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-primary)',
+            },
+          }, text))
+        } else {
+          const caseLabel = meta !== null && meta.case !== '' ? meta.case : ''
+          children.push(React.createElement('div', {
+            key: 'title',
+            style: {
+              fontSize: '12px',
+              fontWeight: 600,
+              color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)',
+            },
+          }, (failed ? label + ' failed' : label) +
+            (caseLabel === '' ? '' : ' — ' + caseLabel) +
+            (settled ? '' : ' · running…')))
+        }
+        return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', margin: '4px 0 4px 4px' } }, children)
+      }
+    }
+
+    const NetworkInfoCard = toolTextCard('InterPSS network info')
+    const CaseLoadCard = toolTextCard('InterPSS case load')
+    const CaseSummaryCard = toolTextCard('InterPSS case summary')
+
+    // The chat report *is* the summary, so no `interpss_case_summary` card is shown:
+    // every settled, successful block renders nothing at all, whichever scope it is.
+    // A keyed toolview replaces the whole tool row, so returning null removes the row
+    // with it; a failed call always renders its error, and an unsettled call or a
+    // replayed block without metadata falls back to the text card.
+    function CaseSummaryRow(props) {
+      const block = props === null || props === undefined ? null : props.block
+      if (block !== null && block !== undefined && ('kind' in block) && block.isError !== true) {
+        const meta = block.meta
+        if (meta !== null && typeof meta === 'object' && !Array.isArray(meta) && meta.ok === true) return null
+      }
+      return React.createElement(CaseSummaryCard, { block: block })
+    }
+
+    // Report heading text for a case path: its file stem.
+    function aclfReportName(casePath) {
+      const slash = String(casePath).lastIndexOf('/')
+      return String(casePath).slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+    }
+
+    function AclfResultPanel(props) {
+      const meta = props.meta
+      const callRemote = props.callRemote
+      const sessionId = props.sessionId
+      const [kind, setKind] = React.useState(null)
+      const [header, setHeader] = React.useState(null)
+      const [rows, setRows] = React.useState([])
+      const [total, setTotal] = React.useState(0)
+      const [hasMore, setHasMore] = React.useState(false)
+      const [loading, setLoading] = React.useState(false)
+      const [loadingMore, setLoadingMore] = React.useState(false)
+      const [error, setError] = React.useState(null)
+      const [reportRunning, setReportRunning] = React.useState(false)
+      const [reportError, setReportError] = React.useState(null)
+      // Scroll fires repeatedly while a page is in flight; the state guard alone
+      // re-renders a frame later, so a ref also gates the fetch to avoid
+      // appending the same page twice.
+      const loadingMoreRef = React.useRef(false)
+
+      // Generate the AC Loadflow Markdown report from this run's CSVs, then open
+      // it in the file surface. `reportType: 'aclf'` is explicit so a case that
+      // also has a contingency CSV still yields the load-flow report.
+      function generateReport() {
+        if (reportRunning || meta === null) return
+        setReportRunning(true)
+        setReportError(null)
+        callRemote('runReport', {
+          input: meta.case,
+          displayName: aclfReportName(meta.case),
+          reportType: 'aclf',
+          sessionId: sessionId,
+        }).then(
+          (res) => {
+            setReportRunning(false)
+            if (res && res.ok) {
+              if (typeof props.openFile === 'function') {
+                props.openFile('wspace/' + (res.resultDir || meta.resultDir) + '/AC_Loadflow_Report.md')
+              }
+              return
+            }
+            setReportError(res && res.error ? res.error : 'failed to generate the AC Loadflow report')
+          },
+          (err) => { setReportRunning(false); setReportError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
+      function openKind(next) {
+        setHeader(null)
+        setRows([])
+        setTotal(0)
+        setHasMore(false)
+        setError(null)
+        if (kind === next) { setKind(null); return }
+        setKind(next)
+        if (meta === null) { setError('result metadata is unavailable for this card'); return }
+        const path = explorerPathForKind(meta, next)
+        if (path === null) { setError('result file not found for ' + next); return }
+        setLoading(true)
+        callRemote('readCsv', { path: path, sessionId: sessionId, start: 0, limit: EXPLORER_PAGE }).then(
+          (res) => {
+            setLoading(false)
+            if (res && res.ok) {
+              setHeader(res.header || null)
+              setRows(res.rows || [])
+              setTotal(res.totalRows || 0)
+              setHasMore(!!res.hasMore)
+            } else {
+              setError(res && res.error ? res.error : 'failed to read the ' + next + ' results')
+            }
+          },
+          (err) => { setLoading(false); setError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
+      function loadMore() {
+        if (loadingMoreRef.current || !hasMore || meta === null) return
+        const path = explorerPathForKind(meta, kind)
+        if (path === null) return
+        loadingMoreRef.current = true
+        setLoadingMore(true)
+        callRemote('readCsv', { path: path, sessionId: sessionId, start: rows.length, limit: EXPLORER_PAGE }).then(
+          (res) => {
+            loadingMoreRef.current = false
+            setLoadingMore(false)
+            if (res && res.ok) {
+              setRows((prev) => prev.concat(res.rows || []))
+              setTotal(res.totalRows || 0)
+              setHasMore(!!res.hasMore)
+            }
+          },
+          () => { loadingMoreRef.current = false; setLoadingMore(false) },
+        )
+      }
+
+      // Auto-load the next page when the table is scrolled to the bottom,
+      // matching the InterPSS tab's explorer (no explicit Load more control).
+      function handleTableScroll(e) {
+        const el = e.currentTarget
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 40) loadMore()
+      }
+
+      const args = props.args === null || props.args === undefined ? {} : props.args
+      const caseArg = typeof args.case === 'string' ? args.case : ''
+      const caseLabel = meta !== null && meta.case !== '' ? meta.case : caseArg
+      const failed = props.isError === true
+      const smallBtn = { ...btn, height: '26px', padding: '0 10px', fontSize: '12px' }
+
+      const children = []
+      if (typeof props.text === 'string' && props.text !== '') {
+        // The rendered result already names the case and the convergence state.
+        children.push(React.createElement('pre', {
+          key: 'text',
+          style: {
+            ...mono,
+            ...panel,
+            marginTop: 0,
+            maxHeight: '260px',
+            color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-primary)',
+          },
+        }, props.text))
+      } else {
+        children.push(React.createElement('div', {
+          key: 'title',
+          style: {
+            fontSize: '12px',
+            fontWeight: 600,
+            color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)',
+          },
+        }, (failed ? 'InterPSS AC load flow failed' : 'InterPSS AC load flow') +
+          (caseLabel === '' ? '' : ' — ' + caseLabel) +
+          (props.settled === true ? '' : ' · running…')))
+      }
+      if (meta !== null) {
+        children.push(React.createElement('div', { key: 'head', style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginTop: '8px' } },
+          React.createElement('span', { key: 'explore', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, 'Explore results'),
+          EXPLORER_KINDS.map((entry) => React.createElement('button', {
+            key: entry.kind,
+            onClick: () => openKind(entry.kind),
+            style: { ...smallBtn, borderColor: kind === entry.kind ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' },
+          }, entry.label)),
+          React.createElement('span', {
+            key: 'sep',
+            style: { width: '1px', alignSelf: 'stretch', margin: '2px 4px', background: 'var(--dsw-alias-border-l1)' },
+          }),
+          React.createElement('button', {
+            key: 'report',
+            onClick: generateReport,
+            disabled: reportRunning,
+            title: 'Generate the AC Loadflow report from this run',
+            style: { ...smallBtn, opacity: reportRunning ? 0.6 : 1 },
+          }, reportRunning ? 'Generating…' : 'Report'),
+        ))
+      }
+      if (kind !== null) {
+        const status = error !== null
+          ? String(error)
+          : (loading || loadingMore ? 'loading…' : (total > 0 ? rows.length + ' of ' + total + ' rows' : 'no rows'))
+        children.push(React.createElement('div', {
+          key: 'status',
+          style: { ...mono, fontSize: '11px', marginTop: '6px', color: error !== null ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-tertiary)' },
+        }, status))
+      }
+      if (header && rows.length > 0) {
+        const headerCols = String(header).split(',')
+        children.push(React.createElement('div', {
+          key: 'table',
+          style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' },
+          onScroll: handleTableScroll,
+        }, React.createElement('table', { style: { ...tableStyle, marginTop: 0 } },
+          React.createElement('thead', null,
+            React.createElement('tr', null, headerCols.map((h, i) => React.createElement('th', { key: i, style: thStyle }, h)))),
+          React.createElement('tbody', null,
+            rows.map((line, ri) => React.createElement('tr', { key: ri },
+              String(line).split(',').map((cell, ci) => React.createElement('td', { key: ci, style: tdStyle }, formatValue(cell)))))),
+        )))
+      }
+      if (reportError !== null) {
+        children.push(React.createElement('div', {
+          key: 'report-error',
+          style: { ...mono, fontSize: '11px', marginTop: '6px', color: 'var(--dsw-alias-state-error-primary)' },
+        }, 'AC Loadflow report failed: ' + String(reportError)))
+      }
+      return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', margin: '4px 0 4px 4px' } }, children)
+    }
+
     const slots = ctx.get('slots')
     if (slots === undefined) return
     slots.inject('conversation.view', () => slots.register(
       { name: 'conversation.view', id: 'interpss', order: 1, label: 'InterPSS' },
       (props) => React.createElement(InterPssView, { sessionId: props && props.sessionId, callRemote: callRemote }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_run_aclf' },
+      (props) => React.createElement(AclfResultCard, {
+        block: props && props.block,
+        sessionId: props && props.sessionId,
+        callRemote: callRemote,
+        openFile: props && props.openFile,
+      }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_network_info' },
+      (props) => React.createElement(NetworkInfoCard, { block: props && props.block }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_case_load' },
+      (props) => React.createElement(CaseLoadCard, { block: props && props.block }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_case_summary' },
+      (props) => React.createElement(CaseSummaryRow, { block: props && props.block }),
     ))
   },
 }

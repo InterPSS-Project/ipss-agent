@@ -1,0 +1,6 @@
+interface:
+  display_name: "InterPSS Case Summary"
+  short_description: "Summarize the current case"
+  default_prompt: "Use $ipss-case-summary to produce a summary report for the current InterPSS simulation case."
+policy:
+  allow_implicit_invocation: true

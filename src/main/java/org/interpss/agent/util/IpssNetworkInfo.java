@@ -1,9 +1,7 @@
 package org.interpss.agent.util;
 
-import org.apache.commons.math3.complex.Complex;
 import org.interpss.numeric.datatype.Unit.UnitType;
 
-import com.interpss.core.aclf.AclfBus;
 import com.interpss.core.aclf.AclfNetwork;
 import com.interpss.core.aclf.hvdc.HvdcLine2T;
 import com.interpss.core.algo.AclfMethodType;
@@ -42,46 +40,25 @@ public final class IpssNetworkInfo {
 
         sb.append("\n===== Loadflow Run Information:=====\n");
         sb.append("Loadflow converged: ").append(net.isLfConverged()).append('\n');
-        sb.append("Max Mismatch: ").append(reportingMaxMismatch(net, AclfMethodType.NR)).append('\n');
+        sb.append("Max Mismatch: ").append(maxMismatch(net)).append('\n');
         return sb.toString();
     }
 
     /**
-     * Post-LF {@code net.maxMismatch()} can disagree with the last NR iteration log
-     * when a PV bus with shunt/capacitor equipment is converted to PQ during the
-     * final {@code needAdjustment()} pass. Use scheduled-vs-net generation for those
-     * GenPQ buses so the summary matches the converged NR residuals.
+     * The network's own residual, in pu on the 100 MVA base — the same value the NR loop
+     * logs each iteration, so the summary matches the convergence criterion.
+     *
+     * <p>An earlier version special-cased GenPQ buses that had hit a PV Q limit with
+     * switched-shunt or capacitor equipment, substituting {@code gen - calNetPQResults()}
+     * for their mismatch. That expression is {@code load - capacitorQ} by construction —
+     * it never measured the network at all — and so it reported 0.00002 where the bus was
+     * genuinely 2.26 pu out of balance, hiding a 226 Mvar violation behind a clean-looking
+     * report. {@code AclfRunner.runOnNet} now re-solves until that violation is gone, and
+     * this reports whatever remains.
      */
-    static Mismatch reportingMaxMismatch(AclfNetwork net, AclfMethodType lfMethod) {
+    static Mismatch maxMismatch(AclfNetwork net) {
         net.calExternalPowerIntoNet();
-
-        Mismatch max = new Mismatch();
-        double re = -1.0;
-        double im = -1.0;
-
-        for (AclfBus bus : net.getBusList()) {
-            Complex mis = reportingMismatch(bus, lfMethod);
-            double absP = Math.abs(mis.getReal());
-            double absQ = Math.abs(mis.getImaginary());
-            if (absP > re) {
-                re = absP;
-                max.maxPBus = bus;
-            }
-            if (absQ > im) {
-                im = absQ;
-                max.maxQBus = bus;
-            }
-        }
-        max.maxMis = new Complex(re, im);
-        return max;
-    }
-
-    private static Complex reportingMismatch(AclfBus bus, AclfMethodType lfMethod) {
-        if (bus.isGenPQ() && bus.isPVBusLimit() && (bus.isSwitchedShunt() || bus.isCapacitor())) {
-            Complex netPq = bus.calNetPQResults();
-            return new Complex(bus.getGenP(), bus.getGenQ()).subtract(netPq);
-        }
-        return bus.mismatch(lfMethod);
+        return net.maxMismatch(AclfMethodType.NR);
     }
 
     private static void appendIfPositive(StringBuilder sb, String label, long count) {
