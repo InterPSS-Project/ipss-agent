@@ -121,9 +121,11 @@ Find the top N-1 loaded branches
 | Markdown report generator         | [GenReport.md](GenReport.md)                                                               |
 | DeepSeek Harness DSH plugin       | [InstallDSHPlugin.md](InstallDSHPlugin.md)                                                 |
 | DSH plugin package                | [interpss-persistent/README.md](interpss-persistent/README.md)                             |
+| InterPSS chat tools               | [docs/interpss-tools.md](docs/interpss-tools.md)                                           |
 | Interactive HTML dashboards       | `[.agents/skills/nerc-report-html/SKILL.md](.agents/skills/nerc-report-html/SKILL.md)`     |
 | NERC slide decks                  | `[.agents/skills/nerc-report-slides/SKILL.md](.agents/skills/nerc-report-slides/SKILL.md)` |
 | Current case network info         | [.agents/skills/ipss-case-info/SKILL.md](.agents/skills/ipss-case-info/SKILL.md)           |
 | Run ACLF for the current case     | [.agents/skills/ipss-case-aclf/SKILL.md](.agents/skills/ipss-case-aclf/SKILL.md)           |
+| Summary report for the current case | [.agents/skills/ipss-case-summary/SKILL.md](.agents/skills/ipss-case-summary/SKILL.md)   |
 
 

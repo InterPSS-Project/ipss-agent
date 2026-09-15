@@ -57,10 +57,17 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   mirrors `IpssAgentBridge.loadedInput` (set by `loadCase`, `runAclf`, and
   `runContingency`) so a converged load flow is reused rather than discarded
 - **Chat tools**: `apply()` registers every definition in `chatToolDefs`
-  (`networkInfoTool(ctx)`, `runAclfTool(ctx)`) on the host tool registry via
-  `ctx.effect(() => tools.register(...))`, guarded by `ctx.get('tools')` (the row
-  only injects `typert`) with a `diag()` line either way. `METHODS` is unchanged —
-  tools add no `/api` endpoint
+  (`caseLoadTool(ctx)`, `networkInfoTool(ctx)`, `runAclfTool(ctx)`,
+  `caseSummaryTool(ctx)`) on the host tool registry via
+  `ctx.effect(() => tools.register(...))`, guarded by `ctx.get('tools')`
+  (the row only injects `typert`) with a `diag()` line either way. `METHODS` is
+  unchanged — tools add no `/api` endpoint
+- **`interpss_case_load`** is the explicit load step. It adds no bridge method: it
+  resolves the case and calls the same `javaBridge.caseInfo()` the other tools use,
+  so it reuses a held case (`alreadyLoaded: true`, no re-parse) and otherwise loads
+  it, reporting the counts. Its description and the other two tools'
+  descriptions carry the shared `LOAD_FIRST_HINT` ordering sentence; nothing
+  enforces the order, so the other tools must keep loading on demand
 - The InterPSS tab's case selection reaches the tools through the existing
   `checkResult` RPC, which records the selection per session; do not add a Client
   call or a new endpoint for it
@@ -86,13 +93,28 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   and only falls back to the contingency-CSV auto rule when it is absent or
   unrecognized, so the tab's own Report button is unchanged. `METHODS` still has
   no new endpoint — `reportType` is an added optional input field
-- **Network-info card** (Client half): `networkInfoTool.output.presentationMeta`
-  projects `{ ok, case, source, lfConverged }` and `lib/client.js` registers
-  `tool.call.toolview` with `key: 'interpss_network_info'`. The shipped generic
-  `ToolRow` keeps its output behind `expanded` (default false), so without this
-  card the network summary is invisible in the conversation. `toolResultText()`
-  is shared with the ACLF card and joins **every** text block — requiring exactly
-  one silently dropped the summary whenever the content layout differed
+- **`interpss_case_summary`** ports `IpssAgentBridge.summarize()`. Java always returns
+  every result section in full (only the requested one is ranked/limited) and
+  `text` is a JSON string inside the envelope, so the tool does a second parse and
+  keeps just `netResults` plus the requested section, mapping entries to uniform
+  `{ id, name, bus?, value, unit, mvar? }` rows. It rejects an unknown scope (the
+  Java switch silently falls back to `net`, which truncates every section in model
+  order) and uses `numRec = 1` for scope `net` so the bridge payload stays small.
+  The case-wide totals are populated by `net` only (`converged` by every scope), and
+  `render()` gives a ranked scope its table alone — no `case · scope · converged` header
+  and no blank line. Since 0.3.10 the `net` card drops that preamble too and renders only
+  its two totals lines; the case identity lives in the tool result, not on any card
+- **Short-result cards** (Client half): `caseLoadTool`, `networkInfoTool` and
+  `caseSummaryTool` each project a small `presentationMeta`
+  (`{ ok, case, source, alreadyLoaded, format }`, `{ ok, case, source, lfConverged }`
+  and `{ ok, case, scope, rowCount }` respectively), and `lib/client.js` registers
+  `tool.call.toolview` for `interpss_case_load`, `interpss_network_info` and
+  `interpss_case_summary` with one shared `toolTextCard(label)` component. The
+  shipped generic `ToolRow` keeps its output behind `expanded` (default false), so
+  without these cards those summaries are invisible in the conversation.
+  `toolResultText()` is shared with the ACLF card and joins **every** text block —
+  requiring exactly one silently dropped the summary whenever the content layout
+  differed
 - **Windows JDK discovery**: `ensureBridge()` sets `process.env.JAVA_HOME` from
   `discoverJavaHome()` before `ensureJvm()` (java-bridge reads JAVA_HOME only at
   that point, and it is usually missing in the Windows harness env); the CLI
@@ -106,7 +128,7 @@ fallbacks use `shellQuote(javaLauncher())`, where `javaLauncher()` reads
 
 ## 3. Pack, install, verify
 
-**Always bump a minor version before packing** (e.g. `0.3.4` → `0.3.5` in
+**Always bump a minor version before packing** (e.g. `0.3.11` → `0.3.12` in
 `package.json`). Each rebuild must ship a new version so the install picks up
 the fresh tarball instead of a cached older package. Re-packing the *same*
 version is silently skipped by pnpm — the installed copy stays stale; if that
@@ -115,20 +137,20 @@ the installed file's SHA-256 against the source is the check that catches it.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.3.4 → 0.3.5
+# bump version first, e.g. 0.3.11 → 0.3.12
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.3.5.tgz
+rm -f deepseek-ai-dsh-interpss-0.3.12.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.3.5.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.3.12.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall
 cd /Users/mzhou/.dsh/profiles/web
 pnpm remove @deepseek-ai/dsh-interpss
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.5.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.12.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 
@@ -144,15 +166,20 @@ served with the plugin bundle, so the reload is what picks it up):
   - `isActivated`, `listCases`, `getAclfOptions`, `runCa`, `getNetworkInfo` → `200`, `ok:true`
   - unknown method → `404` (proves only registered endpoints respond)
 - Composition row present: `dsh --profile web --dump-config` → `- id: interpss`
-- **Chat tools**: the tool registry lists `interpss_network_info` and
-  `interpss_run_aclf`, and the plugin's `$TMPDIR/dsh-interpss-diagnostic.log`
-  contains `chat tools registered: interpss_network_info, interpss_run_aclf` and
-  `tools=true`. In an iPSS Agent workspace:
+- **Chat tools**: the tool registry lists `interpss_case_load`,
+  `interpss_network_info`, `interpss_run_aclf` and `interpss_case_summary`, and the plugin's
+  `$TMPDIR/dsh-interpss-diagnostic.log` contains
+  `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary`
+  and `tools=true`. In an iPSS Agent workspace:
   - a chat call with no argument returns the case selected in the InterPSS tab
     (result `source: selection`) — select a case **without** pressing Load first
     to prove the selection path rather than the bridge path;
   - `interpss_run_aclf` converges a small case, and its
     `wspace/<case dir>/result/` CSVs and `_network_info.txt` are rewritten.
+- **Case load**: `interpss_case_load` with no argument reports the selected case
+  with `alreadyLoaded: false` and its bus/branch counts the first time, and
+  `alreadyLoaded: true` on an immediate second call (no re-parse). Selecting a
+  different case and calling it again loads that case.
 - **Result explorer**: the settled `interpss_run_aclf` card shows an
   *Explore results* row with Bus / Branch / Gen / Load; each opens a paged table
   (`N of M rows`) that appends the next 100 rows when scrolled to the bottom —
@@ -163,6 +190,14 @@ served with the plugin bundle, so the reload is what picks it up):
   `wspace/<case dir>/result/AC_Loadflow_Report.md` and opens it in the file
   surface — even for a case that also has a contingency CSV (the point of the
   explicit `reportType`).
-- **Network-info card**: the settled `interpss_network_info` card shows the
-  network summary text directly, with no expand toggle to click — the symptom of
-  a missing card here is a summary visible only after expanding a generic row.
+- **Case summary**: `interpss_case_summary` renders no card for any scope (0.3.12) — the
+  tool call appears with no output row at all. Its result is what the chat report uses:
+  no arguments gives the case totals (no rows); `{ scope: "bus", numRec: 5 }` gives five
+  lowest-voltage rows and `{ scope: "bus", sortRule: "Highest Bus Voltage" }` five highest;
+  an unknown scope fails instead of silently summarizing `net`.
+- **Short-result cards**: the settled `interpss_case_load`,
+  `interpss_network_info` and `interpss_case_summary` cards show their summary text directly, with no expand
+  toggle to click — the symptom of a missing card here is a summary visible only
+  after expanding a generic row. The summary tool is the exception: since 0.3.12 no
+  `interpss_case_summary` call renders a card (ranked scopes since 0.3.11), so any visible card for
+  it — totals or top-N table — is the regression symptom.

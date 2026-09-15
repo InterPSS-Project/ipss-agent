@@ -52,10 +52,12 @@ iPSS Agent workspace activation check.
 
 | Tool | Purpose |
 | --- | --- |
+| `interpss_case_load` | Load the selected simulation case into the embedded bridge. No-op (`alreadyLoaded: true`) when the bridge already holds it; call it before the other tools. |
 | `interpss_network_info` | Show the InterPSS network information (active buses and branches, total generation and load, load-flow convergence, max mismatch) of a simulation case. |
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
+| `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
 
-Both tools resolve the target case through one shared helper, in this order:
+The first three tools resolve the target case through one shared helper, in this order:
 
 1. the optional `case` argument — a workspace-relative `data/…` path, an
    absolute path containing `/wspace/data/`, or a preset label (`IEEE 118-bus`,
@@ -67,9 +69,25 @@ Both tools resolve the target case through one shared helper, in this order:
 
 The result names the case and which of those sources produced it.
 
+`interpss_case_load` is the explicit load step and the recommended first call when
+the selected case has not been loaded yet. It goes through the same
+`javaBridge.caseInfo` path, so it reuses a case the bridge already holds — reporting
+`alreadyLoaded: true` without re-parsing — and otherwise loads it and reports the
+active bus/branch counts. It deliberately does not return the network-info text;
+that is `interpss_network_info`'s job. Nothing enforces the order: the other tools
+still load on demand.
+
 `interpss_network_info` loads the case into the embedded bridge as part of the
 call. A case the bridge already holds is reused instead of reloaded, so a
 converged AC load flow is preserved rather than replaced by base-case values.
+
+`interpss_case_summary` reads the cached model — the case only has to be loaded, not solved — and
+returns the case-wide totals with `scope: net`, or a bounded ranked row list (`numRec`, default 10,
+capped at 100) for the other scopes. Only `converged` is reported by every scope — the remaining
+totals stay on the `net` call so a ranked card does not repeat them. It is a port of `IpssAgentBridge.summarize()`, with two tool-level changes: the
+Java result container *always* carries every section in full (only the requested one is ranked),
+so the Host slices it instead of forwarding it; and an unknown `scope` is rejected where the RPC
+would silently fall back to `net`. Branch ranking is by flow magnitude, not rating loading.
 
 `interpss_run_aclf` solves the case and writes
 `<stem>_DF_{bus,branch,gen,load}.csv` plus `<stem>_network_info.txt` under
@@ -99,19 +117,21 @@ surface. It passes `reportType: 'aclf'` explicitly, so a case that also has a
 the tab's own Report button keeps its contingency-based auto-selection.
 
 Adding a tool needs no new Typert endpoint: host-side definitions live in
-`lib/index.js` (`networkInfoTool`, `runAclfTool`) and are registered together at
-the end of `apply()`. A tool that wants a custom card adds one
-`tool.call.toolview` registration in `lib/client.js`, keyed by its wire name.
+`lib/index.js` (`caseLoadTool`, `networkInfoTool`, `runAclfTool`, `caseSummaryTool`)
+and are registered together at the end of `apply()`. A tool that wants a custom card adds
+one `tool.call.toolview` registration in `lib/client.js`, keyed by its wire name.
 
-### Network-info card
+### Short-result cards
 
-`interpss_network_info` also owns a card (key `interpss_network_info`). The
-shipped generic tool row hides a tool's output behind an expand toggle, which
-left the network summary invisible in the conversation, so this card renders the
-result text directly — and, like the ACLF card, it renders in every state
-(running, error, replayed log) because a registered key *replaces* the generic
-row rather than falling back to it. Its `presentationMeta` carries
-`{ ok, case, source, lfConverged }` for the title line.
+`interpss_case_load`, `interpss_network_info` and `interpss_case_summary` share one
+card implementation: `toolTextCard(label)` in `lib/client.js` returns a hook-free
+component that renders the settled result text directly. The shipped generic tool row hides a tool's
+output behind an expand toggle, which left both summaries invisible in the
+conversation. Every card renders in every state (running, error, replayed log)
+because a registered key *replaces* the generic row rather than falling back to it.
+
+Their `presentationMeta` carries `{ ok, case, source, … }` for the title line —
+`lfConverged` for the info tool, `alreadyLoaded` / `format` for the load tool.
 
 ## Prerequisites
 

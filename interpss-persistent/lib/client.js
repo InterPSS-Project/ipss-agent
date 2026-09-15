@@ -1537,13 +1537,14 @@ module.exports = {
       })
     }
 
-    // --- Network-info tool-card view ------------------------------------------
-    // Owns the card for `interpss_network_info`. The shipped generic row hides a
-    // tool's output behind an expand toggle, which left the network summary
-    // invisible in the conversation; this renders it directly. Hook-free, and it
-    // always renders (a registered key replaces the generic row, so returning
-    // null would leave an empty cell).
-    function networkInfoCardMeta(block) {
+    // --- Simple text tool-card views ------------------------------------------
+    // Owns the cards for the InterPSS tools whose whole result is a short text
+    // block (`interpss_case_load`, `interpss_network_info`). The shipped generic
+    // row hides a tool's output behind an expand toggle, which left these
+    // summaries invisible in the conversation. Hook-free, and it always renders
+    // (a registered key replaces the generic row, so returning null would leave
+    // an empty cell).
+    function simpleCardMeta(block) {
       if (block === null || block === undefined) return null
       if (!('kind' in block)) return null
       if (block.isError === true) return null
@@ -1553,43 +1554,62 @@ module.exports = {
       return {
         case: typeof meta.case === 'string' ? meta.case : '',
         source: typeof meta.source === 'string' ? meta.source : '',
-        lfConverged: meta.lfConverged === true,
       }
     }
 
-    function NetworkInfoCard(props) {
-      const block = props === null || props === undefined ? null : props.block
-      const settled = block !== null && block !== undefined && ('kind' in block)
-      const failed = settled && block.isError === true
-      const meta = networkInfoCardMeta(block)
-      const text = toolResultText(block)
-      const children = []
-      if (typeof text === 'string' && text !== '') {
-        // The rendered result already names the case and its source.
-        children.push(React.createElement('pre', {
-          key: 'text',
-          style: {
-            ...mono,
-            ...panel,
-            marginTop: 0,
-            maxHeight: '340px',
-            color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-primary)',
-          },
-        }, text))
-      } else {
-        const caseLabel = meta !== null && meta.case !== '' ? meta.case : ''
-        children.push(React.createElement('div', {
-          key: 'title',
-          style: {
-            fontSize: '12px',
-            fontWeight: 600,
-            color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)',
-          },
-        }, (failed ? 'InterPSS network info failed' : 'InterPSS network info') +
-          (caseLabel === '' ? '' : ' — ' + caseLabel) +
-          (settled ? '' : ' · running…')))
+    function toolTextCard(label) {
+      return function ToolTextCard(props) {
+        const block = props === null || props === undefined ? null : props.block
+        const settled = block !== null && block !== undefined && ('kind' in block)
+        const failed = settled && block.isError === true
+        const meta = simpleCardMeta(block)
+        const text = toolResultText(block)
+        const children = []
+        if (typeof text === 'string' && text !== '') {
+          // The rendered result already names the case and its source.
+          children.push(React.createElement('pre', {
+            key: 'text',
+            style: {
+              ...mono,
+              ...panel,
+              marginTop: 0,
+              maxHeight: '340px',
+              color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-primary)',
+            },
+          }, text))
+        } else {
+          const caseLabel = meta !== null && meta.case !== '' ? meta.case : ''
+          children.push(React.createElement('div', {
+            key: 'title',
+            style: {
+              fontSize: '12px',
+              fontWeight: 600,
+              color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)',
+            },
+          }, (failed ? label + ' failed' : label) +
+            (caseLabel === '' ? '' : ' — ' + caseLabel) +
+            (settled ? '' : ' · running…')))
+        }
+        return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', margin: '4px 0 4px 4px' } }, children)
       }
-      return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', margin: '4px 0 4px 4px' } }, children)
+    }
+
+    const NetworkInfoCard = toolTextCard('InterPSS network info')
+    const CaseLoadCard = toolTextCard('InterPSS case load')
+    const CaseSummaryCard = toolTextCard('InterPSS case summary')
+
+    // The chat report *is* the summary, so no `interpss_case_summary` card is shown:
+    // every settled, successful block renders nothing at all, whichever scope it is.
+    // A keyed toolview replaces the whole tool row, so returning null removes the row
+    // with it; a failed call always renders its error, and an unsettled call or a
+    // replayed block without metadata falls back to the text card.
+    function CaseSummaryRow(props) {
+      const block = props === null || props === undefined ? null : props.block
+      if (block !== null && block !== undefined && ('kind' in block) && block.isError !== true) {
+        const meta = block.meta
+        if (meta !== null && typeof meta === 'object' && !Array.isArray(meta) && meta.ok === true) return null
+      }
+      return React.createElement(CaseSummaryCard, { block: block })
     }
 
     // Report heading text for a case path: its file stem.
@@ -1801,6 +1821,14 @@ module.exports = {
     slots.inject('tool.call.toolview', () => slots.register(
       { name: 'tool.call.toolview', key: 'interpss_network_info' },
       (props) => React.createElement(NetworkInfoCard, { block: props && props.block }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_case_load' },
+      (props) => React.createElement(CaseLoadCard, { block: props && props.block }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_case_summary' },
+      (props) => React.createElement(CaseSummaryRow, { block: props && props.block }),
     ))
   },
 }

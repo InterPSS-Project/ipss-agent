@@ -1071,10 +1071,133 @@ class InterpssService extends TypertRemoteService {
 // Model-facing Tool over the embedded bridge. Registered once on the host tool
 // registry; per-call it resolves the target case (argument → tab selection →
 // case held by the bridge) and is gated on the iPSS Agent workspace.
+// Shared ordering guidance for the chat tools: loading the selected case is an
+// explicit first step, though every tool still loads on demand if it is skipped.
+const LOAD_FIRST_HINT =
+  'If the case selected in the InterPSS tab has not been loaded yet, call interpss_case_load ' +
+  'first (this tool still loads on demand). '
+
+// --- Chat tool: interpss_case_load ------------------------------------------
+// The explicit "load the selected case into the bridge" step. It reuses the same
+// caseInfo() path the other tools go through, so it is a no-op when the bridge
+// already holds the target and only otherwise parses the case file.
+function caseLoadTool(ctx) {
+  return {
+    name: 'interpss_case_load',
+    description:
+      'Load a power-system simulation case into the embedded InterPSS model (the base case held in the ' +
+      'bridge memory). Call this before interpss_network_info or interpss_run_aclf when a case is selected ' +
+      'in the InterPSS tab and has not been loaded yet: it is a no-op reporting `alreadyLoaded` when the ' +
+      'bridge already holds that case. The case comes from the `case` argument when given, otherwise from ' +
+      'the case selected in the InterPSS tab, otherwise from the case the bridge already holds. Reports ' +
+      'the active bus and branch counts; large cases (PSS/E 2K-bus and up) can take seconds to load.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        case: {
+          type: 'string',
+          description:
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
+            "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
+            'held by the bridge.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          format: { type: 'string' },
+          alreadyLoaded: { type: 'boolean' },
+          busCount: { type: 'number' },
+          branchCount: { type: 'number' },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (value && value.ok === true) {
+          const counts = (typeof value.busCount === 'number' ? value.busCount : '?') + ' buses, ' +
+            (typeof value.branchCount === 'number' ? value.branchCount : '?') + ' branches'
+          const head = 'InterPSS case load \u2014 ' + String(value.case || '') +
+            ' (source: ' + String(value.source || '') + ')'
+          return [{
+            type: 'text',
+            text: head + '\n' + (value.alreadyLoaded === true ? 'Already loaded' : 'Loaded') + ' (' + counts + ')',
+          }]
+        }
+        return [{ type: 'text', text: 'InterPSS case load failed: ' + String((value && value.error) || 'unknown error') }]
+      },
+      // Persisted to the card's block.meta so the load card can render without
+      // the generic row's expand toggle.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          source: String(value.source || ''),
+          format: String(value.format || ''),
+          alreadyLoaded: value.alreadyLoaded === true,
+        }
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS case load', kind: 'read', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      const resolvedCase = resolveToolCase(sessionId, args && typeof args.case === 'string' ? args.case : '')
+      if (resolvedCase.error !== undefined) return fail(resolvedCase.error, 'argument')
+      if (resolvedCase.target === null) {
+        return fail('no simulation case is selected: pick one in the InterPSS tab, or pass `case` (a data/... path, an absolute path containing /wspace/data/, or a preset label)', 'none')
+      }
+      const target = resolvedCase.target
+      const source = resolvedCase.source
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.caseInfo !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
+      }
+      try {
+        const raw = await bridge.caseInfo(target.format, root + '/wspace/' + target.input)
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          return fail(String((parsed && parsed.error) || 'bridge case load failed'), source)
+        }
+        const value = {
+          ok: true,
+          case: target.input,
+          source: source,
+          format: target.format,
+          alreadyLoaded: parsed.reused === true,
+        }
+        // Only include counts the bridge reported: output.schema declares
+        // numbers, and null would fail output validation.
+        if (typeof parsed.busCount === 'number') value.busCount = parsed.busCount
+        if (typeof parsed.branchCount === 'number') value.branchCount = parsed.branchCount
+        return value
+      } catch (e) {
+        return fail('InterPSS case load failed: ' + (e && e.message ? e.message : String(e)), source)
+      }
+    },
+  }
+}
+
 function networkInfoTool(ctx) {
   return {
     name: 'interpss_network_info',
     description:
+      LOAD_FIRST_HINT +
       'Show the InterPSS network information (active buses and branches, total generation and load, ' +
       'load-flow convergence, max mismatch) of a power-system simulation case handled by the embedded ' +
       'InterPSS bridge. The case comes from the `case` argument when given, otherwise from the case ' +
@@ -1186,6 +1309,7 @@ function runAclfTool(ctx) {
   return {
     name: 'interpss_run_aclf',
     description:
+      LOAD_FIRST_HINT +
       'Run an InterPSS AC load flow (ACLF) on a power-system simulation case and report convergence plus ' +
       'the resulting network information. Writes <case>_DF_bus.csv, <case>_DF_branch.csv, <case>_DF_gen.csv, ' +
       '<case>_DF_load.csv and <case>_network_info.txt under wspace/<case dir>/result/. The case comes from ' +
@@ -1309,6 +1433,293 @@ function runAclfTool(ctx) {
         return value
       } catch (e) {
         return fail('InterPSS AC load flow failed: ' + (e && e.message ? e.message : String(e)), source)
+      }
+    },
+  }
+}
+
+// --- Chat tool: interpss_case_summary ----------------------------------------
+// Ports IpssAgentBridge.summarize(): a top-N ranking from the cached model.
+//
+// Two facts about the Java side shape this tool:
+//   1. `text` is a JSON *string* inside the JSON envelope, so it needs a second parse.
+//   2. The result container ALWAYS carries every section (busResults, genResults,
+//      loadResults, branchResults, ...); only the requested section is ranked and
+//      limited. On a large case the bridge payload is therefore big, so this tool
+//      keeps just the requested section plus netResults and returns a bounded,
+//      model-friendly row list rather than forwarding the raw container.
+//
+// It is also stricter than the RPC: an unknown scope is rejected, because the Java
+// switch silently falls back to `net`, which truncates every section in model order
+// — a ranking that is not a ranking.
+const SUMMARY_SECTIONS = {
+  bus: { section: 'busResults', unit: 'pu' },
+  gen: { section: 'genResults', unit: 'MW' },
+  load: { section: 'loadResults', unit: 'MW' },
+  branch: { section: 'branchResults', unit: 'MVA' },
+}
+const SUMMARY_DEFAULT_ROWS = 10
+const SUMMARY_MAX_ROWS = 100
+
+function finiteOrNull(value) {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function padRight(text, width) {
+  return text.length >= width ? text + ' ' : text + ' '.repeat(width - text.length)
+}
+
+function formatAmount(value, unit) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? (unit === 'pu' ? value.toFixed(4) : value.toFixed(2))
+    : '?'
+}
+
+// One InterPSS container entry -> a compact uniform row. Returns null when the
+// ranked quantity is absent, so the row is dropped rather than reported as 0.
+function summaryRowOf(scope, entry) {
+  if (entry === null || typeof entry !== 'object') return null
+  if (scope === 'bus') {
+    const v = finiteOrNull(entry.busVoltageMagnitude)
+    if (v === null) return null
+    return { id: String(entry.busId || ''), name: String(entry.busName || ''), value: v, unit: 'pu' }
+  }
+  if (scope === 'branch') {
+    const flow = entry.branchPowerFlowFrom2To
+    if (flow === null || typeof flow !== 'object') return null
+    const re = finiteOrNull(flow.real)
+    const im = finiteOrNull(flow.imaginary)
+    if (re === null || im === null) return null
+    // The adapter ranks branches by flow magnitude, so report the same quantity.
+    return { id: String(entry.branchId || ''), name: String(entry.branchName || ''), value: Math.hypot(re, im), unit: 'MVA' }
+  }
+  const complex = entry[scope]
+  if (complex === null || typeof complex !== 'object') return null
+  const mw = finiteOrNull(complex.real)
+  if (mw === null) return null
+  const row = {
+    id: String(entry[scope + 'Id'] || ''),
+    name: String(entry[scope + 'Name'] || ''),
+    bus: String(entry.busId || ''),
+    value: mw,
+    unit: 'MW',
+  }
+  const mvar = finiteOrNull(complex.imaginary)
+  if (mvar !== null) row.mvar = mvar
+  return row
+}
+
+// The case-wide totals the container carries regardless of scope.
+function summaryNetOf(net) {
+  const out = {}
+  if (net === null || typeof net !== 'object') return out
+  if (net.LoadflowConverged !== undefined) out.converged = net.LoadflowConverged === true
+  const put = (key, raw) => {
+    const n = finiteOrNull(raw)
+    if (n !== null) out[key] = n
+  }
+  put('buses', net.numberOfBuses)
+  put('branches', net.numberOfBranches)
+  if (net.totalGeneration) put('generationMw', net.totalGeneration.real)
+  if (net.totalLoad) put('loadMw', net.totalLoad.real)
+  if (net.maxMismatch) {
+    put('maxMismatchP', net.maxMismatch.real)
+    put('maxMismatchQ', net.maxMismatch.imaginary)
+  }
+  return out
+}
+
+function caseSummaryTool(ctx) {
+  return {
+    name: 'interpss_case_summary',
+    description:
+      LOAD_FIRST_HINT +
+      'Summarize the simulation case held in the InterPSS bridge. With `scope` "net" (the default) it ' +
+      'reports the case-wide totals: convergence, bus and branch counts, generation, load and max ' +
+      'mismatch. With scope "bus", "gen", "load" or "branch" it adds the top `numRec` entries ranked by ' +
+      'voltage, generation, load, or branch flow magnitude. Rows come from the in-memory model, so the ' +
+      'case only needs to be loaded (interpss_case_load), not solved; on a base case the values are ' +
+      'base-case values. `sortRule` is only read by the bus scope, and only the substring "High" ' +
+      'selects highest-first. Branch ranking is by flow magnitude, not by rating loading — read the ' +
+      'result CSV for Loading%.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        scope: {
+          type: 'string',
+          enum: ['net', 'bus', 'gen', 'load', 'branch'],
+          description:
+            'Which section to summarize. Omit or use "net" for the case-wide totals only; the other ' +
+            'scopes add ranked rows.',
+        },
+        sortRule: {
+          type: 'string',
+          description:
+            'Optional ordering hint passed to the InterPSS adapter. Only the bus scope reads it, and ' +
+            'only the substring "High" (e.g. "Highest Bus Voltage") selects highest-first; anything ' +
+            'else means lowest-first. gen/load/branch are always largest-first.',
+        },
+        numRec: {
+          type: 'number',
+          description: 'Rows to return for a ranked scope (default 10, capped at 100). Ignored by scope "net".',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          scope: { type: 'string' },
+          converged: { type: 'boolean' },
+          buses: { type: 'number' },
+          branches: { type: 'number' },
+          generationMw: { type: 'number' },
+          loadMw: { type: 'number' },
+          maxMismatchP: { type: 'number' },
+          maxMismatchQ: { type: 'number' },
+          rows: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                id: { type: 'string' },
+                name: { type: 'string' },
+                bus: { type: 'string' },
+                value: { type: 'number' },
+                unit: { type: 'string' },
+                mvar: { type: 'number' },
+              },
+            },
+          },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (!value || value.ok !== true) {
+          return [{ type: 'text', text: 'InterPSS case summary failed: ' + String((value && value.error) || 'unknown error') }]
+        }
+        const scope = String(value.scope || 'net')
+        // No case/scope/convergence preamble on any card: it is chrome the tool row
+        // above (which names the tool and its arguments) and the chat report already
+        // carry. The case-wide totals themselves stay, on the `net` scope only, and a
+        // ranked scope renders its table with no blank line.
+        const lines = []
+        if (scope === 'net') {
+          const bits = []
+          if (value.buses !== undefined) bits.push(value.buses + ' buses')
+          if (value.branches !== undefined) bits.push(value.branches + ' branches')
+          if (value.generationMw !== undefined) bits.push('gen ' + formatAmount(value.generationMw, 'MW') + ' MW')
+          if (value.loadMw !== undefined) bits.push('load ' + formatAmount(value.loadMw, 'MW') + ' MW')
+          if (bits.length > 0) lines.push(bits.join(' \u00b7 '))
+          if (value.maxMismatchP !== undefined || value.maxMismatchQ !== undefined) {
+            lines.push('max mismatch: dP ' + formatAmount(value.maxMismatchP, 'MW') +
+              ', dQ ' + formatAmount(value.maxMismatchQ, 'MW'))
+          }
+        }
+        const rows = Array.isArray(value.rows) ? value.rows : []
+        if (rows.length > 0) {
+          lines.push(padRight('#', 5) + padRight('id', 24) + padRight('name', 18) + padRight('value', 12) + 'unit')
+          rows.forEach((row, index) => {
+            lines.push(
+              padRight(String(index + 1), 5) +
+              padRight(String(row.id || ''), 24) +
+              padRight(String(row.name || ''), 18) +
+              padRight(formatAmount(row.value, row.unit), 12) +
+              String(row.unit || ''),
+            )
+          })
+        }
+        if (lines.length === 0) {
+          // A registered toolview key replaces the generic row, so this card must
+          // always render text: a ranked scope with no rows would otherwise leave
+          // an empty cell.
+          lines.push('no data for scope: ' + scope)
+        }
+        return [{ type: 'text', text: lines.join('\n') }]
+      },
+      // Persisted to the card's block.meta so the summary card renders directly.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          scope: String(value.scope || ''),
+          rowCount: Array.isArray(value.rows) ? value.rows.length : 0,
+        }
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS case summary', kind: 'read', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      const rawScope = args && typeof args.scope === 'string' && args.scope.trim() !== ''
+        ? args.scope.trim().toLowerCase()
+        : 'net'
+      if (rawScope !== 'net' && SUMMARY_SECTIONS[rawScope] === undefined) {
+        return fail('unknown scope "' + rawScope + '": expected net, bus, gen, load or branch', 'none')
+      }
+      const sortRule = args && typeof args.sortRule === 'string' ? args.sortRule : ''
+      const requested = args && typeof args.numRec === 'number' && Number.isFinite(args.numRec) && args.numRec > 0
+        ? Math.floor(args.numRec)
+        : SUMMARY_DEFAULT_ROWS
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.summarize !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', 'bridge')
+      }
+      try {
+        // Only the totals are needed for "net", so ask for one row per section:
+        // the container is otherwise returned with every section in full.
+        const limit = rawScope === 'net' ? 1 : Math.min(requested, SUMMARY_MAX_ROWS)
+        const raw = await bridge.summarize(rawScope, sortRule, limit)
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          const message = String((parsed && parsed.error) || 'bridge summarize failed')
+          if (message.indexOf('no loaded network') !== -1) {
+            return fail('no simulation case is loaded in the InterPSS bridge: call interpss_case_load first', 'bridge')
+          }
+          return fail(message, 'bridge')
+        }
+        const container = typeof parsed.text === 'string' ? JSON.parse(parsed.text) : parsed.text
+        const value = {
+          ok: true,
+          case: lastLoadedAbs === null ? '' : relativeCasePath(lastLoadedAbs),
+          source: 'bridge',
+          scope: rawScope,
+        }
+        // `converged` always; the remaining case-wide totals belong to `net`, so a
+        // ranked scope does not carry (or repeat) them.
+        const totals = summaryNetOf(container.netResults)
+        if (totals.converged !== undefined) value.converged = totals.converged
+        if (rawScope === 'net') {
+          Object.assign(value, totals)
+        } else {
+          const section = container[SUMMARY_SECTIONS[rawScope].section]
+          const rows = []
+          if (Array.isArray(section)) {
+            for (const entry of section) {
+              const row = summaryRowOf(rawScope, entry)
+              if (row !== null) rows.push(row)
+            }
+          }
+          value.rows = rows
+        }
+        return value
+      } catch (e) {
+        return fail('InterPSS case summary failed: ' + (e && e.message ? e.message : String(e)), 'bridge')
       }
     },
   }
@@ -1475,7 +1886,7 @@ export default {
     // call is gated on the iPSS Agent workspace activation check.
     const tools = ctx.get('tools')
     if (tools !== undefined) {
-      const chatToolDefs = [networkInfoTool(ctx), runAclfTool(ctx)]
+      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx)]
       for (const definition of chatToolDefs) {
         ctx.effect(() => tools.register(definition))
       }

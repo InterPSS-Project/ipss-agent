@@ -11,6 +11,18 @@ Solve the **current simulation case** — the case selected in the InterPSS tab 
 
 ## Preferred path (DeepSeek Harness)
 
+### Step 0 — load the selected case
+
+Start with `interpss_case_load`:
+
+```
+interpss_case_load()
+```
+
+It loads the case selected in the tab into the embedded bridge and is a **no-op** reporting `alreadyLoaded: true` when the bridge already holds it, so it is safe to call unconditionally. The ACLF tool below still loads on demand, so this step is a convention rather than a hard requirement — its value is making the load explicit before the solve.
+
+### Step 1 — run the load flow
+
 Call the `interpss_run_aclf` tool with **no arguments**:
 
 ```
@@ -91,7 +103,7 @@ With plugin 0.3.2+ the settled card shows an **Explore results** row with **Bus 
 
 ### Replying after a run
 
-The card **is** the report. It already carries the case and its `source`, the `Converged:` line, `Results:`, the network summary, and the **Explore results** row. Do not restate any of it in the assistant message — no repeated network-info block, no convergence table, no result-file listing, and nothing after the Explore results row.
+The card **is** the report. It already carries the case and its `source`, the `Converged:` line, `Results:`, the network summary, and the **Explore results** row. Do not restate any of it in the assistant message — no repeated network-info block, no convergence table, no result-file listing, and nothing after the Explore results row. The `interpss_case_load` card carries the load outcome the same way: mention it only if the load failed or loaded an unexpected case.
 
 Reply with at most a one-line confirmation that the run finished and whether it converged. Write more only when the user needs something the card does not carry:
 
@@ -103,8 +115,10 @@ Reply with at most a one-line confirmation that the run finished and whether it 
 
 | Want | Use |
 |---|---|
+| Load the selected case into the bridge, without solving | `interpss_case_load` |
 | Solve the case (and write result CSVs) | `interpss_run_aclf` |
 | Only show the loaded/selected case's network info, without solving | `interpss_network_info` |
+| Summarize the case — totals, or a top-N ranking by scope | `interpss_case_summary` (`$ipss-case-summary`) |
 
 `interpss_network_info` reuses a converged model, so after an ACLF run it reports the solved values.
 

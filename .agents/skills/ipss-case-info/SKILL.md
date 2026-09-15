@@ -11,6 +11,18 @@ Report the network information of the **current simulation case** — the case s
 
 ## Preferred path (DeepSeek Harness)
 
+### Step 0 — load the selected case
+
+Start with `interpss_case_load`:
+
+```
+interpss_case_load()
+```
+
+It loads the case selected in the tab into the embedded bridge and is a **no-op** reporting `alreadyLoaded: true` when the bridge already holds it, so it is safe to call unconditionally. The tool below still loads on demand, so this step is a convention rather than a hard requirement — its value is making the load explicit and reporting the bus/branch counts.
+
+### Step 1 — report the network info
+
 Call the `interpss_network_info` tool with **no arguments**:
 
 ```
@@ -70,7 +82,7 @@ A `converged: false` result is not an error and needs no retry. To report solved
 
 ### Replying after the call
 
-With plugin 0.3.4+ the card renders this summary directly (earlier versions hid it behind the generic row's expand toggle). Report the case and whether it is a solved or base-case model, and stop — do not paste the network-info block, the bus/branch counts table, or the result-file path into the assistant message.
+With plugin 0.3.4+ the card renders this summary directly (earlier versions hid it behind the generic row's expand toggle). Report the case and whether it is a solved or base-case model, and stop — do not paste the network-info block, the bus/branch counts table, or the result-file path into the assistant message. The `interpss_case_load` card carries its own outcome the same way: mention it only if the load failed or loaded an unexpected case.
 
 Add prose only where the card cannot carry it: the resolved case differs from the one the user expects, `converged: false` when they asked about solved values, or a next step needing a decision (running ACLF to solve it).
 
