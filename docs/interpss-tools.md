@@ -142,7 +142,22 @@ Behaviour:
 - A solve that does **not** converge is still a successful call: `ok: true, converged: false`.
   The mismatch and its bus are in the network-info text; do not report the case as solved and
   do not retry the identical call unchanged.
-- Large cases (PSS/E 2K-bus and up) can take minutes.
+- **The runner settles the solution before writing results.** InterPSS can return from
+  `algo.loadflow()` with a converged NR loop whose *last adjustment* — a switched-shunt step, a
+  PV→PQ Q-limit conversion, a tap move — was never carried into the solved state; the returned
+  voltages then violate that bus's balance. On Texas 2K this left Bus2127 (MIAMI 0, a PV bus
+  converted to PQ next to a 200 Mvar switched shunt) 2.26 pu out of balance behind a
+  "converged" result. `AclfRunner.settle()` re-solves while `net.maxMismatch(NR)` exceeds
+  1e-4 pu (bounded at three passes, stopping as soon as the residual stops improving), so the
+  CSVs, the network info and every tool describe the state actually returned. It fires only
+  when the violation exists: IEEE 14 and IEEE 118 still solve in one pass, unchanged.
+- **One mismatch source.** `_network_info.txt` and `interpss_case_summary` both report
+  `net.maxMismatch(NR)` — the same value the NR loop logs per iteration, in pu on the 100 MVA
+  base. (Before this, the network info substituted `gen − calNetPQResults()`, which is
+  `load − capacitorQ` by construction and reported ~0 for exactly the buses that were out of
+  balance, so the tool and the report disagreed.)
+- Large cases (PSS/E 2K-bus and up) can take minutes (the settle pass adds at most one more
+  solve, and only on a case that needs it).
 
 ## `interpss_case_summary`
 

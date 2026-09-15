@@ -152,8 +152,9 @@ Supported formats: `ieee` (IEEE Common Format / CDF) and `psse` (PSS/E RAW).
 AclfRunner.runOnNet(net, configPath, resultsDir, stem)
   1. AclfRunConfigRec.loadAclfRunConfig(configPath)
   2. LoadflowAlgorithm.loadflow()
-  3. Write stem_network_info.txt
-  4. AclfNetDFrameAdapter → stem_DF_{bus,branch,gen,load}.csv
+  3. settle(): re-solve while net.maxMismatch(NR) > 1e-4 pu (≤3 passes)
+  4. Write stem_network_info.txt
+  5. AclfNetDFrameAdapter → stem_DF_{bus,branch,gen,load}.csv
 ```
 
 **ACLF config resolution** (two-tier, printed as `Using config file: …`):
@@ -418,6 +419,9 @@ Used at runtime by agent code:
 4. **Agent skills as orchestration** — LLM skills shell out to the CLI; they do not embed simulation logic.
 5. **JSON bridge boundary** — Node/DSH code never traverses Java EMF objects; only paths and JSON cross the boundary.
 6. **Case-specific overrides** — per-case `aclf_run.json` under `<input_parent>/` overrides project defaults.
+7. **Settled results** — a load flow that converges before its last adjustment is re-solved
+   (`AclfRunner.settle()`), and every artifact reports `net.maxMismatch(NR)`, so the returned CSVs,
+   the network info and the tools can never describe a state the model does not satisfy.
 
 ---
 

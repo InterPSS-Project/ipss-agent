@@ -83,7 +83,7 @@ Keep it short, in this order:
 
 | Observation | Meaning |
 | --- | --- |
-| Tool mismatch ≫ the `Max Mismatch` in `_network_info.txt` | Expected. The tool reports the raw `net.maxMismatch()`; `IpssNetworkInfo` recomputes a reporting mismatch, and the two diverge when a PV bus with switched shunt/capacitor equipment is converted to PQ during the final adjustment pass. They agree on simple cases (IEEE 14). On a converged case trust the reporting value; treat the tool's as indicative. |
+| Tool mismatch ≠ the `Max Mismatch` in `_network_info.txt` | Should not happen: both now read the same post-solve residual (`net.maxMismatch(NR)`). If they differ, the tool is reading a different cached model than the last run — re-run `interpss_case_load` / `interpss_run_aclf` and compare again. |
 | The highest-flow branch is not the highest-loaded branch | Different metrics. Flow magnitude ignores ratings; use `Loading%` for loadability. |
 | A `sortRule` value is ignored | Only the `bus` scope reads it, and only the substring `High` selects highest-first; anything else is lowest-first. `gen`/`load`/`branch` are always largest-first. |
 | Values look like a base case after a solve | The tool reports the cached model. Another case's `interpss_case_load` replaces it, so re-run `interpss_run_aclf` before summarizing again. |

@@ -92,7 +92,7 @@ Max Mismatch: dPmax :  0.00001 at Bus : Bus104,     dQmax :  0.00005 at Bus : Bu
 |---|---|
 | `Converged: true` | Solved. On a converged case the reported generation includes losses and control adjustments, so it can differ from the base-case scheduled value |
 | `Converged: false` | The solve did not converge — a **successful call with an unsuccessful solve**, not a tool error |
-| `Max Mismatch` | Largest P/Q mismatch and its bus; the residual on a converged run, the failure magnitude otherwise |
+| `Max Mismatch` | Largest P/Q mismatch and its bus, in pu on the 100 MVA base; the residual on a converged run (typically ≤ 1e-5), the failure magnitude otherwise. The runner re-solves when a converged run still violates a bus balance — a switched-shunt step or a PV→PQ conversion applied after the last NR iteration — so a settled run reports the residual of the state it actually returns |
 | `Results:` | `wspace/<case dir>/result/`, where the five files were written |
 
 On non-convergence, do not re-run the identical call and do not report the case as solved. Report the mismatch and the bus, then either read the network info for context or tune the solver options in the case's `aclf_run.json` before trying again.
