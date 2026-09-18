@@ -94,4 +94,17 @@ public final class ProjectPaths {
         }
         return defaultAclfRunConfig();
     }
+
+    /**
+     * Case-folder {@code ca_run.json} for the contingency-analysis run settings
+     * (may not exist). Contingency inputs are case-specific, so there is no
+     * project-level fallback: callers check {@link Files#isRegularFile}.
+     */
+    public Path caseCaRunConfig(String inputRelative) {
+        String parent = inputParentRelative(inputRelative);
+        if (parent.isEmpty()) {
+            return wspaceDir.resolve("ca_run.json");
+        }
+        return wspaceDir.resolve(parent).resolve("ca_run.json");
+    }
 }

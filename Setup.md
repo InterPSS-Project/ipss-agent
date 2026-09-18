@@ -192,6 +192,32 @@ with `configAclfRun(algo, polarCoordinate, includeAdjustments, False)`. The CLI
 prints `Using config file: <path>` to stderr so you can confirm which file ran.
 Edit the JSON to tune convergence or solver behavior.
 
+## Step 3b: CA run configuration
+
+`ca_run.json` (also written by the InterPSS tab's **CA** dialog) selects the
+contingency and monitored-branch inputs for DC contingency analysis. It lives
+beside the case file — `wspace/<input_parent>/ca_run.json` — next to that case's
+`aclf_run.json`. There is no project-level default, because contingency lists are
+case-specific; `IpssCmd` resolves each section independently:
+
+1. **Explicit CLI argument** — `cont_file` / `monitor_file`.
+2. **Case `ca_run.json`** — the `custom` entry for that section.
+3. **Built-in defaults** — all N-1 branch outages, every branch monitored.
+
+The CLI prints `Using ca_run.json: <path>` to stderr when it reads the file.
+
+```json
+{
+  "contingencyMode": "custom",
+  "contingencyFile": "data/psse/Texas2K/2k_contingencies_115kVAbove.json",
+  "monitorMode": "custom",
+  "monitoredBranchFile": "data/psse/Texas2K/2k_monitored_branches.json"
+}
+```
+
+Both file values are paths relative to `wspace/`; `all` (the default) means N-1
+contingencies for the first section and every branch for the second.
+
 ## Step 4: Running simulations
 
 The CLI entry point is `IpssCmd`, packaged in the Uber JAR. Run it from the

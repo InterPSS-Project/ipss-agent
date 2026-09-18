@@ -31,6 +31,11 @@ parameters and results, no build-time Typert compiler required.
 - Bus / Branch / Gen / Load CSV explorer with infinite scroll and sticky headers.
 - Selectable bus IDs with a branch-connection popup: **Diagram** (bus info tooltips on hover, transformer styling, double-click a node to navigate), **Branch**, **Gen**, and **Load** tabs.
 - AC Loadflow Options dialog (3 tabs — Main / NR Config / Adj-Ctrl Setting), backed by `config/aclf_run.json`.
+- **CA dialog** — the CA button opens a *Run Contingency Analysis* dialog that picks
+  the contingency and monitored-branch inputs (all N-1 / every branch, or a `.json`
+  from the case folder, with the entry count shown after the pick), saves them as
+  `ca_run.json` beside that case's `aclf_run.json`, and runs CA — the same file the
+  CLI reads (OK = save + run, Cancel = write nothing).
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
 - Remembers the last selected case across tab switches.
@@ -41,7 +46,9 @@ parameters and results, no build-time Typert compiler required.
 ## Host RPC methods
 
 `isActivated`, `checkResult`, `checkResultFiles`, `listCases`, `readCsv`,
-`busConnections`, `runAclf`, `runReport`, `getAclfOptions`, `saveAclfOptions`.
+`busConnections`, `runAclf`, `runCa`, `runReport`, `getAclfOptions`,
+`saveAclfOptions`, `listCaFiles`, `getCaOptions`, `saveCaOptions`, `loadCase`,
+`summarizeResult`, `getNetworkInfo`.
 
 ## Chat tools
 

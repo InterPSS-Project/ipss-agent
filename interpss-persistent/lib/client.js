@@ -620,6 +620,16 @@ module.exports = {
       const [caRunning, setCaRunning] = React.useState(false)
       const [caError, setCaError] = React.useState(null)
       const [caResult, setCaResult] = React.useState(null)
+      const [caOpen, setCaOpen] = React.useState(false)
+      const [caLoading, setCaLoading] = React.useState(false)
+      const [caForm, setCaForm] = React.useState(null)
+      const [caFiles, setCaFiles] = React.useState(null)
+      const [caFilesLoading, setCaFilesLoading] = React.useState(false)
+      const [caPicker, setCaPicker] = React.useState(null)
+      const [caSaving, setCaSaving] = React.useState(false)
+      const [caDialogError, setCaDialogError] = React.useState(null)
+      const [caWarning, setCaWarning] = React.useState(null)
+      const [caCase, setCaCase] = React.useState(null)
       const [infoTab, setInfoTab] = React.useState('network')
 
       const isCustom = mode === 'custom'
@@ -745,13 +755,15 @@ module.exports = {
         )
       }
 
-      function runCa() {
-        const c = resolveCase()
-        if (c === null || c.input === '') return
+      // Run CA against an explicit case/configuration. `config` is null when the
+      // host should use the case ca_run.json (or the discovered defaults).
+      function runCaWith(c, config) {
         setCaRunning(true)
         setCaError(null)
         setCaResult(null)
-        callRemote('runCa', { format: c.format, input: c.input, sessionId }).then(
+        const payload = { format: c.format, input: c.input, sessionId }
+        if (config !== null && config !== undefined) payload.config = config
+        callRemote('runCa', payload).then(
           (res) => {
             setCaRunning(false)
             if (res && res.ok) {
@@ -763,6 +775,200 @@ module.exports = {
             }
           },
           (err) => { setCaRunning(false); setCaError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
+      // --- Run Contingency Analysis dialog -----------------------------------
+      // The CA button opens this dialog; OK saves the four-key ca_run.json in
+      // the case folder and runs CA with it. Cancel writes nothing.
+
+      function caCountFor(file, kind) {
+        if (file === null || file === undefined) return null
+        return kind === 'contingency' ? file.contingencyCount : file.monitoredCount
+      }
+
+      function caFileEntry(form, kind) {
+        const rel = kind === 'contingency' ? form.contingencyFile : form.monitoredBranchFile
+        const mode = kind === 'contingency' ? form.contingencyMode : form.monitorMode
+        if (mode !== 'custom' || rel === null || caFiles === null) return null
+        return caFiles.find((f) => f.path === rel) || null
+      }
+
+      function caBasename(rel) {
+        if (typeof rel !== 'string') return ''
+        const slash = rel.lastIndexOf('/')
+        return slash >= 0 ? rel.slice(slash + 1) : rel
+      }
+
+      // The green line under a radio group, or the red error when the chosen
+      // file does not carry that section's shape.
+      function caMessage(kind) {
+        if (caForm === null) return null
+        const mode = kind === 'contingency' ? caForm.contingencyMode : caForm.monitorMode
+        if (mode !== 'custom') return null
+        const rel = kind === 'contingency' ? caForm.contingencyFile : caForm.monitoredBranchFile
+        if (rel === null) {
+          return { kind: 'hint', text: 'No file selected — click the search icon' }
+        }
+        // The folder listing arrives with (or just after) the config; until then
+        // neither an error nor a count is known.
+        if (caFiles === null) {
+          return { kind: 'checking', text: 'Checking the case folder…' }
+        }
+        const entry = caFileEntry(caForm, kind)
+        if (entry === null) {
+          return { kind: 'error', text: caBasename(rel) + ' is not in the case folder' }
+        }
+        if (entry.error) {
+          return { kind: 'error', text: caBasename(rel) + ': ' + entry.error }
+        }
+        const count = caCountFor(entry, kind)
+        if (count === null) {
+          return {
+            kind: 'error',
+            text: caBasename(rel) + (kind === 'contingency'
+              ? ' is not a contingency file (no "contingencies" array)'
+              : ' is not a monitored-branch file (no "monitored_branches" array)'),
+          }
+        }
+        return {
+          kind: 'ok',
+          text: kind === 'contingency'
+            ? 'User-defined contingencies: ' + count + ' (' + caBasename(rel) + ')'
+            : 'Monitored branches: ' + count + ' (' + caBasename(rel) + ')',
+        }
+      }
+
+      // Only the picked custom sections must be valid before OK runs.
+      function caFormError() {
+        if (caForm === null) return 'the run configuration is still loading'
+        const kinds = ['contingency', 'monitored']
+        for (const kind of kinds) {
+          const mode = kind === 'contingency' ? caForm.contingencyMode : caForm.monitorMode
+          if (mode !== 'custom') continue
+          const message = caMessage(kind)
+          if (message === null) continue
+          if (message.kind === 'checking') return message.text
+          if (message.kind === 'hint') return 'select a file for the ' + (kind === 'contingency' ? 'user-defined contingency' : 'monitored branches')
+          if (message.kind === 'error') return message.text
+        }
+        return null
+      }
+
+      function loadCaFiles(c) {
+        const target = c === undefined ? caCase : c
+        if (target === null || target === undefined) return
+        setCaFilesLoading(true)
+        callRemote('listCaFiles', { input: target.input, sessionId }).then(
+          (res) => { setCaFilesLoading(false); setCaFiles(res && res.ok ? res.files : []) },
+          () => { setCaFilesLoading(false); setCaFiles([]) },
+        )
+      }
+
+      function openCaDialog() {
+        if (caOpen) {
+          setCaOpen(false)
+          return
+        }
+        const c = resolveCase()
+        if (c === null || c.input === '') return
+        setCaCase(c)
+        setCaOpen(true)
+        setCaPicker(null)
+        setCaDialogError(null)
+        setCaWarning(null)
+        setCaForm(null)
+        setCaLoading(true)
+        setCaFiles(null)
+        callRemote('getCaOptions', { input: c.input, sessionId }).then(
+          (res) => {
+            setCaLoading(false)
+            if (res && res.ok && res.config) {
+              setCaForm({
+                contingencyMode: res.config.contingencyMode === 'custom' ? 'custom' : 'all',
+                contingencyFile: res.config.contingencyFile || null,
+                monitorMode: res.config.monitorMode === 'custom' ? 'custom' : 'all',
+                monitoredBranchFile: res.config.monitoredBranchFile || null,
+              })
+              setCaWarning(res.warning || null)
+            } else {
+              setCaDialogError(res && res.error ? res.error : 'failed to load the run configuration')
+            }
+          },
+          (err) => { setCaLoading(false); setCaDialogError(String(err && err.message ? err.message : err)) },
+        )
+        loadCaFiles(c)
+      }
+
+      function setCaMode(kind, mode) {
+        if (caForm === null) return
+        setCaDialogError(null)
+        if (kind === 'contingency') {
+          setCaForm({ ...caForm, contingencyMode: mode })
+        } else {
+          setCaForm({ ...caForm, monitorMode: mode })
+        }
+        if (mode === 'all') setCaPicker(null)
+      }
+
+      function toggleCaPicker(kind) {
+        if (caPicker === kind) {
+          setCaPicker(null)
+          return
+        }
+        setCaPicker(kind)
+        if (caFiles === null) loadCaFiles()
+      }
+
+      function chooseCaFile(kind, entry) {
+        if (caForm === null) return
+        setCaDialogError(null)
+        if (kind === 'contingency') {
+          setCaForm({ ...caForm, contingencyMode: 'custom', contingencyFile: entry.path })
+        } else {
+          setCaForm({ ...caForm, monitorMode: 'custom', monitoredBranchFile: entry.path })
+        }
+        setCaPicker(null)
+      }
+
+      function cancelCaDialog() {
+        if (caSaving) return
+        setCaOpen(false)
+        setCaPicker(null)
+        setCaDialogError(null)
+        setCaWarning(null)
+      }
+
+      function okCaDialog() {
+        if (caForm === null || caSaving) return
+        const c = caCase
+        if (c === null) return
+        const invalid = caFormError()
+        if (invalid !== null) {
+          setCaDialogError(invalid)
+          return
+        }
+        const payload = {
+          contingencyMode: caForm.contingencyMode,
+          contingencyFile: caForm.contingencyMode === 'custom' ? caForm.contingencyFile : null,
+          monitorMode: caForm.monitorMode,
+          monitoredBranchFile: caForm.monitorMode === 'custom' ? caForm.monitoredBranchFile : null,
+        }
+        setCaSaving(true)
+        setCaDialogError(null)
+        callRemote('saveCaOptions', { input: c.input, config: payload, sessionId }).then(
+          (res) => {
+            setCaSaving(false)
+            if (res && res.ok) {
+              setCaOpen(false)
+              setCaPicker(null)
+              setCaWarning(null)
+              runCaWith(c, payload)
+            } else {
+              setCaDialogError(res && res.error ? res.error : 'failed to save ca_run.json')
+            }
+          },
+          (err) => { setCaSaving(false); setCaDialogError(String(err && err.message ? err.message : err)) },
         )
       }
 
@@ -1034,7 +1240,7 @@ module.exports = {
             'aria-label': 'AC Loadflow options',
             style: { ...btn, borderTopLeftRadius: 0, borderBottomLeftRadius: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '7px 10px', opacity: !caseLoaded ? 0.6 : 1 },
           }, gearIcon),
-          React.createElement('button', { onClick: runCa, disabled: running || caRunning || !caseLoaded, title: 'Run DC contingency analysis', style: { ...btn, marginLeft: '12px', opacity: (running || caRunning || !caseLoaded) ? 0.6 : 1 } }, caRunning ? 'Running…' : 'CA'),
+          React.createElement('button', { onClick: openCaDialog, disabled: running || caRunning || !caseLoaded, title: 'Run DC contingency analysis', style: { ...btn, marginLeft: '12px', opacity: (running || caRunning || !caseLoaded) ? 0.6 : 1 } }, caRunning ? 'Running…' : 'CA'),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
         ),
         caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
@@ -1328,6 +1534,105 @@ module.exports = {
         )
       }
 
+      // --- Run Contingency Analysis dialog (rendering) ------------------------
+      const caRadio = (kind, value, label) => {
+        const mode = caForm === null ? 'all' : (kind === 'contingency' ? caForm.contingencyMode : caForm.monitorMode)
+        return React.createElement('label', {
+          key: value,
+          style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 0', cursor: 'pointer', fontSize: '14px' },
+        },
+          React.createElement('input', {
+            type: 'radio',
+            name: 'ca-' + kind,
+            checked: mode === value,
+            onChange: () => setCaMode(kind, value),
+            style: { width: '16px', height: '16px', margin: 0, accentColor: 'var(--dsw-alias-brand-primary)', cursor: 'pointer' },
+          }),
+          React.createElement('span', null, label),
+        )
+      }
+
+      const caSection = (kind, title, allLabel, customLabel) => {
+        if (caForm === null) return null
+        const mode = kind === 'contingency' ? caForm.contingencyMode : caForm.monitorMode
+        const message = caMessage(kind)
+        const children = [
+          React.createElement('div', { key: 'title', style: { fontWeight: 600, fontSize: '15px', marginBottom: '4px' } }, title),
+          caRadio(kind, 'all', allLabel),
+          React.createElement('div', { key: 'custom', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+            caRadio(kind, 'custom', customLabel),
+            React.createElement('button', {
+              onClick: () => toggleCaPicker(kind),
+              title: caPicker === kind ? 'Close the file selection' : 'Select a .json file',
+              'aria-label': caPicker === kind ? 'Close the file selection' : 'Select a .json file',
+              style: { ...btn, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '30px', height: '30px', padding: 0, opacity: mode === 'custom' ? 1 : 0.5 },
+            }, searchIcon),
+          ),
+        ]
+        if (caPicker === kind) {
+          const rows = caFilesLoading
+            ? [React.createElement('div', { key: 'loading', style: { padding: '10px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…')]
+            : (caFiles === null || caFiles.length === 0)
+              ? [React.createElement('div', { key: 'empty', style: { padding: '10px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, caFiles === null ? 'Loading…' : 'No .json files in this case folder')]
+              : caFiles.map((f) => {
+                const count = caCountFor(f, kind)
+                const note = f.error ? f.error : (count !== null ? String(count) : '')
+                return React.createElement('button', {
+                  key: f.path,
+                  onClick: () => chooseCaFile(kind, f),
+                  style: { display: 'flex', justifyContent: 'space-between', gap: '14px', width: '100%', textAlign: 'left', padding: '6px 10px', border: 'none', borderBottom: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' },
+                },
+                  React.createElement('span', null, f.name),
+                  note === '' ? null : React.createElement('span', { style: { opacity: 0.65 } }, note),
+                )
+              })
+          children.push(React.createElement('div', {
+            key: 'picker',
+            style: { marginTop: '6px', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', maxHeight: '200px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)' },
+          }, rows))
+        }
+        children.push(React.createElement('div', {
+          key: 'message',
+          style: {
+            marginTop: '6px',
+            fontSize: '12px',
+            color: message === null || message.kind === 'hint' || message.kind === 'checking'
+              ? 'var(--dsw-alias-label-secondary)'
+              : (message.kind === 'ok' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)'),
+          },
+        }, message === null ? '' : message.text))
+        return React.createElement('div', { key: kind }, children)
+      }
+
+      const caModal = caOpen ? React.createElement('div', {
+        style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' },
+        onClick: cancelCaDialog,
+      },
+        React.createElement('div', {
+          onClick: (e) => e.stopPropagation(),
+          style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '18px', width: '100%', maxWidth: '620px', maxHeight: '86vh', display: 'flex', flexDirection: 'column' },
+        },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' } },
+            React.createElement('div', { style: { fontWeight: 600, fontSize: '16px' } }, 'Run Contingency Analysis'),
+            React.createElement('button', { onClick: cancelCaDialog, style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
+          ),
+          caCase !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginBottom: '10px' } }, 'Case: ' + caCase.displayName) : null,
+          caLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
+          caForm === null ? React.createElement('pre', { style: { ...mono, maxHeight: '180px', overflow: 'auto' } }, caDialogError || 'no run configuration available') :
+          React.createElement('div', { style: { flex: '1 1 auto', overflowY: 'auto', minHeight: 0 } },
+            caSection('contingency', 'Define Contingency Branches:', 'Consider all N-1 contingencies', 'User-defined contingency'),
+            React.createElement('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1)', margin: '14px 0' } }),
+            caSection('monitored', 'Define Monitored Branches:', 'Monitor all branches (default)', 'Monitor selected branches'),
+          ),
+          caWarning !== null ? React.createElement('div', { style: { marginTop: '10px', fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caWarning) : null,
+          caDialogError !== null && caForm !== null ? React.createElement('div', { style: { marginTop: '10px', fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caDialogError) : null,
+          React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px', borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '12px' } },
+            React.createElement('button', { onClick: cancelCaDialog, disabled: caSaving, style: { ...btn, padding: '6px 22px', opacity: caSaving ? 0.6 : 1 } }, 'Cancel'),
+            React.createElement('button', { onClick: okCaDialog, disabled: caSaving || caLoading || caFilesLoading || caForm === null, style: { ...btn, padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)', fontWeight: 600, opacity: (caSaving || caLoading || caFilesLoading || caForm === null) ? 0.6 : 1 } }, caSaving ? 'Saving…' : 'OK'),
+          ),
+        ),
+      ) : null
+
       const optModal = optOpen ? React.createElement('div', {
         style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' },
         onClick: () => { if (!optSaving) setOptOpen(false) },
@@ -1446,6 +1751,7 @@ module.exports = {
         csvPanel,
         connModal,
         ctxMenuEl,
+        caModal,
         optModal,
         reportModal,
         diagramTipEl,

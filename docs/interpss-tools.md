@@ -289,9 +289,10 @@ Report button keeps that auto-selection.
 | Browse results | Bus/Branch/Gen/Load tabs | card's Explore row | `interpss/readCsv` |
 | Generate report | Report button | card's Report button | `interpss/runReport` |
 
-The tools add **no** `/api` endpoint: `METHODS` still lists the same 14 methods. The one Host
-RPC signature that grew is `runReport`, which now accepts an optional `reportType`
-(`aclf` | `nerc`) that takes precedence over the contingency-based auto rule.
+The tools add **no** `/api` endpoint. `METHODS` gains only the CA-dialog methods
+(`listCaFiles`, `getCaOptions`, `saveCaOptions`, 17 in total), which no tool calls.
+The one Host RPC signature that grew is `runReport`, which now accepts an optional
+`reportType` (`aclf` | `nerc`) that takes precedence over the contingency-based auto rule.
 
 The bridge's `lastLoadedAbs` mirrors `IpssAgentBridge.loadedInput` and is updated by
 `loadCase`, `runAclf` and `runContingency` — every JVM load goes through this module's

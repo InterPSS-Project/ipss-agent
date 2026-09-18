@@ -64,6 +64,25 @@ class ProjectPathsTest {
     }
 
     @Test
+    void caseCaRunConfig_returnsCaseLocalPath() throws Exception {
+        ProjectPaths paths = AgentTestSupport.createProjectLayout(tempDir);
+
+        Path config = paths.caseCaRunConfig(AgentTestSupport.IEEE14_INPUT);
+
+        assertThat(config.toString()).endsWith("data/ieee/Ieee14Bus/ca_run.json");
+        assertThat(config).doesNotExist();
+    }
+
+    @Test
+    void caseCaRunConfig_handlesRootRelativeCase() throws Exception {
+        ProjectPaths paths = AgentTestSupport.createProjectLayout(tempDir);
+
+        Path config = paths.caseCaRunConfig("ieee14.ieee");
+
+        assertThat(config).isEqualTo(paths.wspaceDir().resolve("ca_run.json"));
+    }
+
+    @Test
     void discover_findsCurrentProjectRoot() {
         ProjectPaths discovered = ProjectPaths.discover();
         assertThat(discovered.projectRoot()).exists();

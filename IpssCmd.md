@@ -37,7 +37,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar <simutype> <format> <input> [<
 | `simutype`               | `aclf`, `ca`   | Simulation type: load flow or contingency analysis   |
 | `format`                 | `ieee`, `psse` | Input file format                                    |
 | `input`                  | path           | Case file path (relative to `wspace/`)               |
-| `cont_file` / `monitor_file` | path       | Contingency / monitored-branches JSON (required for `ca`) |
+| `cont_file` / `monitor_file` | path       | Optional contingency / monitored-branches JSON (relative to `wspace/`); each overrides the matching `ca_run.json` entry for `ca` |
 
 ## Run ACLF (AC Load Flow)
 
@@ -58,8 +58,36 @@ used. Adjust NR settings, limits, and related fields in that JSON.
 
 ## Run Contingency Analysis (CA)
 
-CA requires contingency and monitored-branches JSON paths in addition to the case
-file. Example using the Texas 2K case files shipped under `wspace/data/psse/Texas2K/`:
+Both contingency inputs are optional. `IpssCmd` resolves each of them
+independently, most specific first:
+
+1. **Explicit CLI argument** — `cont_file` / `monitor_file`; must exist.
+2. **Case `ca_run.json`** — `wspace/<input_parent>/ca_run.json`, for whichever
+   section it selects with `custom`. The line `Using ca_run.json: ...` on stderr
+   shows the file it read. A named file that does not exist is an error.
+3. **Built-in defaults** — all N-1 branch outages, every branch monitored.
+
+Unlike `aclf_run.json` there is no project-level default: contingency lists are
+case-specific. The case `ca_run.json` is the same file the InterPSS tab's **CA**
+dialog writes, so a run configured in the GUI is reproduced by the CLI.
+
+```json
+{
+  "contingencyMode": "custom",
+  "contingencyFile": "data/psse/Texas2K/2k_contingencies_115kVAbove.json",
+  "monitorMode": "custom",
+  "monitoredBranchFile": "data/psse/Texas2K/2k_monitored_branches.json"
+}
+```
+
+| Key | Values | Meaning |
+| --- | --- | --- |
+| `contingencyMode` | `all` (default) \| `custom` | N-1 outages for every branch, or the listed contingencies |
+| `contingencyFile` | path under `wspace/` | Contingency JSON (`{"contingencies": [...]}`); required when `contingencyMode` is `custom` |
+| `monitorMode` | `all` (default) \| `custom` | Monitor every branch, or only the listed ones |
+| `monitoredBranchFile` | path under `wspace/` | Monitored-branch JSON (`{"monitored_branches": [...]}`); required when `monitorMode` is `custom` |
+
+Example using the Texas 2K case files shipped under `wspace/data/psse/Texas2K/`:
 
 ```bash
 cd wspace
@@ -70,7 +98,8 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca psse \
 ```
 
 For another IEEE CDF case, supply your own `contingency.json` and `monitored.json`
-paths after the `.ieee` file, using `ca ieee ...`.
+paths after the `.ieee` file, using `ca ieee ...`, or drop a `ca_run.json` beside
+the case and run `ca ieee <case>` with no file arguments.
 
 ## Outputs
 
