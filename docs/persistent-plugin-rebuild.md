@@ -32,9 +32,17 @@ window.__ModuleLoader__.load({
     var React = require("react");
     // <dynamic body, transformed per above>
     return module.exports;
-  }
-});
+  }});
 ```
+
+Mechanically, only the **tab body** changes between rebuilds: splice the dynamic
+file's region from `    const PRESETS = [` up to (excluding) its
+`    const slots = ctx.get('slots')` into the persistent file between the
+transport block and the `    // --- ACLF tool-card result explorer` section. That
+keeps the persistent-only tool-card section, all five `slots.inject`
+registrations, and the module footer intact — copying only up to
+`const slots` drops the tool cards, and diffing the result against the previous
+`lib/client.js` should show your UI change alone.
 
 ## 2. Host (`lib/index.js`)
 
@@ -44,11 +52,20 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
 
 - `inject: ['typert']` on the default export (else `apply()` runs before the
   typert registry and `/api` endpoints silently 404)
-- `METHODS` matches the dynamic list (14): `isActivated, checkResult,
+- `METHODS` matches the dynamic list (17): `isActivated, checkResult,
   checkResultFiles, listCases, readCsv, busConnections, runAclf, runCa,
-  runReport, getAclfOptions, saveAclfOptions, loadCase, summarizeResult,
-  getNetworkInfo`
+  runReport, getAclfOptions, saveAclfOptions, listCaFiles, getCaOptions,
+  saveCaOptions, loadCase, summarizeResult, getNetworkInfo`
 - `readCsv` whitelist includes `contingency`: `_DF_(bus|branch|gen|load|contingency)\.csv`
+- **CA run config** (since 0.3.16): the case-folder `ca_run.json` is resolved by
+  `resolveCaRunConfig(ctx, root, parent, explicit)` — explicit dialog payload →
+  case file → per-case filename discovery — and its `custom` entries become the
+  absolute `contPath` / `monitorPath` the bridge already takes
+  (`runContingency`'s signature is unchanged). `listCaFiles` lists the case
+  folder's `.json` files with their `contingencies[]` / `monitored_branches[]`
+  counts, `getCaOptions` returns the config plus a warning when the file is
+  unreadable, and `saveCaOptions` validates and writes it. The dynamic host
+  carries the same four functions, so the two cannot drift
 - `javaBridge` provider exposes `runAclf`, `runContingency`, `runReport`,
   `loadCase`, `summarize`, `getNetworkInfo`, `caseInfo`, and `javaLauncher()`
   (the resolved `java` path consumed by the dynamic plugin's CLI fallback).
@@ -128,29 +145,33 @@ fallbacks use `shellQuote(javaLauncher())`, where `javaLauncher()` reads
 
 ## 3. Pack, install, verify
 
-**Always bump a minor version before packing** (e.g. `0.3.11` → `0.3.12` in
+**Always bump a minor version before packing** (e.g. `0.3.16` → `0.3.17` in
 `package.json`). Each rebuild must ship a new version so the install picks up
 the fresh tarball instead of a cached older package. Re-packing the *same*
 version is silently skipped by pnpm — the installed copy stays stale; if that
 happens, `pnpm remove` then `dsh plugin add` forces the relink, and comparing
 the installed file's SHA-256 against the source is the check that catches it.
 
+The profile pins an exact tarball path, so the install only ever works while that
+file exists: an `npm cache`/store copy is not a substitute for the tarball on
+disk.
+
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.3.11 → 0.3.12
+# bump version first, e.g. 0.3.16 → 0.3.17
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.3.12.tgz
+rm -f deepseek-ai-dsh-interpss-0.3.17.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.3.12.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.3.17.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall
 cd /Users/mzhou/.dsh/profiles/web
 pnpm remove @deepseek-ai/dsh-interpss
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.12.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.17.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 
@@ -163,13 +184,22 @@ served with the plugin bundle, so the reload is what picks it up):
   SHA-256 matches `lib/client.js`
 - `POST /api/interpss/<method>` with
   `{"type":"client-request","rpcId":"x","method":"interpss/<method>","payload":{"args":{"input":{}}}}`:
-  - `isActivated`, `listCases`, `getAclfOptions`, `runCa`, `getNetworkInfo` → `200`, `ok:true`
+  - `isActivated`, `listCases`, `getAclfOptions`, `listCaFiles`, `getCaOptions`, `runCa`, `getNetworkInfo` → `200`, `ok:true`
   - unknown method → `404` (proves only registered endpoints respond)
 - Composition row present: `dsh --profile web --dump-config` → `- id: interpss`
+- **CA dialog** (since 0.3.16): with the Texas 2K case selected and no
+  `ca_run.json`, pressing **CA** opens *Run Contingency Analysis* pre-filled with
+  `2k_contingencies_115kVAbove.json` (2359) and `2k_monitored_branches.json`
+  (1308) and their green count lines. **OK** writes
+  `wspace/data/psse/Texas2K/ca_run.json` (four keys), closes the dialog, runs CA
+  (the CA info tab shows the summary) and rewrites `*_DF_contingency.csv`;
+  **Cancel** writes nothing and runs nothing. Deleting the file and reopening the
+  dialog reproduces the discovery defaults — the regression symptom is an empty
+  or `all`/`all` dialog for a case that has companion JSON files.
 - **Chat tools**: the tool registry lists `interpss_case_load`,
-  `interpss_network_info`, `interpss_run_aclf` and `interpss_case_summary`, and the plugin's
-  `$TMPDIR/dsh-interpss-diagnostic.log` contains
-  `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary`
+  `interpss_network_info`, `interpss_run_aclf`, `interpss_case_summary` and `interpss_run_gvy`, and the
+  plugin's `$TMPDIR/dsh-interpss-diagnostic.log` contains
+  `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary, interpss_run_gvy`
   and `tools=true`. In an iPSS Agent workspace:
   - a chat call with no argument returns the case selected in the InterPSS tab
     (result `source: selection`) — select a case **without** pressing Load first
@@ -195,6 +225,13 @@ served with the plugin bundle, so the reload is what picks it up):
   no arguments gives the case totals (no rows); `{ scope: "bus", numRec: 5 }` gives five
   lowest-voltage rows and `{ scope: "bus", sortRule: "Highest Bus Voltage" }` five highest;
   an unknown scope fails instead of silently summarizing `net`.
+- **Groovy script tool** (0.3.17+, needs the rebuilt uber JAR): with the IEEE 14 case,
+  `interpss_run_gvy({ script: "ieee14_adjBus14.gvy", case: "IEEE 14-bus" })` reports
+  `load 259.00 → 262.10 MW (+3.10)` and renders its card; a second call without `reload`
+  compounds the edit, `reload: true` resets it; `ieee14_adjBranch1_2.gvy` takes
+  Bus1→Bus2(1) out of service; a script with a typo fails with the property name and
+  `script line N`; a script outside `data/…/scripts/` is rejected with the available
+  `.gvy` names. A following `interpss_run_aclf` converges and its CSVs show the edit.
 - **Short-result cards**: the settled `interpss_case_load`,
   `interpss_network_info` and `interpss_case_summary` cards show their summary text directly, with no expand
   toggle to click — the symptom of a missing card here is a summary visible only

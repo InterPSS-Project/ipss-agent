@@ -5,6 +5,7 @@ import static com.interpss.core.DclfAlgoObjectFactory.createContingency;
 import static com.interpss.core.DclfAlgoObjectFactory.createContingencyAnalysisAlgorithm;
 import static org.dflib.Exp.$double;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import org.dflib.DataFrame;
 import org.dflib.csv.Csv;
 import org.interpss.agent.cli.CliArgs;
 import org.interpss.agent.input.NetworkLoader;
+import org.interpss.agent.util.CaRunConfig;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.contingency.DclfContingencyConfig;
 import org.interpss.plugin.contingency.ParallelDclfContingencyAnalyzer;
@@ -52,7 +54,7 @@ public final class ContingencyRunner {
 
     public static ContAnalysisSummary run(ProjectPaths paths, CliArgs cli, AclfNetwork net,
             Path resultsDir, String stem) throws Exception {
-        ValidatedContingencyInputs inputs = validateInputs(paths, cli);
+        ValidatedContingencyInputs inputs = resolveInputs(paths, cli);
         return runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.monitorPath());
     }
 
@@ -161,6 +163,72 @@ public final class ContingencyRunner {
             }
         }
         return new ValidatedContingencyInputs(contPath, monPath);
+    }
+
+    /**
+     * Resolve the contingency/monitor files for a run. Explicit CLI arguments
+     * win and must exist; otherwise the case-folder {@code ca_run.json} supplies
+     * the {@code custom} entries; otherwise both are null and the built-in
+     * defaults apply (N-1 outages, all branches monitored). The GUI tab writes
+     * the same file, so both entry points agree.
+     */
+    public static ValidatedContingencyInputs resolveInputs(ProjectPaths paths, CliArgs cli) {
+        ValidatedContingencyInputs explicit = validateInputs(paths, cli);
+
+        Path configFile = paths.caseCaRunConfig(cli.input());
+        if (!Files.isRegularFile(configFile)) {
+            return explicit;
+        }
+
+        CaRunConfig config;
+        try {
+            config = CaRunConfig.load(configFile);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot read " + configFile + ": " + e.getMessage(), e);
+        }
+        System.out.println("Using ca_run.json: " + configFile);
+
+        Path contPath = explicit.contPath() != null ? explicit.contPath()
+                : resolveConfigEntry(paths, configFile, config.contingencyInput(),
+                        config.contingencyIsCustom(), "contingencyFile", "custom contingencies");
+        Path monitorPath = explicit.monitorPath() != null ? explicit.monitorPath()
+                : resolveConfigEntry(paths, configFile, config.monitoredBranchInput(),
+                        config.monitorIsCustom(), "monitoredBranchFile", "custom monitored branches");
+        return new ValidatedContingencyInputs(contPath, monitorPath);
+    }
+
+    /**
+     * One {@code ca_run.json} entry: {@code null} when its mode is {@code all},
+     * otherwise an existing path under {@code wspace/}.
+     */
+    private static Path resolveConfigEntry(ProjectPaths paths, Path configFile, String value,
+            boolean custom, String key, String label) {
+        if (!custom) {
+            return null;
+        }
+        if (value == null) {
+            throw new IllegalStateException(configFile + " selects " + label + " but names no " + key);
+        }
+        Path candidate = wspaceRelative(paths, configFile, key, value);
+        if (!Files.isRegularFile(candidate)) {
+            throw new IllegalStateException(key + " not found: " + candidate + " (from " + configFile + ")");
+        }
+        return candidate;
+    }
+
+    /** Reject absolute and escaping values so a config file cannot point outside {@code wspace/}. */
+    private static Path wspaceRelative(ProjectPaths paths, Path configFile, String key, String value) {
+        String normalized = value.replace('\\', '/');
+        if (normalized.startsWith("/") || normalized.contains("..")) {
+            throw new IllegalStateException(
+                    configFile + ": " + key + " must be a path under wspace/ (got '" + value + "')");
+        }
+        Path resolved = paths.resolveWspace(normalized);
+        if (!resolved.startsWith(paths.wspaceDir())) {
+            throw new IllegalStateException(
+                    configFile + ": " + key + " escapes wspace/ (got '" + value + "')");
+        }
+        return resolved;
     }
 
     public record ValidatedContingencyInputs(Path contPath, Path monitorPath) {

@@ -16,8 +16,9 @@ Reference implementation: `interpss-persistent/lib/index.js` (Host) and
 | `interpss_network_info` | Show the network information of a simulation case | Loads the case into the embedded JVM when it is not already held |
 | `interpss_run_aclf` | Run an AC load flow (ACLF) and report convergence | Writes `<stem>_DF_{bus,branch,gen,load}.csv` and `<stem>_network_info.txt` under `wspace/<case dir>/result/` |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals, or a top-N ranking by scope | None — reads the in-memory model |
+| `interpss_run_gvy` | Apply a Groovy (`.gvy`) scenario script from the case folder's `scripts/` directory to the bridge-held case | Mutates the held model in place (no rollback); `reload: true` re-parses the case first |
 
-All four are registered once at the end of `apply()` and are **global to the host process**;
+All five are registered once at the end of `apply()` and are **global to the host process**;
 every call is gated on the iPSS Agent workspace check, so a non-`iPSS Agent` workspace gets an
 explicit failure message rather than a missing tool.
 
@@ -209,9 +210,63 @@ that. `sortRule` is only read by the `bus` scope, and only as a substring test o
 `gen`/`load`/`branch` ignore it. With nothing loaded, the tool reports
 `no simulation case is loaded in the InterPSS bridge: call interpss_case_load first`.
 
+## `interpss_run_gvy`
+
+| | |
+| --- | --- |
+| Input | `{ script: string, case?: string, reload?: boolean }` — `script` is required |
+| Output | `{ ok, case, source, format, script, reload?, elapsedMs?, returnValue?, returnType?, stdout?, line?, buses?, branches?, loadMw?, generationMw?, loadMwBefore?, generationMwBefore?, lfConverged?, error? }` |
+| `presentationMeta` | `{ ok, case, source, script }` |
+| Card key | `interpss_run_gvy` (0.3.17+) |
+
+Applies a Groovy script to the **live** `AclfNetwork` held in the bridge, using
+`org.interpss.script.gvy.AclfNetGvyScriptProcessor` (see
+[groovy-script-adapter-architecture.md](groovy-script-adapter-architecture.md)): the network is bound
+as `aclfnet`, `Complex` is pre-imported, and property assignment maps to JavaBean setters
+(`bus.loadP = 0.18`, `branch.status = false`, `load.loadCP = new Complex(p, q)`).
+
+**Where the script comes from.** A bare file name resolves into the resolved case's own folder:
+
+| `script` form | Resolves to |
+| --- | --- |
+| `ieee14_adjBus14.gvy` | `wspace/<case dir>/scripts/ieee14_adjBus14.gvy` |
+| `data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy` | that path, verbatim |
+| an absolute path containing `/wspace/data/` | the same file, converted to the `data/…` form |
+
+Anything else — a path outside a `scripts/` directory, a non-`.gvy` file, a `..` segment — is
+rejected before the bridge is called, and a missing file fails with the names of the `.gvy` files
+that *are* there. The Java side re-checks the same rule (`.gvy`, regular file, under
+`<case folder>/scripts/`, ≤ 256 KB) so a direct bridge caller cannot bypass it.
+
+**What it returns.** The digest is measured around the evaluation, so a mutation-only script still
+shows its effect: `loadMw` / `generationMw` after the run, `loadMwBefore` / `generationMwBefore`
+before it, plus `buses`, `branches` and `lfConverged`. The script's last expression is reported as
+`returnValue` **only when it is a scalar** (`String`, `Number`, `Boolean`, `Character`, `Complex`);
+a model object is never serialized — its simple class name comes back as `returnType` instead. Extra
+`println` output from the script is captured and returned as `stdout` (truncated at 8000 characters).
+
+**Mutating semantics** (the whole point, and the main caveat):
+
+- Edits happen **in place** on the held model and are **never rolled back**; a script that fails
+  halfway keeps what it already changed, and the failure carries `line` (the script line) so the
+  caller can fix it.
+- Running the same script twice applies it twice, unless it assigns absolute values. `reload: true`
+  re-parses the case from disk before evaluating, which is the only reset.
+- This tool **only edits**: solving stays with `interpss_run_aclf`, which the caller runs afterwards
+  (the digest says `not solved` until then).
+- `.gvy` files are executable code with full access to the bound model: only run scripts you trust.
+
+Worked example — the shipped IEEE 14 fixtures:
+
+```
+interpss_run_gvy({ script: 'ieee14_adjBus14.gvy', case: 'IEEE 14-bus' })
+  Model: 14 buses · 20 branches · load 259.00 → 262.10 MW (+3.10) · gen 272.35 → 272.35 MW · not solved
+interpss_run_aclf()          # solves the edited case and rewrites the result CSVs
+```
+
 ## Tool cards
 
-Four cards are registered in the session-scoped `tool.call.toolview` slot, keyed by the wire
+Five cards are registered in the session-scoped `tool.call.toolview` slot, keyed by the wire
 tool name:
 
 ```js
@@ -231,12 +286,16 @@ slots.inject('tool.call.toolview', () => slots.register(
   { name: 'tool.call.toolview', key: 'interpss_case_summary' },
   (props) => React.createElement(CaseSummaryCard, { block: props && props.block }),
 ))
+slots.inject('tool.call.toolview', () => slots.register(
+  { name: 'tool.call.toolview', key: 'interpss_run_gvy' },
+  (props) => React.createElement(RunGvyCard, { block: props && props.block }),
+))
 ```
 
-The three short-result tools share one implementation: `toolTextCard(label)` returns a hook-free
+The short-result tools share one implementation: `toolTextCard(label)` returns a hook-free
 component that renders the settled text directly (or a title line while running), and
-`NetworkInfoCard` / `CaseLoadCard` / `CaseSummaryCard` are that factory bound to their labels. Only
-the ACLF card needs hooks, because it fetches rows.
+`NetworkInfoCard` / `CaseLoadCard` / `CaseSummaryCard` / `RunGvyCard` are that factory bound to
+their labels. Only the ACLF card needs hooks, because it fetches rows.
 
 `CaseSummaryRow` wraps `CaseSummaryCard` with one gate: **every settled, successful** summary block
 returns `null`, so nothing is shown for any scope. Because a keyed `toolview` replaces the whole tool
@@ -289,9 +348,10 @@ Report button keeps that auto-selection.
 | Browse results | Bus/Branch/Gen/Load tabs | card's Explore row | `interpss/readCsv` |
 | Generate report | Report button | card's Report button | `interpss/runReport` |
 
-The tools add **no** `/api` endpoint: `METHODS` still lists the same 14 methods. The one Host
-RPC signature that grew is `runReport`, which now accepts an optional `reportType`
-(`aclf` | `nerc`) that takes precedence over the contingency-based auto rule.
+The tools add **no** `/api` endpoint. `METHODS` gains only the CA-dialog methods
+(`listCaFiles`, `getCaOptions`, `saveCaOptions`, 17 in total), which no tool calls.
+The one Host RPC signature that grew is `runReport`, which now accepts an optional
+`reportType` (`aclf` | `nerc`) that takes precedence over the contingency-based auto rule.
 
 The bridge's `lastLoadedAbs` mirrors `IpssAgentBridge.loadedInput` and is updated by
 `loadCase`, `runAclf` and `runContingency` — every JVM load goes through this module's
@@ -344,12 +404,13 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.3.10 | No summary card carries the `case · scope · converged` preamble any more: the `net` card is its two totals lines (the case identity stays in the tool result and the chat report) |
 | 0.3.11 | A ranked summary call shows **no card**: its rows still reach the agent, but the card would only repeat the chat report's table, so the gate in `CaseSummaryRow` hides the row entirely |
 | 0.3.12 | The `net` totals card goes the same way: no `interpss_case_summary` call renders anything (the chat report is the summary) |
+| 0.3.17 | `interpss_run_gvy`: apply a Groovy `.gvy` script from the case folder's `scripts/` directory to the held case, with a before/after digest and captured script stdout (Java: `GvyScriptRunner` + `IpssAgentBridge.runGvy`, Groovy 4.0.x added to the uber JAR) |
 
 ## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| Tool missing from the registry | Check `$TMPDIR/dsh-interpss-diagnostic.log` for `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf` and `tools=true`; a row that applied without the `tools` service logs the `NOT registered` line instead |
+| Tool missing from the registry | Check `$TMPDIR/dsh-interpss-diagnostic.log` for `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary, interpss_run_gvy` and `tools=true`; a row that applied without the `tools` service logs the `NOT registered` line instead |
 | Summary absent from a card | The card needs 0.3.4+ (network info) or 0.3.2+ (ACLF). Older cards fall back to the generic row, collapsed by default |
 | `alreadyLoaded: true` when a reload was wanted | The tool reuses the held model by design; the tab's **Load** button is the way to force a re-parse |
 | `interpss_case_summary` returns no rows | `scope: "net"` is the totals-only mode; pass `bus`, `gen`, `load` or `branch` for rows |
@@ -357,6 +418,11 @@ objects) so a card can render without re-deriving paths from the result text.
 | A ranked summary card shows no counts/mismatch | By design since 0.3.8 — the totals are on the `net` call |
 | A summary card shows no case/scope/converged header | By design since 0.3.10 (ranked cards since 0.3.9) — the tool row names the tool and its arguments; the tool result still carries `case` and `converged` for the report |
 | Branch ranking looks wrong for loadability | `interpss_case_summary` ranks by flow magnitude; the `Loading%` column in the result CSV is the rating-based measure |
+| `script not found: …` | The tool lists the `.gvy` files that exist in that `scripts/` folder; a bare name resolves against the **resolved case's** folder, so pass `case` when the selected case is not the one holding the script |
+| `unrecognized script selector` / `must live in …/scripts/` | Scripts are confined to `<case folder>/scripts/` and must end in `.gvy`; `..` is rejected |
+| A script edit vanished | Mutations live on the held model until the case is re-parsed: pass `reload: true`, or load another case and come back |
+| A script change had no effect on the totals | Contribute-model networks (`isContributeGenLoadModel()`) carry load on the contribute objects: edit `bus.getContributeLoad(id).loadCP`, not the aggregate `bus.loadP` |
+| `noSuchProperty` / `MissingMethodException` from a script | The failure names the property and the script line; check the JavaBean names in `docs/groovy-script-adapter-architecture.md` |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |
 | `no simulation case is selected` | Select a case in the InterPSS tab, or pass `case` explicitly |

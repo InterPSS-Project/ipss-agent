@@ -25,7 +25,7 @@ function diag(line) {
 
 const NAMESPACE = 'interpss'
 const PACKAGE = '@deepseek-ai/dsh-interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
 
 function jsonParam(name, wire) {
   return { name, wire, source: 'json', codec: { mode: 'src-json' } }
@@ -170,6 +170,90 @@ function relativeCasePath(absPath) {
   return marker >= 0 ? 'data/' + String(absPath).slice(marker + WS_DATA_MARKER.length) : String(absPath)
 }
 
+// --- Chat tools: Groovy scenario scripts -------------------------------------
+// A scenario script lives next to the case it edits: wspace/data/<case dir>/scripts/<name>.gvy.
+// The Java runner reads the file and evaluates it against the bridge-held network
+// under the `aclfnet` binding (docs/groovy-script-adapter-architecture.md), so the
+// Host only has to decide *which* file, and refuse anything outside that folder.
+const GVY_SCRIPT_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\/scripts\/[A-Za-z0-9_.\/-]+\.gvy$/
+const GVY_MAX_LISTED = 20
+const GVY_STDOUT_LIMIT = 8000
+
+// Resolve the `script` argument to a workspace-relative .gvy path under the case's
+// scripts/ folder, then confirm it exists. Returns { ok, input, abs } or { ok:false, error }.
+async function resolveGvyScript(ctx, root, caseInput, raw) {
+  const value = typeof raw === 'string' ? raw.trim() : ''
+  if (value === '') {
+    return {
+      ok: false,
+      error: 'the `script` argument is required: the name of a .gvy file in <case folder>/scripts/ ' +
+        '(for example "ieee14_adjBus14.gvy"), or a data/.../scripts/x.gvy path',
+    }
+  }
+  if (value.indexOf('..') >= 0) return { ok: false, error: 'the script path must not contain "..": ' + value }
+  let input = ''
+  if (GVY_SCRIPT_PATH_RE.test(value)) {
+    input = value
+  } else if (!value.includes('/') && /\.gvy$/i.test(value)) {
+    // `caseInput` is already workspace-relative ("data/<case dir>/<stem>.<ext>").
+    const { parent } = casePartsOf(caseInput)
+    input = wspaceJoin(parent, 'scripts/' + value)
+  } else {
+    const marker = value.indexOf(WS_DATA_MARKER)
+    if (marker >= 0) {
+      const candidate = 'data/' + value.slice(marker + WS_DATA_MARKER.length)
+      if (GVY_SCRIPT_PATH_RE.test(candidate)) input = candidate
+    }
+  }
+  if (input === '') {
+    return {
+      ok: false,
+      error: 'unrecognized script selector "' + value + '": expected a .gvy file name in the case folder\'s ' +
+        'scripts/ directory, or a data/.../scripts/x.gvy path',
+    }
+  }
+  const abs = root + '/wspace/' + input
+  const fs = ctx.get('fs')
+  if (fs !== undefined) {
+    let found = false
+    try {
+      const info = await fs.stat(await fs.resolve(abs))
+      found = info !== undefined
+    } catch (e) {
+      found = false
+    }
+    if (!found) {
+      // The names in that folder are the useful part of this failure.
+      const available = await listGvyScripts(ctx, root, input)
+      return {
+        ok: false,
+        error: 'script not found: ' + input +
+          (available.length > 0 ? '; available scripts: ' + available.join(', ') : ' (no .gvy files there)'),
+      }
+    }
+  }
+  return { ok: true, input: input, abs: abs }
+}
+
+// Names of the .gvy files beside the requested script, for an actionable error.
+async function listGvyScripts(ctx, root, scriptInput) {
+  const fs = ctx.get('fs')
+  if (fs === undefined) return []
+  const slash = scriptInput.lastIndexOf('/')
+  if (slash < 0) return []
+  try {
+    const dir = await fs.resolve(root + '/wspace/' + scriptInput.slice(0, slash))
+    const entries = await fs.listDir(dir)
+    return entries
+      .filter((entry) => entry.type === 'file' && /\.gvy$/i.test(entry.name))
+      .map((entry) => entry.name)
+      .sort()
+      .slice(0, GVY_MAX_LISTED)
+  } catch (e) {
+    return []
+  }
+}
+
 // Resolve the calling session's workspace root. Shared by the `interpss`
 // service (browser RPCs) and the chat tools (which carry the agent id).
 function resolveWorkspaceRoot(ctx, sessionId) {
@@ -307,6 +391,174 @@ const DEFAULT_ACLF_CONFIG = {
   svcAccFactor: 1.0,
   xfrTapAccFactor: 1.0,
   psXfrPContrlAccFactor: 1.0,
+}
+
+// Contingency-analysis run config (ca_run.json, beside aclf_run.json in the
+// case folder) written by the CA dialog and read by `runCa`. Contingency inputs
+// are case-specific, so there is no project-level default: an absent file falls
+// back to the per-case suggestion below, which reproduces the filename
+// discovery the CA run has always used.
+const DEFAULT_CA_CONFIG = {
+  contingencyMode: 'all',
+  contingencyFile: null,
+  monitorMode: 'all',
+  monitoredBranchFile: null,
+}
+
+// The dialog reports how many entries a candidate file holds, which means
+// parsing every .json in the case folder; skip absurd ones.
+const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
+
+function wspaceJoin(parent, name) {
+  return parent === '' ? name : parent + '/' + name
+}
+
+function caConfigPath(root, parent) {
+  return root + '/wspace/' + wspaceJoin(parent, 'ca_run.json')
+}
+
+function caConfigRel(parent) {
+  return wspaceJoin(parent, 'ca_run.json')
+}
+
+// Case-folder .json files that can be contingency inputs: our own two config
+// files are settings, not inputs.
+function caCandidateName(name) {
+  return /\.json$/i.test(name) && name !== 'aclf_run.json' && name !== 'ca_run.json'
+}
+
+// Today's discovery heuristic, kept as the default when no ca_run.json exists:
+// the first *contingenc*.json and the first *monitor*.json.
+async function suggestCaConfig(ctx, root, parent) {
+  const fs = ctx.get('fs')
+  const out = Object.assign({}, DEFAULT_CA_CONFIG)
+  if (fs === undefined) return out
+  try {
+    const entries = await fs.listDir(await fs.resolve(root + '/wspace/' + parent))
+    const names = entries
+      .filter((e) => e.type === 'file' && caCandidateName(e.name))
+      .map((e) => e.name)
+      .sort()
+    for (const name of names) {
+      const lower = name.toLowerCase()
+      if (out.contingencyFile === null && lower.indexOf('contingenc') !== -1) {
+        out.contingencyMode = 'custom'
+        out.contingencyFile = wspaceJoin(parent, name)
+      }
+      if (out.monitoredBranchFile === null && lower.indexOf('monitor') !== -1) {
+        out.monitorMode = 'custom'
+        out.monitoredBranchFile = wspaceJoin(parent, name)
+      }
+    }
+  } catch (e) {}
+  return out
+}
+
+// Entry counts for the dialog message. A null count means the file does not
+// carry that shape; `error` explains an unreadable file.
+function caFileCounts(text) {
+  let parsed = null
+  try {
+    parsed = JSON.parse(text)
+  } catch (e) {
+    return { contingencyCount: null, monitoredCount: null, error: 'not valid JSON' }
+  }
+  if (Array.isArray(parsed)) {
+    return { contingencyCount: parsed.length, monitoredCount: null, error: null }
+  }
+  if (parsed === null || typeof parsed !== 'object') {
+    return { contingencyCount: null, monitoredCount: null, error: 'not a JSON object' }
+  }
+  return {
+    contingencyCount: Array.isArray(parsed.contingencies) ? parsed.contingencies.length : null,
+    monitoredCount: Array.isArray(parsed.monitored_branches) ? parsed.monitored_branches.length : null,
+    error: null,
+  }
+}
+
+// A ca_run.json entry is a wspace-relative path: never absolute, never escaping
+// wspace/.
+async function caEntryCheck(ctx, root, value) {
+  const rel = String(value).replace(/\\/g, '/')
+  if (rel.startsWith('/') || rel.indexOf('..') !== -1) {
+    return { ok: false, error: 'must be a path under wspace/ (got ' + rel + ')' }
+  }
+  const fs = ctx.get('fs')
+  let exists = false
+  if (fs !== undefined) {
+    try {
+      const info = await fs.stat(await fs.resolve(root + '/wspace/' + rel))
+      exists = info !== undefined && info !== null
+    } catch (e) {
+      exists = false
+    }
+  }
+  return { ok: true, exists: exists }
+}
+
+// Normalise an untrusted config payload to the four known keys. Modes must be
+// exactly 'all' | 'custom'; a custom mode must name a file, which must exist
+// when `requireFiles` is set.
+async function validateCaConfig(ctx, root, value, requireFiles) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, error: 'the run configuration must be a JSON object' }
+  }
+  const out = Object.assign({}, DEFAULT_CA_CONFIG)
+  const fields = [
+    ['contingencyMode', 'contingencyFile'],
+    ['monitorMode', 'monitoredBranchFile'],
+  ]
+  for (const field of fields) {
+    const modeKey = field[0]
+    const fileKey = field[1]
+    const raw = value[modeKey]
+    if (raw !== undefined && raw !== null && raw !== '' && raw !== 'all' && raw !== 'custom') {
+      return { ok: false, error: modeKey + " must be 'all' or 'custom' (got " + JSON.stringify(raw) + ')' }
+    }
+    const mode = raw === 'custom' ? 'custom' : 'all'
+    out[modeKey] = mode
+    if (mode === 'all') continue
+    const rel = typeof value[fileKey] === 'string' ? value[fileKey].trim() : ''
+    if (rel === '') {
+      return { ok: false, error: modeKey + " is 'custom' but no " + fileKey + ' is set' }
+    }
+    const check = await caEntryCheck(ctx, root, rel)
+    if (!check.ok) return { ok: false, error: fileKey + ': ' + check.error }
+    if (requireFiles && !check.exists) {
+      return { ok: false, error: fileKey + ' not found: ' + rel }
+    }
+    out[fileKey] = rel
+  }
+  return { ok: true, config: out }
+}
+
+// Effective CA config for a run: an explicit payload from the dialog, else the
+// case-folder ca_run.json, else the per-case suggestion.
+async function resolveCaRunConfig(ctx, root, parent, explicit) {
+  if (explicit !== undefined && explicit !== null) {
+    const validated = await validateCaConfig(ctx, root, explicit, true)
+    if (!validated.ok) return { ok: false, error: 'invalid run configuration: ' + validated.error }
+    return { ok: true, config: validated.config, source: 'request' }
+  }
+  const fs = ctx.get('fs')
+  if (fs !== undefined) {
+    let text = null
+    try {
+      text = await fs.readText(await fs.resolve(caConfigPath(root, parent)))
+    } catch (e) {}
+    if (text !== null) {
+      let parsed = null
+      try {
+        parsed = JSON.parse(text)
+      } catch (e) {
+        return { ok: false, error: caConfigRel(parent) + ' is not valid JSON' }
+      }
+      const validated = await validateCaConfig(ctx, root, parsed, true)
+      if (!validated.ok) return { ok: false, error: validated.error }
+      return { ok: true, config: validated.config, source: 'case' }
+    }
+  }
+  return { ok: true, config: await suggestCaConfig(ctx, root, parent), source: 'suggested' }
 }
 
 async function scanCases(fs, dirTarget, relDir, out) {
@@ -789,23 +1041,15 @@ class InterpssService extends TypertRemoteService {
     const { parent, stem } = this.caseParts(caseInput)
     const resultDir = parent + '/result'
 
-    // Discover companion contingency + monitored-branch JSONs in the case dir
-    // when present; omit either/both to use N-1 / all-branch defaults in Java.
-    const fs = this.ctx.get('fs')
-    let contRel = null
-    let monRel = null
-    if (fs !== undefined) {
-      try {
-        const dirTarget = await fs.resolve(root + '/wspace/' + parent)
-        const entries = await fs.listDir(dirTarget)
-        for (const entry of entries) {
-          if (entry.type !== 'file' || !/\.json$/i.test(entry.name)) continue
-          const lower = entry.name.toLowerCase()
-          if (contRel === null && lower.indexOf('contingenc') !== -1) contRel = parent + '/' + entry.name
-          if (monRel === null && lower.indexOf('monitor') !== -1) monRel = parent + '/' + entry.name
-        }
-      } catch (e) {}
-    }
+    // Run configuration: an explicit payload from the dialog, else the
+    // case-folder ca_run.json, else the per-case filename discovery. A custom
+    // entry with no matching file becomes null, which selects the Java defaults
+    // (N-1 outages / all branches monitored).
+    const resolved = await resolveCaRunConfig(this.ctx, root, parent, input && input.config)
+    if (!resolved.ok) return { ok: false, error: resolved.error }
+    const caConfig = resolved.config
+    const contRel = caConfig.contingencyFile
+    const monRel = caConfig.monitoredBranchFile
 
     // In-process bridge path (preferred): no JVM spawn, cached network.
     const bridge = this.bridge()
@@ -1063,6 +1307,110 @@ class InterpssService extends TypertRemoteService {
       return { ok: true }
     } catch (e) {
       return { ok: false, error: 'failed to write ' + caseCfg + ': ' + (e && e.message ? e.message : String(e)) }
+    }
+  }
+
+  // Candidate contingency / monitored-branch inputs: every .json beside the
+  // case file, with the entry counts the dialog reports after a pick.
+  async listCaFiles(input) {
+    const fs = this.ctx.get('fs')
+    if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+    const caseInput = input && typeof input.input === 'string' ? input.input : ''
+    if (caseInput === '') return { ok: false, error: 'no case selected' }
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+    const { parent } = this.caseParts(caseInput)
+
+    let entries
+    try {
+      entries = await fs.listDir(await fs.resolve(root + '/wspace/' + parent))
+    } catch (e) {
+      return { ok: false, error: 'cannot list ' + (parent === '' ? 'wspace' : parent) }
+    }
+
+    const files = []
+    const names = entries
+      .filter((e) => e.type === 'file' && caCandidateName(e.name))
+      .map((e) => e.name)
+      .sort()
+    for (const name of names) {
+      const rel = wspaceJoin(parent, name)
+      const out = { name: name, path: rel, contingencyCount: null, monitoredCount: null, error: null }
+      try {
+        const target = await fs.resolve(root + '/wspace/' + rel)
+        const info = await fs.stat(target)
+        const size = info && typeof info.size === 'number' ? info.size : null
+        if (size !== null && size > CA_INSPECT_MAX_BYTES) {
+          out.error = 'too large to inspect'
+        } else {
+          Object.assign(out, caFileCounts(await fs.readText(target)))
+        }
+      } catch (e) {
+        out.error = 'cannot read'
+      }
+      files.push(out)
+    }
+    return { ok: true, dir: parent, files: files }
+  }
+
+  // The dialog's starting state: the case ca_run.json when it exists and
+  // parses, else the discovered defaults with a warning explaining why.
+  async getCaOptions(input) {
+    const fs = this.ctx.get('fs')
+    if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+    const caseInput = input && typeof input.input === 'string' ? input.input : ''
+    if (caseInput === '') return { ok: false, error: 'no case selected' }
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+    const { parent } = this.caseParts(caseInput)
+    const cfgRel = caConfigRel(parent)
+    const suggestion = await suggestCaConfig(this.ctx, root, parent)
+
+    let text = null
+    try {
+      text = await fs.readText(await fs.resolve(caConfigPath(root, parent)))
+    } catch (e) {
+      return { ok: true, config: suggestion, source: 'suggested', path: cfgRel }
+    }
+    let parsed = null
+    try {
+      parsed = JSON.parse(text)
+    } catch (e) {
+      return { ok: true, config: suggestion, source: 'suggested', path: cfgRel, warning: cfgRel + ' is not valid JSON — showing the discovered defaults' }
+    }
+    // A missing file is reported by listCaFiles, so existence is not required here.
+    const validated = await validateCaConfig(this.ctx, root, parsed, false)
+    if (!validated.ok) {
+      return { ok: true, config: suggestion, source: 'suggested', path: cfgRel, warning: cfgRel + ': ' + validated.error + ' — showing the discovered defaults' }
+    }
+    return { ok: true, config: validated.config, source: 'case', path: cfgRel }
+  }
+
+  // Persist the dialog's configuration as <case folder>/ca_run.json.
+  async saveCaOptions(input) {
+    const fs = this.ctx.get('fs')
+    if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+    const caseInput = input && typeof input.input === 'string' ? input.input : ''
+    if (caseInput === '') return { ok: false, error: 'no case selected' }
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+    const { parent } = this.caseParts(caseInput)
+    const validated = await validateCaConfig(this.ctx, root, input && input.config, true)
+    if (!validated.ok) return { ok: false, error: validated.error }
+
+    const cfgRel = caConfigRel(parent)
+    const payload = {
+      contingencyMode: validated.config.contingencyMode,
+      contingencyFile: validated.config.contingencyFile,
+      monitorMode: validated.config.monitorMode,
+      monitoredBranchFile: validated.config.monitoredBranchFile,
+    }
+    try {
+      const target = await fs.resolve(caConfigPath(root, parent))
+      await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n')
+      return { ok: true, path: cfgRel }
+    } catch (e) {
+      return { ok: false, error: 'failed to write ' + cfgRel + ': ' + (e && e.message ? e.message : String(e)) }
     }
   }
 }
@@ -1725,6 +2073,207 @@ function caseSummaryTool(ctx) {
   }
 }
 
+// --- Chat tool: interpss_run_gvy ---------------------------------------------
+// Applies a Groovy (.gvy) scenario script to the case held in the embedded bridge.
+// The script mutates that network in place (binding `aclfnet`, Complex pre-imported),
+// which is what makes the tool useful and also what makes it dangerous: edits are not
+// rolled back, so `reload: true` re-parses the case and the docs say the scripts are
+// trusted code. Solving stays a separate step (interpss_run_aclf).
+function runGvyTool(ctx) {
+  return {
+    name: 'interpss_run_gvy',
+    description:
+      LOAD_FIRST_HINT +
+      'Apply a Groovy (.gvy) scenario script to the power-system case held in the embedded InterPSS ' +
+      'bridge, then report what the script changed. The script file comes from its case folder\'s ' +
+      'scripts/ directory: pass just the file name (for example "ieee14_adjBus14.gvy") or a ' +
+      'data/.../scripts/x.gvy path. Inside the script the network is bound as `aclfnet` (for example ' +
+      '`aclfnet.getBus("Bus14").getContributeLoad("Bus14-L1").loadCP = new Complex(0.18, 0.07)`), and ' +
+      'Complex is already imported. The script edits the model in place and edits are NOT rolled back, ' +
+      'so pass `reload: true` to re-parse the case before applying it; a failing script keeps whatever ' +
+      'it already changed. Script output from println is returned as `stdout`. This tool only edits the ' +
+      'model — call interpss_run_aclf afterwards to solve the edited case. See ' +
+      'docs/groovy-script-adapter-architecture.md for the binding and property mapping.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        script: {
+          type: 'string',
+          description:
+            'The .gvy script to apply: a file name in the case folder\'s scripts/ directory ' +
+            '(e.g. "ieee14_adjBus14.gvy"), or a workspace-relative path such as ' +
+            '"data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy".',
+        },
+        case: {
+          type: 'string',
+          description:
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
+            "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
+            'held by the bridge. The script is always taken from that case folder\'s scripts/ directory.',
+        },
+        reload: {
+          type: 'boolean',
+          description:
+            'Re-parse the case from disk before applying the script, discarding any earlier script edits ' +
+            'on the held model. Defaults to false, which reuses the held model and lets scripts accumulate.',
+        },
+      },
+      required: ['script'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          format: { type: 'string' },
+          script: { type: 'string' },
+          reload: { type: 'boolean' },
+          elapsedMs: { type: 'number' },
+          returnValue: { type: 'string' },
+          returnType: { type: 'string' },
+          stdout: { type: 'string' },
+          line: { type: 'number' },
+          buses: { type: 'number' },
+          branches: { type: 'number' },
+          loadMw: { type: 'number' },
+          generationMw: { type: 'number' },
+          loadMwBefore: { type: 'number' },
+          generationMwBefore: { type: 'number' },
+          lfConverged: { type: 'boolean' },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (value && value.ok === true) {
+          const lines = [
+            'InterPSS run script \u2014 ' + String(value.script || '') + ' on ' + String(value.case || '') +
+              ' (source: ' + String(value.source || '') + ')',
+            'Model: ' + String(value.buses === undefined ? '?' : value.buses) + ' buses \u00b7 ' +
+              String(value.branches === undefined ? '?' : value.branches) + ' branches \u00b7 load ' +
+              formatAmount(value.loadMwBefore, 'MW') + ' \u2192 ' + formatAmount(value.loadMw, 'MW') + ' MW (' +
+              signed(formatAmount(value.loadMw, 'MW'), formatAmount(value.loadMwBefore, 'MW')) + ') \u00b7 gen ' +
+              formatAmount(value.generationMwBefore, 'MW') + ' \u2192 ' + formatAmount(value.generationMw, 'MW') +
+              ' MW \u00b7 ' + (value.lfConverged === true ? 'solved' : 'not solved'),
+          ]
+          if (typeof value.returnValue === 'string' && value.returnValue !== '') {
+            lines.push('Returned: ' + value.returnValue)
+          } else if (typeof value.returnType === 'string' && value.returnType !== '') {
+            lines.push('Returned a ' + value.returnType + ' (not rendered)')
+          }
+          if (typeof value.stdout === 'string' && value.stdout.trim() !== '') {
+            lines.push('Script output:', value.stdout.trimEnd())
+          }
+          return [{ type: 'text', text: lines.join('\n') }]
+        }
+        const where = value && typeof value.line === 'number' && value.line > 0
+          ? ' (script line ' + value.line + ')'
+          : ''
+        return [{
+          type: 'text',
+          text: 'InterPSS run script failed' + where + ': ' + String((value && value.error) || 'unknown error'),
+        }]
+      },
+      // Persisted to the card's block.meta so the script card renders directly.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          source: String(value.source || ''),
+          script: String(value.script || ''),
+        }
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS run script', kind: 'execute', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      const resolvedCase = resolveToolCase(sessionId, args && typeof args.case === 'string' ? args.case : '')
+      if (resolvedCase.error !== undefined) return fail(resolvedCase.error, 'argument')
+      if (resolvedCase.target === null) {
+        return fail('no simulation case is selected: pick one in the InterPSS tab, or pass `case` (a data/... path, an absolute path containing /wspace/data/, or a preset label)', 'none')
+      }
+      const target = resolvedCase.target
+      const source = resolvedCase.source
+      const script = await resolveGvyScript(ctx, root, target.input, args && args.script)
+      if (script.ok !== true) return fail(script.error, 'argument')
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.runGvy !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
+      }
+      const reload = args && args.reload === true
+      try {
+        const raw = await bridge.runGvy(target.format, root + '/wspace/' + target.input, script.abs, reload)
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          // A script can fail *after* editing, so the case and script stay in the
+          // result: the line number is what the caller needs to fix it.
+          const value = {
+            ok: false,
+            error: String((parsed && parsed.error) || 'bridge runGvy failed'),
+            case: target.input,
+            source: source,
+            script: script.input,
+          }
+          if (parsed && typeof parsed.line === 'number') value.line = parsed.line
+          if (parsed && typeof parsed.stdout === 'string' && parsed.stdout !== '') {
+            value.stdout = truncateStdout(parsed.stdout)
+          }
+          return value
+        }
+        const value = {
+          ok: true,
+          case: target.input,
+          source: source,
+          format: target.format,
+          script: script.input,
+          reload: reload,
+        }
+        for (const key of ['elapsedMs', 'buses', 'branches', 'loadMw', 'generationMw', 'loadMwBefore',
+          'generationMwBefore', 'line']) {
+          const n = finiteOrNull(parsed[key])
+          if (n !== null) value[key] = n
+        }
+        for (const key of ['returnValue', 'returnType']) {
+          if (typeof parsed[key] === 'string' && parsed[key] !== '') value[key] = parsed[key]
+        }
+        value.lfConverged = parsed.lfConverged === true
+        if (typeof parsed.stdout === 'string' && parsed.stdout !== '') value.stdout = truncateStdout(parsed.stdout)
+        return value
+      } catch (e) {
+        return fail('InterPSS run script failed: ' + (e && e.message ? e.message : String(e)), source)
+      }
+    },
+  }
+}
+
+function truncateStdout(text) {
+  return text.length > GVY_STDOUT_LIMIT
+    ? text.slice(0, GVY_STDOUT_LIMIT) + '\n\u2026 (truncated)'
+    : text
+}
+
+// "+3.10" / "-2.00" / "\u00b10.00" for the card's load/gen delta.
+function signed(after, before) {
+  const a = Number(after)
+  const b = Number(before)
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return '\u00b1?'
+  const delta = a - b
+  return (delta >= 0 ? '+' : '') + delta.toFixed(2)
+}
+
 export default {
   // Wait for the `typert` registry before applying: loader entries activate in
   // parallel, and without this dependency `ctx.get('typert')` can still be
@@ -1790,6 +2339,30 @@ export default {
       async summarize(scope, sortRule, numRec) {
         const bridge = await ensureBridge(rootFor(''))
         return bridge.summarize(scope, sortRule, numRec)
+      },
+      // Apply a Groovy scenario script to the held case. Mutations are in place, so
+      // `absCase` becomes the case the JVM holds — the same bookkeeping `runAclf`
+      // does. stdout/stderr are attached like runAclf's, which is how a script's
+      // println output reaches the caller instead of the dsh terminal.
+      async runGvy(format, absCase, absScript, reload) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        const cap = captureStdio()
+        let raw
+        try {
+          raw = await bridge.runGvy(format, absCase, absScript, reload === true)
+        } finally {
+          cap.stop()
+        }
+        try {
+          const parsed = JSON.parse(raw)
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.ok === true) lastLoadedAbs = absCase
+            parsed.stdout = cap.out()
+            parsed.stderr = cap.err()
+            raw = JSON.stringify(parsed)
+          }
+        } catch (e) {}
+        return raw
       },
       async networkInfo() {
         const bridge = await ensureBridge(rootFor(''))
@@ -1886,7 +2459,7 @@ export default {
     // call is gated on the iPSS Agent workspace activation check.
     const tools = ctx.get('tools')
     if (tools !== undefined) {
-      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx)]
+      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx), runGvyTool(ctx)]
       for (const definition of chatToolDefs) {
         ctx.effect(() => tools.register(definition))
       }

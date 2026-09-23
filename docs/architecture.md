@@ -113,6 +113,7 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 | `NetworkLoader` | `input` | Route to format-specific adapters |
 | `IeeeFileAdapter`, `PsseFileAdapter` | `input` | Import `.ieee` / `.raw` via `IpssAdapter` |
 | `AclfRunner` | `runner` | Newton–Raphson AC load flow → CSV + network info |
+| `GvyScriptRunner` | `runner` | Evaluate a Groovy `.gvy` script against a live `AclfNetwork` (`aclfnet` binding) → mutation digest |
 | `ContingencyRunner` | `runner` | DC N-1 contingency → contingency CSV |
 | `ReportRunner` | `report` | Orchestrate Markdown report generation |
 | `IpssAgentBridge` | `bridge` | In-process JSON facade for DSH `java-bridge` |
@@ -155,6 +156,12 @@ AclfRunner.runOnNet(net, configPath, resultsDir, stem)
   3. settle(): re-solve while net.maxMismatch(NR) > 1e-4 pu (≤3 passes)
   4. Write stem_network_info.txt
   5. AclfNetDFrameAdapter → stem_DF_{bus,branch,gen,load}.csv
+
+Optional scenario edits (before or between solves):
+
+GvyScriptRunner.runOnNet(net, <case dir>/scripts/<name>.gvy)
+  1. AclfNetGvyScriptProcessor(net).evaluate(<file>)   // binding: aclfnet
+  2. digest before/after: buses, branches, load, generation, lfConverged
 ```
 
 **ACLF config resolution** (two-tier, printed as `Using config file: …`):
@@ -166,12 +173,26 @@ AclfRunner.runOnNet(net, configPath, resultsDir, stem)
 
 ```
 ContingencyRunner.run(paths, cli, net, resultsDir, stem)
-  1. Load contingency + monitored-branch JSON (ContingencyFileUtil)
-  2. ParallelDclfContingencyAnalyzer
-  3. DclfContingencyDFrameAdapter → stem_DF_contingency.csv
+  1. resolveInputs(): explicit CLI args → case ca_run.json → built-in defaults
+  2. Load contingency + monitored-branch JSON (ContingencyFileUtil)
+  3. ParallelDclfContingencyAnalyzer
+  4. DclfContingencyDFrameAdapter → stem_DF_contingency.csv
 ```
 
-CA requires both JSON companion files. The agent skill auto-discovers them in directory mode by filename patterns (`*contingency*`, `*monitor*`).
+Both JSON companion files are optional: omitting them means N-1 outages for every
+branch and every branch monitored.
+
+**CA config resolution** (`ContingencyRunner.resolveInputs`, printed as
+`Using ca_run.json: …`), per section and most specific first:
+
+1. Explicit CLI argument: `cont_file` / `monitor_file`
+2. Case-specific: `wspace/<input_parent>/ca_run.json` (the `custom` entry)
+3. Built-in default: N-1 contingencies / monitor every branch
+
+There is no project-level default — contingency lists are case-specific. The
+InterPSS tab's CA dialog writes the same `ca_run.json`, so the GUI and the CLI
+agree. The agent skill auto-discovers the files in directory mode by filename
+patterns (`*contingency*`, `*monitor*`).
 
 ### Step 4 — Report generation
 
@@ -230,6 +251,7 @@ Legacy layout `wspace/result/<subdir>/` is still supported by `ReportCaseResolve
 |--------|---------|
 | `loadCase(format, absCasePath)` | Load network into `SimuModelRepository` |
 | `runAclf(format, absCasePath, absConfigPath, absResultsDir, stem)` | Reuse cached net when path matches; call `AclfRunner.runOnNet()` |
+| `runGvy(format, absCasePath, absScriptPath, reload)` | `.gvy` under `<case dir>/scripts/` only; reuse the cached net unless `reload`; evaluate via `GvyScriptRunner` (mutates in place) |
 | `summarize(scope, sortRule, numRec)` | In-memory result summary via `AclfResultAdapter` |
 | `getNetworkInfo()` | Text network summary |
 | `runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)` | Delegate to `ReportRunner` |
@@ -294,7 +316,7 @@ Browser (lib/client.js)
 
 ### Host RPC methods
 
-`isActivated`, `checkResult`, `checkResultFiles`, `listCases`, `readCsv`, `busConnections`, `runAclf`, `runReport`, `getAclfOptions`, `saveAclfOptions`, `loadCase`, `summarizeResult`
+`isActivated`, `checkResult`, `checkResultFiles`, `listCases`, `readCsv`, `busConnections`, `runAclf`, `runCa`, `runReport`, `getAclfOptions`, `saveAclfOptions`, `listCaFiles`, `getCaOptions`, `saveCaOptions`, `loadCase`, `summarizeResult`
 
 ### Activation gate
 
@@ -325,6 +347,25 @@ Loaded by `AclfRunConfigRec` in `AclfRunner.runOnNet()`. Controls:
 - NR tuning parameters
 
 Editable from the DSH GUI via `getAclfOptions` / `saveAclfOptions`.
+
+### `wspace/<input_parent>/ca_run.json`
+
+Per-case contingency-analysis run settings, persisting what the tab's **CA**
+dialog collects and what `ContingencyRunner.resolveInputs` reads for the CLI.
+Deliberately **not** a project-level default: contingency lists are case-specific.
+
+| Key | Values | Meaning |
+| --- | --- | --- |
+| `contingencyMode` | `all` (default) \| `custom` | N-1 outages for every branch, or the listed contingencies |
+| `contingencyFile` | path under `wspace/` | `{"contingencies": [...]}` JSON; required when `contingencyMode` is `custom` |
+| `monitorMode` | `all` (default) \| `custom` | Monitor every branch, or only the listed ones |
+| `monitoredBranchFile` | path under `wspace/` | `{"monitored_branches": [...]}` JSON; required when `monitorMode` is `custom` |
+
+Written and read from the GUI via `getCaOptions` / `saveCaOptions`; the candidate
+files in the case folder (and their entry counts) come from `listCaFiles`. When
+the file is absent the dialog and `runCa` fall back to per-case filename discovery
+(first `*contingenc*.json` / `*monitor*.json`) and then to `all`/`all`, so a case
+that never opened the dialog behaves as before.
 
 ### `config/gen_report.json`
 
@@ -405,6 +446,7 @@ Used at runtime by agent code:
 |---------|-----|
 | `org.dflib:dflib-csv` | CSV export in runners |
 | `com.google.code.gson` | JSON in bridge and config |
+| `org.apache.groovy:groovy` (4.0.x) | Runtime for `org.interpss.script.gvy` — the Groovy scenario-script adapter `GvyScriptRunner` drives |
 | `org.eclipse.emf.*` | EMF model (ipss-core transitive) |
 | Sparse solvers (JKLU, CSPARSEJ, etc.) | Linear algebra |
 | `org.slf4j:slf4j-simple` | Logging |
@@ -418,7 +460,7 @@ Used at runtime by agent code:
 3. **CSV-driven reports** — Markdown generators analyze exported DataFrames; they never re-run load flow.
 4. **Agent skills as orchestration** — LLM skills shell out to the CLI; they do not embed simulation logic.
 5. **JSON bridge boundary** — Node/DSH code never traverses Java EMF objects; only paths and JSON cross the boundary.
-6. **Case-specific overrides** — per-case `aclf_run.json` under `<input_parent>/` overrides project defaults.
+6. **Case-specific overrides** — per-case `aclf_run.json` and `ca_run.json` under `<input_parent>/` override project and built-in defaults.
 7. **Settled results** — a load flow that converges before its last adjustment is re-solved
    (`AclfRunner.settle()`), and every artifact reports `net.maxMismatch(NR)`, so the returned CSVs,
    the network info and the tools can never describe a state the model does not satisfy.

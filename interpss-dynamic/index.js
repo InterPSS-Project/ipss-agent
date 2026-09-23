@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -154,6 +154,178 @@ export default {
         if (info !== undefined) return caseCfg
       } catch (e) {}
       return defCfg
+    }
+
+    // ---------------------------------------------------------------------
+    // Contingency-analysis run config (ca_run.json)
+    // ---------------------------------------------------------------------
+    // Written beside aclf_run.json in the case folder by the CA dialog and read
+    // by runCa. Contingency inputs are case-specific, so there is no
+    // project-level default: an absent file falls back to the per-case
+    // suggestion below, which reproduces the filename discovery the CA run has
+    // always used.
+
+    const DEFAULT_CA_CONFIG = {
+      contingencyMode: 'all',
+      contingencyFile: null,
+      monitorMode: 'all',
+      monitoredBranchFile: null,
+    }
+
+    // The dialog reports how many entries a candidate file holds, which means
+    // parsing every .json in the case folder; skip absurd ones.
+    const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
+
+    function wspaceJoin(parent, name) {
+      return parent === '' ? name : parent + '/' + name
+    }
+
+    function caConfigPath(root, parent) {
+      return root + '/wspace/' + wspaceJoin(parent, 'ca_run.json')
+    }
+
+    function caConfigRel(parent) {
+      return wspaceJoin(parent, 'ca_run.json')
+    }
+
+    // Case-folder .json files that can be contingency inputs: our own two
+    // config files are settings, not inputs.
+    function caCandidateName(name) {
+      return /\.json$/i.test(name) && name !== 'aclf_run.json' && name !== 'ca_run.json'
+    }
+
+    // Today's discovery heuristic, kept as the default when no ca_run.json
+    // exists: the first *contingenc*.json and the first *monitor*.json.
+    async function suggestCaConfig(root, parent) {
+      const fs = ctx.get('fs')
+      const out = Object.assign({}, DEFAULT_CA_CONFIG)
+      if (fs === undefined) return out
+      try {
+        const entries = await fs.listDir(await fs.resolve(root + '/wspace/' + parent))
+        const names = entries
+          .filter((e) => e.type === 'file' && caCandidateName(e.name))
+          .map((e) => e.name)
+          .sort()
+        for (const name of names) {
+          const lower = name.toLowerCase()
+          if (out.contingencyFile === null && lower.indexOf('contingenc') !== -1) {
+            out.contingencyMode = 'custom'
+            out.contingencyFile = wspaceJoin(parent, name)
+          }
+          if (out.monitoredBranchFile === null && lower.indexOf('monitor') !== -1) {
+            out.monitorMode = 'custom'
+            out.monitoredBranchFile = wspaceJoin(parent, name)
+          }
+        }
+      } catch (e) {}
+      return out
+    }
+
+    // Entry counts for the dialog message. A null count means the file does not
+    // carry that shape; `error` explains an unreadable file.
+    function caFileCounts(text) {
+      let parsed = null
+      try {
+        parsed = JSON.parse(text)
+      } catch (e) {
+        return { contingencyCount: null, monitoredCount: null, error: 'not valid JSON' }
+      }
+      if (Array.isArray(parsed)) {
+        return { contingencyCount: parsed.length, monitoredCount: null, error: null }
+      }
+      if (parsed === null || typeof parsed !== 'object') {
+        return { contingencyCount: null, monitoredCount: null, error: 'not a JSON object' }
+      }
+      return {
+        contingencyCount: Array.isArray(parsed.contingencies) ? parsed.contingencies.length : null,
+        monitoredCount: Array.isArray(parsed.monitored_branches) ? parsed.monitored_branches.length : null,
+        error: null,
+      }
+    }
+
+    // A ca_run.json entry is a wspace-relative path: never absolute, never
+    // escaping wspace/.
+    async function caEntryCheck(root, value) {
+      const rel = String(value).replace(/\\/g, '/')
+      if (rel.startsWith('/') || rel.indexOf('..') !== -1) {
+        return { ok: false, error: 'must be a path under wspace/ (got ' + rel + ')' }
+      }
+      const fs = ctx.get('fs')
+      let exists = false
+      if (fs !== undefined) {
+        try {
+          const info = await fs.stat(await fs.resolve(root + '/wspace/' + rel))
+          exists = info !== undefined && info !== null
+        } catch (e) {
+          exists = false
+        }
+      }
+      return { ok: true, exists: exists }
+    }
+
+    // Normalise an untrusted config payload to the four known keys. Modes must
+    // be exactly 'all' | 'custom'; a custom mode must name a file, which must
+    // exist when `requireFiles` is set.
+    async function validateCaConfig(root, value, requireFiles) {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return { ok: false, error: 'the run configuration must be a JSON object' }
+      }
+      const out = Object.assign({}, DEFAULT_CA_CONFIG)
+      const fields = [
+        ['contingencyMode', 'contingencyFile'],
+        ['monitorMode', 'monitoredBranchFile'],
+      ]
+      for (const field of fields) {
+        const modeKey = field[0]
+        const fileKey = field[1]
+        const raw = value[modeKey]
+        if (raw !== undefined && raw !== null && raw !== '' && raw !== 'all' && raw !== 'custom') {
+          return { ok: false, error: modeKey + " must be 'all' or 'custom' (got " + JSON.stringify(raw) + ')' }
+        }
+        const mode = raw === 'custom' ? 'custom' : 'all'
+        out[modeKey] = mode
+        if (mode === 'all') continue
+        const rel = typeof value[fileKey] === 'string' ? value[fileKey].trim() : ''
+        if (rel === '') {
+          return { ok: false, error: modeKey + " is 'custom' but no " + fileKey + ' is set' }
+        }
+        const check = await caEntryCheck(root, rel)
+        if (!check.ok) return { ok: false, error: fileKey + ': ' + check.error }
+        if (requireFiles && !check.exists) {
+          return { ok: false, error: fileKey + ' not found: ' + rel }
+        }
+        out[fileKey] = rel
+      }
+      return { ok: true, config: out }
+    }
+
+    // Effective CA config for a run: an explicit payload from the dialog, else
+    // the case-folder ca_run.json, else the per-case suggestion.
+    async function resolveCaRunConfig(root, parent, explicit) {
+      if (explicit !== undefined && explicit !== null) {
+        const validated = await validateCaConfig(root, explicit, true)
+        if (!validated.ok) return { ok: false, error: 'invalid run configuration: ' + validated.error }
+        return { ok: true, config: validated.config, source: 'request' }
+      }
+      const fs = ctx.get('fs')
+      if (fs !== undefined) {
+        let text = null
+        try {
+          text = await fs.readText(await fs.resolve(caConfigPath(root, parent)))
+        } catch (e) {}
+        if (text !== null) {
+          let parsed = null
+          try {
+            parsed = JSON.parse(text)
+          } catch (e) {
+            return { ok: false, error: caConfigRel(parent) + ' is not valid JSON' }
+          }
+          const validated = await validateCaConfig(root, parsed, true)
+          if (!validated.ok) return { ok: false, error: validated.error }
+          return { ok: true, config: validated.config, source: 'case' }
+        }
+      }
+      return { ok: true, config: await suggestCaConfig(root, parent), source: 'suggested' }
     }
 
     const handlers = {
@@ -533,23 +705,15 @@ export default {
         const { parent, stem } = caseParts(caseInput)
         const resultDir = parent + '/result'
 
-        // Discover companion contingency + monitored-branch JSONs in the case dir
-        // when present; omit either/both to use N-1 / all-branch defaults in Java.
-        const fs = ctx.get('fs')
-        let contRel = null
-        let monRel = null
-        if (fs !== undefined) {
-          try {
-            const dirTarget = await fs.resolve(root + '/wspace/' + parent)
-            const entries = await fs.listDir(dirTarget)
-            for (const entry of entries) {
-              if (entry.type !== 'file' || !/\.json$/i.test(entry.name)) continue
-              const lower = entry.name.toLowerCase()
-              if (contRel === null && lower.indexOf('contingenc') !== -1) contRel = parent + '/' + entry.name
-              if (monRel === null && lower.indexOf('monitor') !== -1) monRel = parent + '/' + entry.name
-            }
-          } catch (e) {}
-        }
+        // Run configuration: an explicit payload from the dialog, else the
+        // case-folder ca_run.json, else the per-case filename discovery. A
+        // custom entry with no matching file becomes null, which selects the
+        // Java defaults (N-1 outages / all branches monitored).
+        const resolved = await resolveCaRunConfig(root, parent, args && args.config)
+        if (!resolved.ok) return { ok: false, error: resolved.error }
+        const caConfig = resolved.config
+        const contRel = caConfig.contingencyFile
+        const monRel = caConfig.monitoredBranchFile
 
         // In-process bridge path (preferred): no JVM spawn, cached network.
         if (javaBridge !== undefined && typeof javaBridge.runContingency === 'function') {
@@ -798,6 +962,110 @@ export default {
           return { ok: true }
         } catch (e) {
           return { ok: false, error: 'failed to write ' + caseCfg + ': ' + (e && e.message ? e.message : String(e)) }
+        }
+      },
+
+      // Candidate contingency / monitored-branch inputs: every .json beside the
+      // case file, with the entry counts the dialog reports after a pick.
+      async listCaFiles(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        if (caseInput === '') return { ok: false, error: 'no case selected' }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const { parent } = caseParts(caseInput)
+
+        let entries
+        try {
+          entries = await fs.listDir(await fs.resolve(root + '/wspace/' + parent))
+        } catch (e) {
+          return { ok: false, error: 'cannot list ' + (parent === '' ? 'wspace' : parent) }
+        }
+
+        const files = []
+        const names = entries
+          .filter((e) => e.type === 'file' && caCandidateName(e.name))
+          .map((e) => e.name)
+          .sort()
+        for (const name of names) {
+          const rel = wspaceJoin(parent, name)
+          const out = { name: name, path: rel, contingencyCount: null, monitoredCount: null, error: null }
+          try {
+            const target = await fs.resolve(root + '/wspace/' + rel)
+            const info = await fs.stat(target)
+            const size = info && typeof info.size === 'number' ? info.size : null
+            if (size !== null && size > CA_INSPECT_MAX_BYTES) {
+              out.error = 'too large to inspect'
+            } else {
+              Object.assign(out, caFileCounts(await fs.readText(target)))
+            }
+          } catch (e) {
+            out.error = 'cannot read'
+          }
+          files.push(out)
+        }
+        return { ok: true, dir: parent, files: files }
+      },
+
+      // The dialog's starting state: the case ca_run.json when it exists and
+      // parses, else the discovered defaults with a warning explaining why.
+      async getCaOptions(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        if (caseInput === '') return { ok: false, error: 'no case selected' }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const { parent } = caseParts(caseInput)
+        const cfgRel = caConfigRel(parent)
+        const suggestion = await suggestCaConfig(root, parent)
+
+        let text = null
+        try {
+          text = await fs.readText(await fs.resolve(caConfigPath(root, parent)))
+        } catch (e) {
+          return { ok: true, config: suggestion, source: 'suggested', path: cfgRel }
+        }
+        let parsed = null
+        try {
+          parsed = JSON.parse(text)
+        } catch (e) {
+          return { ok: true, config: suggestion, source: 'suggested', path: cfgRel, warning: cfgRel + ' is not valid JSON — showing the discovered defaults' }
+        }
+        // A missing file is reported by listCaFiles, so existence is not required here.
+        const validated = await validateCaConfig(root, parsed, false)
+        if (!validated.ok) {
+          return { ok: true, config: suggestion, source: 'suggested', path: cfgRel, warning: cfgRel + ': ' + validated.error + ' — showing the discovered defaults' }
+        }
+        return { ok: true, config: validated.config, source: 'case', path: cfgRel }
+      },
+
+      // Persist the dialog's configuration as <case folder>/ca_run.json.
+      async saveCaOptions(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        if (caseInput === '') return { ok: false, error: 'no case selected' }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const { parent } = caseParts(caseInput)
+        const validated = await validateCaConfig(root, args && args.config, true)
+        if (!validated.ok) return { ok: false, error: validated.error }
+
+        const cfgRel = caConfigRel(parent)
+        const payload = {
+          contingencyMode: validated.config.contingencyMode,
+          contingencyFile: validated.config.contingencyFile,
+          monitorMode: validated.config.monitorMode,
+          monitoredBranchFile: validated.config.monitoredBranchFile,
+        }
+        try {
+          const target = await fs.resolve(caConfigPath(root, parent))
+          await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n')
+          return { ok: true, path: cfgRel }
+        } catch (e) {
+          return { ok: false, error: 'failed to write ' + cfgRel + ': ' + (e && e.message ? e.message : String(e)) }
         }
       },
     }

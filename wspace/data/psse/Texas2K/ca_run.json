@@ -1,0 +1,6 @@
+{
+  "contingencyMode": "custom",
+  "contingencyFile": "data/psse/Texas2K/2k_contingencies_115kVAbove.json",
+  "monitorMode": "custom",
+  "monitoredBranchFile": "data/psse/Texas2K/2k_monitored_branches.json"
+}
