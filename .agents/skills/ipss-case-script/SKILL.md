@@ -167,6 +167,7 @@ the chat tools keep reporting the model the bridge holds, not the edited one.
 | `unrecognized script selector` / `the script must live in …/scripts/` | Scripts are confined to `<case folder>/scripts/` and must end in `.gvy`; `..` is rejected |
 | `MissingPropertyException` / `noSuchProperty` | The failure names the property and the line: check the JavaBean names above (`loadCP`, `z`, `status`) |
 | A script edit had no effect on the totals | Contribute-model network: edit `bus.getContributeLoad(id).loadCP`, not the aggregate `bus.loadP` |
+| A branch edit had no effect | Check the script really contains the status line: `branch.status = false` drops the digest's `branches` count immediately (20 → 19 on IEEE 14), so that count is the check — a status line that was edited out of the file changes nothing |
 | The edit vanished | The case was re-parsed (another `interpss_case_load` with `reload`, the tab's **Load**, or a different case loaded); re-run the script |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |

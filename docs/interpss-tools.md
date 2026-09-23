@@ -425,6 +425,7 @@ objects) so a card can render without re-deriving paths from the result text.
 | `unrecognized script selector` / `must live in …/scripts/` | Scripts are confined to `<case folder>/scripts/` and must end in `.gvy`; `..` is rejected |
 | A script edit vanished | Mutations live on the held model until the case is re-parsed: pass `reload: true`, or load another case and come back |
 | A script change had no effect on the totals | Contribute-model networks (`isContributeGenLoadModel()`) carry load on the contribute objects: edit `bus.getContributeLoad(id).loadCP`, not the aggregate `bus.loadP` |
+| A branch change had no effect | `branch.status = false` drops the digest's `branches` count immediately (20 → 19 on IEEE 14), so that count is the check — a script whose status line is missing changes nothing there, and the result CSV's `Status` column stays `true` |
 | `noSuchProperty` / `MissingMethodException` from a script | The failure names the property and the script line; check the JavaBean names in `docs/groovy-script-adapter-architecture.md` |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |
