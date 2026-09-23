@@ -113,6 +113,7 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 | `NetworkLoader` | `input` | Route to format-specific adapters |
 | `IeeeFileAdapter`, `PsseFileAdapter` | `input` | Import `.ieee` / `.raw` via `IpssAdapter` |
 | `AclfRunner` | `runner` | Newton–Raphson AC load flow → CSV + network info |
+| `GvyScriptRunner` | `runner` | Evaluate a Groovy `.gvy` script against a live `AclfNetwork` (`aclfnet` binding) → mutation digest |
 | `ContingencyRunner` | `runner` | DC N-1 contingency → contingency CSV |
 | `ReportRunner` | `report` | Orchestrate Markdown report generation |
 | `IpssAgentBridge` | `bridge` | In-process JSON facade for DSH `java-bridge` |
@@ -155,6 +156,12 @@ AclfRunner.runOnNet(net, configPath, resultsDir, stem)
   3. settle(): re-solve while net.maxMismatch(NR) > 1e-4 pu (≤3 passes)
   4. Write stem_network_info.txt
   5. AclfNetDFrameAdapter → stem_DF_{bus,branch,gen,load}.csv
+
+Optional scenario edits (before or between solves):
+
+GvyScriptRunner.runOnNet(net, <case dir>/scripts/<name>.gvy)
+  1. AclfNetGvyScriptProcessor(net).evaluate(<file>)   // binding: aclfnet
+  2. digest before/after: buses, branches, load, generation, lfConverged
 ```
 
 **ACLF config resolution** (two-tier, printed as `Using config file: …`):
@@ -244,6 +251,7 @@ Legacy layout `wspace/result/<subdir>/` is still supported by `ReportCaseResolve
 |--------|---------|
 | `loadCase(format, absCasePath)` | Load network into `SimuModelRepository` |
 | `runAclf(format, absCasePath, absConfigPath, absResultsDir, stem)` | Reuse cached net when path matches; call `AclfRunner.runOnNet()` |
+| `runGvy(format, absCasePath, absScriptPath, reload)` | `.gvy` under `<case dir>/scripts/` only; reuse the cached net unless `reload`; evaluate via `GvyScriptRunner` (mutates in place) |
 | `summarize(scope, sortRule, numRec)` | In-memory result summary via `AclfResultAdapter` |
 | `getNetworkInfo()` | Text network summary |
 | `runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)` | Delegate to `ReportRunner` |
@@ -438,6 +446,7 @@ Used at runtime by agent code:
 |---------|-----|
 | `org.dflib:dflib-csv` | CSV export in runners |
 | `com.google.code.gson` | JSON in bridge and config |
+| `org.apache.groovy:groovy` (4.0.x) | Runtime for `org.interpss.script.gvy` — the Groovy scenario-script adapter `GvyScriptRunner` drives |
 | `org.eclipse.emf.*` | EMF model (ipss-core transitive) |
 | Sparse solvers (JKLU, CSPARSEJ, etc.) | Linear algebra |
 | `org.slf4j:slf4j-simple` | Logging |

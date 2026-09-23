@@ -170,6 +170,90 @@ function relativeCasePath(absPath) {
   return marker >= 0 ? 'data/' + String(absPath).slice(marker + WS_DATA_MARKER.length) : String(absPath)
 }
 
+// --- Chat tools: Groovy scenario scripts -------------------------------------
+// A scenario script lives next to the case it edits: wspace/data/<case dir>/scripts/<name>.gvy.
+// The Java runner reads the file and evaluates it against the bridge-held network
+// under the `aclfnet` binding (docs/groovy-script-adapter-architecture.md), so the
+// Host only has to decide *which* file, and refuse anything outside that folder.
+const GVY_SCRIPT_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\/scripts\/[A-Za-z0-9_.\/-]+\.gvy$/
+const GVY_MAX_LISTED = 20
+const GVY_STDOUT_LIMIT = 8000
+
+// Resolve the `script` argument to a workspace-relative .gvy path under the case's
+// scripts/ folder, then confirm it exists. Returns { ok, input, abs } or { ok:false, error }.
+async function resolveGvyScript(ctx, root, caseInput, raw) {
+  const value = typeof raw === 'string' ? raw.trim() : ''
+  if (value === '') {
+    return {
+      ok: false,
+      error: 'the `script` argument is required: the name of a .gvy file in <case folder>/scripts/ ' +
+        '(for example "ieee14_adjBus14.gvy"), or a data/.../scripts/x.gvy path',
+    }
+  }
+  if (value.indexOf('..') >= 0) return { ok: false, error: 'the script path must not contain "..": ' + value }
+  let input = ''
+  if (GVY_SCRIPT_PATH_RE.test(value)) {
+    input = value
+  } else if (!value.includes('/') && /\.gvy$/i.test(value)) {
+    // `caseInput` is already workspace-relative ("data/<case dir>/<stem>.<ext>").
+    const { parent } = casePartsOf(caseInput)
+    input = wspaceJoin(parent, 'scripts/' + value)
+  } else {
+    const marker = value.indexOf(WS_DATA_MARKER)
+    if (marker >= 0) {
+      const candidate = 'data/' + value.slice(marker + WS_DATA_MARKER.length)
+      if (GVY_SCRIPT_PATH_RE.test(candidate)) input = candidate
+    }
+  }
+  if (input === '') {
+    return {
+      ok: false,
+      error: 'unrecognized script selector "' + value + '": expected a .gvy file name in the case folder\'s ' +
+        'scripts/ directory, or a data/.../scripts/x.gvy path',
+    }
+  }
+  const abs = root + '/wspace/' + input
+  const fs = ctx.get('fs')
+  if (fs !== undefined) {
+    let found = false
+    try {
+      const info = await fs.stat(await fs.resolve(abs))
+      found = info !== undefined
+    } catch (e) {
+      found = false
+    }
+    if (!found) {
+      // The names in that folder are the useful part of this failure.
+      const available = await listGvyScripts(ctx, root, input)
+      return {
+        ok: false,
+        error: 'script not found: ' + input +
+          (available.length > 0 ? '; available scripts: ' + available.join(', ') : ' (no .gvy files there)'),
+      }
+    }
+  }
+  return { ok: true, input: input, abs: abs }
+}
+
+// Names of the .gvy files beside the requested script, for an actionable error.
+async function listGvyScripts(ctx, root, scriptInput) {
+  const fs = ctx.get('fs')
+  if (fs === undefined) return []
+  const slash = scriptInput.lastIndexOf('/')
+  if (slash < 0) return []
+  try {
+    const dir = await fs.resolve(root + '/wspace/' + scriptInput.slice(0, slash))
+    const entries = await fs.listDir(dir)
+    return entries
+      .filter((entry) => entry.type === 'file' && /\.gvy$/i.test(entry.name))
+      .map((entry) => entry.name)
+      .sort()
+      .slice(0, GVY_MAX_LISTED)
+  } catch (e) {
+    return []
+  }
+}
+
 // Resolve the calling session's workspace root. Shared by the `interpss`
 // service (browser RPCs) and the chat tools (which carry the agent id).
 function resolveWorkspaceRoot(ctx, sessionId) {
@@ -1989,6 +2073,207 @@ function caseSummaryTool(ctx) {
   }
 }
 
+// --- Chat tool: interpss_run_gvy ---------------------------------------------
+// Applies a Groovy (.gvy) scenario script to the case held in the embedded bridge.
+// The script mutates that network in place (binding `aclfnet`, Complex pre-imported),
+// which is what makes the tool useful and also what makes it dangerous: edits are not
+// rolled back, so `reload: true` re-parses the case and the docs say the scripts are
+// trusted code. Solving stays a separate step (interpss_run_aclf).
+function runGvyTool(ctx) {
+  return {
+    name: 'interpss_run_gvy',
+    description:
+      LOAD_FIRST_HINT +
+      'Apply a Groovy (.gvy) scenario script to the power-system case held in the embedded InterPSS ' +
+      'bridge, then report what the script changed. The script file comes from its case folder\'s ' +
+      'scripts/ directory: pass just the file name (for example "ieee14_adjBus14.gvy") or a ' +
+      'data/.../scripts/x.gvy path. Inside the script the network is bound as `aclfnet` (for example ' +
+      '`aclfnet.getBus("Bus14").getContributeLoad("Bus14-L1").loadCP = new Complex(0.18, 0.07)`), and ' +
+      'Complex is already imported. The script edits the model in place and edits are NOT rolled back, ' +
+      'so pass `reload: true` to re-parse the case before applying it; a failing script keeps whatever ' +
+      'it already changed. Script output from println is returned as `stdout`. This tool only edits the ' +
+      'model — call interpss_run_aclf afterwards to solve the edited case. See ' +
+      'docs/groovy-script-adapter-architecture.md for the binding and property mapping.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        script: {
+          type: 'string',
+          description:
+            'The .gvy script to apply: a file name in the case folder\'s scripts/ directory ' +
+            '(e.g. "ieee14_adjBus14.gvy"), or a workspace-relative path such as ' +
+            '"data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy".',
+        },
+        case: {
+          type: 'string',
+          description:
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
+            "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
+            'held by the bridge. The script is always taken from that case folder\'s scripts/ directory.',
+        },
+        reload: {
+          type: 'boolean',
+          description:
+            'Re-parse the case from disk before applying the script, discarding any earlier script edits ' +
+            'on the held model. Defaults to false, which reuses the held model and lets scripts accumulate.',
+        },
+      },
+      required: ['script'],
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          format: { type: 'string' },
+          script: { type: 'string' },
+          reload: { type: 'boolean' },
+          elapsedMs: { type: 'number' },
+          returnValue: { type: 'string' },
+          returnType: { type: 'string' },
+          stdout: { type: 'string' },
+          line: { type: 'number' },
+          buses: { type: 'number' },
+          branches: { type: 'number' },
+          loadMw: { type: 'number' },
+          generationMw: { type: 'number' },
+          loadMwBefore: { type: 'number' },
+          generationMwBefore: { type: 'number' },
+          lfConverged: { type: 'boolean' },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (value && value.ok === true) {
+          const lines = [
+            'InterPSS run script \u2014 ' + String(value.script || '') + ' on ' + String(value.case || '') +
+              ' (source: ' + String(value.source || '') + ')',
+            'Model: ' + String(value.buses === undefined ? '?' : value.buses) + ' buses \u00b7 ' +
+              String(value.branches === undefined ? '?' : value.branches) + ' branches \u00b7 load ' +
+              formatAmount(value.loadMwBefore, 'MW') + ' \u2192 ' + formatAmount(value.loadMw, 'MW') + ' MW (' +
+              signed(formatAmount(value.loadMw, 'MW'), formatAmount(value.loadMwBefore, 'MW')) + ') \u00b7 gen ' +
+              formatAmount(value.generationMwBefore, 'MW') + ' \u2192 ' + formatAmount(value.generationMw, 'MW') +
+              ' MW \u00b7 ' + (value.lfConverged === true ? 'solved' : 'not solved'),
+          ]
+          if (typeof value.returnValue === 'string' && value.returnValue !== '') {
+            lines.push('Returned: ' + value.returnValue)
+          } else if (typeof value.returnType === 'string' && value.returnType !== '') {
+            lines.push('Returned a ' + value.returnType + ' (not rendered)')
+          }
+          if (typeof value.stdout === 'string' && value.stdout.trim() !== '') {
+            lines.push('Script output:', value.stdout.trimEnd())
+          }
+          return [{ type: 'text', text: lines.join('\n') }]
+        }
+        const where = value && typeof value.line === 'number' && value.line > 0
+          ? ' (script line ' + value.line + ')'
+          : ''
+        return [{
+          type: 'text',
+          text: 'InterPSS run script failed' + where + ': ' + String((value && value.error) || 'unknown error'),
+        }]
+      },
+      // Persisted to the card's block.meta so the script card renders directly.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          source: String(value.source || ''),
+          script: String(value.script || ''),
+        }
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS run script', kind: 'execute', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      const resolvedCase = resolveToolCase(sessionId, args && typeof args.case === 'string' ? args.case : '')
+      if (resolvedCase.error !== undefined) return fail(resolvedCase.error, 'argument')
+      if (resolvedCase.target === null) {
+        return fail('no simulation case is selected: pick one in the InterPSS tab, or pass `case` (a data/... path, an absolute path containing /wspace/data/, or a preset label)', 'none')
+      }
+      const target = resolvedCase.target
+      const source = resolvedCase.source
+      const script = await resolveGvyScript(ctx, root, target.input, args && args.script)
+      if (script.ok !== true) return fail(script.error, 'argument')
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.runGvy !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
+      }
+      const reload = args && args.reload === true
+      try {
+        const raw = await bridge.runGvy(target.format, root + '/wspace/' + target.input, script.abs, reload)
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          // A script can fail *after* editing, so the case and script stay in the
+          // result: the line number is what the caller needs to fix it.
+          const value = {
+            ok: false,
+            error: String((parsed && parsed.error) || 'bridge runGvy failed'),
+            case: target.input,
+            source: source,
+            script: script.input,
+          }
+          if (parsed && typeof parsed.line === 'number') value.line = parsed.line
+          if (parsed && typeof parsed.stdout === 'string' && parsed.stdout !== '') {
+            value.stdout = truncateStdout(parsed.stdout)
+          }
+          return value
+        }
+        const value = {
+          ok: true,
+          case: target.input,
+          source: source,
+          format: target.format,
+          script: script.input,
+          reload: reload,
+        }
+        for (const key of ['elapsedMs', 'buses', 'branches', 'loadMw', 'generationMw', 'loadMwBefore',
+          'generationMwBefore', 'line']) {
+          const n = finiteOrNull(parsed[key])
+          if (n !== null) value[key] = n
+        }
+        for (const key of ['returnValue', 'returnType']) {
+          if (typeof parsed[key] === 'string' && parsed[key] !== '') value[key] = parsed[key]
+        }
+        value.lfConverged = parsed.lfConverged === true
+        if (typeof parsed.stdout === 'string' && parsed.stdout !== '') value.stdout = truncateStdout(parsed.stdout)
+        return value
+      } catch (e) {
+        return fail('InterPSS run script failed: ' + (e && e.message ? e.message : String(e)), source)
+      }
+    },
+  }
+}
+
+function truncateStdout(text) {
+  return text.length > GVY_STDOUT_LIMIT
+    ? text.slice(0, GVY_STDOUT_LIMIT) + '\n\u2026 (truncated)'
+    : text
+}
+
+// "+3.10" / "-2.00" / "\u00b10.00" for the card's load/gen delta.
+function signed(after, before) {
+  const a = Number(after)
+  const b = Number(before)
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return '\u00b1?'
+  const delta = a - b
+  return (delta >= 0 ? '+' : '') + delta.toFixed(2)
+}
+
 export default {
   // Wait for the `typert` registry before applying: loader entries activate in
   // parallel, and without this dependency `ctx.get('typert')` can still be
@@ -2054,6 +2339,30 @@ export default {
       async summarize(scope, sortRule, numRec) {
         const bridge = await ensureBridge(rootFor(''))
         return bridge.summarize(scope, sortRule, numRec)
+      },
+      // Apply a Groovy scenario script to the held case. Mutations are in place, so
+      // `absCase` becomes the case the JVM holds — the same bookkeeping `runAclf`
+      // does. stdout/stderr are attached like runAclf's, which is how a script's
+      // println output reaches the caller instead of the dsh terminal.
+      async runGvy(format, absCase, absScript, reload) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        const cap = captureStdio()
+        let raw
+        try {
+          raw = await bridge.runGvy(format, absCase, absScript, reload === true)
+        } finally {
+          cap.stop()
+        }
+        try {
+          const parsed = JSON.parse(raw)
+          if (parsed && typeof parsed === 'object') {
+            if (parsed.ok === true) lastLoadedAbs = absCase
+            parsed.stdout = cap.out()
+            parsed.stderr = cap.err()
+            raw = JSON.stringify(parsed)
+          }
+        } catch (e) {}
+        return raw
       },
       async networkInfo() {
         const bridge = await ensureBridge(rootFor(''))
@@ -2150,7 +2459,7 @@ export default {
     // call is gated on the iPSS Agent workspace activation check.
     const tools = ctx.get('tools')
     if (tools !== undefined) {
-      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx)]
+      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx), runGvyTool(ctx)]
       for (const definition of chatToolDefs) {
         ctx.effect(() => tools.register(definition))
       }

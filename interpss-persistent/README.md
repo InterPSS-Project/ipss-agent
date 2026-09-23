@@ -63,6 +63,7 @@ iPSS Agent workspace activation check.
 | `interpss_network_info` | Show the InterPSS network information (active buses and branches, total generation and load, load-flow convergence, max mismatch) of a simulation case. |
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
+| `interpss_run_gvy` | Apply a Groovy (`.gvy`) scenario script from the case folder's `scripts/` directory to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. |
 
 The first three tools resolve the target case through one shared helper, in this order:
 
@@ -95,6 +96,16 @@ totals stay on the `net` call so a ranked card does not repeat them. It is a por
 Java result container *always* carries every section in full (only the requested one is ranked),
 so the Host slices it instead of forwarding it; and an unknown `scope` is rejected where the RPC
 would silently fall back to `net`. Branch ranking is by flow magnitude, not rating loading.
+
+`interpss_run_gvy` edits the held model through InterPSS's Groovy script adapter
+(`org.interpss.script.gvy.AclfNetGvyScriptProcessor`, binding `aclfnet`). The script
+file is resolved inside the **case folder's `scripts/` directory** (a bare file
+name, or a `data/…/scripts/x.gvy` path); the Host and the Java bridge both refuse
+anything else. Scripts mutate the model in place with no rollback, so `reload: true`
+re-parses the case first, and solving stays a separate `interpss_run_aclf` call.
+The tool reports the script's scalar return value, captured `println` output, and
+`loadMw` / `generationMw` before and after, so a mutation-only script still shows
+what it changed. Groovy 4.0.x is a Maven dependency merged into the uber JAR.
 
 `interpss_run_aclf` solves the case and writes
 `<stem>_DF_{bus,branch,gen,load}.csv` plus `<stem>_network_info.txt` under

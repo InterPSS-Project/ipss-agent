@@ -1903,6 +1903,9 @@ module.exports = {
     const NetworkInfoCard = toolTextCard('InterPSS network info')
     const CaseLoadCard = toolTextCard('InterPSS case load')
     const CaseSummaryCard = toolTextCard('InterPSS case summary')
+    // The script result is short: the applied script, the model digest with its load/gen
+    // deltas, the script's return value or its stdout, and the failure with its line.
+    const RunGvyCard = toolTextCard('InterPSS run script')
 
     // The chat report *is* the summary, so no `interpss_case_summary` card is shown:
     // every settled, successful block renders nothing at all, whichever scope it is.
@@ -2135,6 +2138,10 @@ module.exports = {
     slots.inject('tool.call.toolview', () => slots.register(
       { name: 'tool.call.toolview', key: 'interpss_case_summary' },
       (props) => React.createElement(CaseSummaryRow, { block: props && props.block }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_run_gvy' },
+      (props) => React.createElement(RunGvyCard, { block: props && props.block }),
     ))
   },
 }

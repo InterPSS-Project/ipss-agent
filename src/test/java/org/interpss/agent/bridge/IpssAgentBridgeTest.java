@@ -2,6 +2,7 @@ package org.interpss.agent.bridge;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.interpss.agent.support.AgentTestSupport;
@@ -74,6 +75,112 @@ class IpssAgentBridgeTest {
         assertThat(o.get("converged").getAsBoolean()).isTrue();
     }
 
+    /**
+     * A case folder with a {@code scripts/} directory, as the Host resolves scripts —
+     * the bridge refuses any script outside it.
+     */
+    private Path caseWithScripts(String scriptName, String code) throws Exception {
+        Path caseDir = Files.createDirectories(tempDir.resolve("case-" + scriptName.replace('.', '_')));
+        Path caseFile = caseDir.resolve("ieee14.ieee");
+        Files.copy(AgentTestSupport.absoluteResourcePath(AgentTestSupport.IEEE14_CASE), caseFile);
+        Path scripts = Files.createDirectories(caseDir.resolve("scripts"));
+        Files.writeString(scripts.resolve(scriptName), code);
+        return caseDir;
+    }
+
+    @Test
+    void runGvy_appliesAScriptFromTheCaseScriptsDir() throws Exception {
+        Path caseDir = caseWithScripts("adj.gvy", """
+                bus = aclfnet.getBus('Bus14');
+                load = bus.getContributeLoad('Bus14-L1');
+                load.loadCP = new Complex(0.18, 0.07);
+                """);
+        String casePath = caseDir.resolve("ieee14.ieee").toString();
+        String scriptPath = caseDir.resolve("scripts/adj.gvy").toString();
+
+        String json = bridge.runGvy("ieee", casePath, scriptPath, false);
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isTrue();
+        assertThat(o.get("script").getAsString()).endsWith("adj.gvy");
+        assertThat(o.get("buses").getAsInt()).isEqualTo(14);
+        assertThat(o.get("loadMw").getAsDouble() - o.get("loadMwBefore").getAsDouble()).isCloseTo(3.1,
+                org.assertj.core.data.Offset.offset(0.05));
+
+        // The edit is visible to the other tools on the same held model.
+        JsonObject info = JsonParser.parseString(bridge.summarize("net", null, 1)).getAsJsonObject();
+        assertThat(info.get("ok").getAsBoolean()).isTrue();
+    }
+
+    @Test
+    void runGvy_rejectsAScriptOutsideTheScriptsDir() throws Exception {
+        Path caseDir = caseWithScripts("adj.gvy", "aclfnet.id = 'x'\n");
+        Path stray = Files.writeString(tempDir.resolve("stray.gvy"), "aclfnet.id = 'y'\n");
+
+        String json = bridge.runGvy("ieee", caseDir.resolve("ieee14.ieee").toString(), stray.toString(), false);
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isFalse();
+        assertThat(o.get("error").getAsString()).contains("must live in");
+    }
+
+    @Test
+    void runGvy_rejectsANonGvyFile() throws Exception {
+        Path caseDir = caseWithScripts("adj.gvy", "aclfnet.id = 'x'\n");
+        Path plain = Files.writeString(caseDir.resolve("scripts/readme.txt"), "not a script");
+
+        String json = bridge.runGvy("ieee", caseDir.resolve("ieee14.ieee").toString(), plain.toString(), false);
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isFalse();
+        assertThat(o.get("error").getAsString()).contains(".gvy");
+    }
+
+    @Test
+    void runGvy_reportsAScriptFailureWithItsLine() throws Exception {
+        Path caseDir = caseWithScripts("broken.gvy", """
+                bus = aclfnet.getBus('Bus14');
+                bus.noSuchProperty = 1;
+                """);
+
+        String json = bridge.runGvy("ieee", caseDir.resolve("ieee14.ieee").toString(),
+                caseDir.resolve("scripts/broken.gvy").toString(), false);
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isFalse();
+        assertThat(o.get("error").getAsString()).as(json).contains("noSuchProperty");
+        assertThat(o.get("line").getAsInt()).isGreaterThan(0);
+    }
+
+    @Test
+    void runGvy_reusesTheHeldModelUnlessReloadIsRequested() throws Exception {
+        Path caseDir = caseWithScripts("bump.gvy", """
+                load = aclfnet.getBus('Bus14').getContributeLoad('Bus14-L1');
+                cp = load.loadCP;
+                load.loadCP = new Complex(cp.real + 0.1, cp.imaginary);
+                """);
+        String casePath = caseDir.resolve("ieee14.ieee").toString();
+        String scriptPath = caseDir.resolve("scripts/bump.gvy").toString();
+
+        // IEEE 14 totals 259 MW; Bus14 holds 14.9 MW, so +0.1 pu is +10 MW.
+        JsonObject first = JsonParser.parseString(bridge.runGvy("ieee", casePath, scriptPath, false))
+                .getAsJsonObject();
+        assertThat(first.get("loadMwBefore").getAsDouble()).isCloseTo(259.0, org.assertj.core.data.Offset.offset(1.0));
+        assertThat(first.get("loadMw").getAsDouble()).as(first.toString()).isCloseTo(269.0, org.assertj.core.data.Offset.offset(1.0));
+
+        // Without reload the held model keeps the edit, so the bump compounds.
+        JsonObject again = JsonParser.parseString(bridge.runGvy("ieee", casePath, scriptPath, false))
+                .getAsJsonObject();
+        assertThat(again.get("loadMwBefore").getAsDouble()).isCloseTo(269.0, org.assertj.core.data.Offset.offset(1.0));
+        assertThat(again.get("loadMw").getAsDouble()).isCloseTo(279.0, org.assertj.core.data.Offset.offset(1.0));
+
+        // reload re-parses the case, so the mutation starts from the file's own value.
+        JsonObject fresh = JsonParser.parseString(bridge.runGvy("ieee", casePath, scriptPath, true))
+                .getAsJsonObject();
+        assertThat(fresh.get("loadMwBefore").getAsDouble()).isCloseTo(259.0, org.assertj.core.data.Offset.offset(1.0));
+        assertThat(fresh.get("loadMw").getAsDouble()).isCloseTo(269.0, org.assertj.core.data.Offset.offset(1.0));
+    }
+
     @Test
     void summarize_returnsErrorWhenNoNetworkLoaded() {
         String json = bridge.summarize("net", null, 5);
@@ -82,7 +189,6 @@ class IpssAgentBridgeTest {
         assertThat(o.get("ok").getAsBoolean()).isFalse();
         assertThat(o.get("error").getAsString()).contains("no loaded network");
     }
-
     @Test
     void summarize_supportsAllScopes() throws Exception {
         bridge.loadCase("ieee", casePath);

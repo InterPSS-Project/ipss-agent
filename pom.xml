@@ -28,6 +28,10 @@
     <ipss.local.repo>${project.basedir}/lib/m2-repo</ipss.local.repo>
     <ipss.core.version>1.0.16</ipss.core.version>
     <ieee.odm.version>1.0.1</ieee.odm.version>
+    <!-- Groovy backs org.interpss.script.gvy (AclfNetGvyScriptProcessor), which ships
+         inside ipss_runnable.jar without its own dependency: 4.0.x matches the
+         GroovyShell/Binding API that class was compiled against. -->
+    <groovy.version>4.0.27</groovy.version>
   </properties>
 
   <repositories>
@@ -146,6 +150,13 @@
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>
       <version>2.11.0</version>
+    </dependency>
+
+    <!-- Groovy script adapter (org.interpss.script.gvy) runtime -->
+    <dependency>
+      <groupId>org.apache.groovy</groupId>
+      <artifactId>groovy</artifactId>
+      <version>${groovy.version}</version>
     </dependency>
 
     <dependency>
