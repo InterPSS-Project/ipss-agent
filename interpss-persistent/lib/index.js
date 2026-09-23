@@ -144,10 +144,29 @@ const IPSS_PRESETS = [
   { label: 'texas 2k-bus', format: 'psse', input: 'data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW' },
 ]
 
-// Accept a workspace-relative data/… path, an absolute path containing
-// /wspace/data/, or an exact preset label.
+// A session renders workspace files as `wspace/data/…` (that is the form an @-reference
+// and the file surfaces show), so accept that prefix — and its `./` spelling — wherever a
+// `data/…` selector is expected. It is a pure prefix strip: the `data/` form is still
+// what every regex and every bridge call sees.
+function stripWspacePrefix(value) {
+  let text = String(value).trim()
+  for (;;) {
+    if (text.startsWith('./')) {
+      text = text.slice(2)
+      continue
+    }
+    if (text.startsWith('wspace/')) {
+      text = text.slice('wspace/'.length)
+      continue
+    }
+    return text
+  }
+}
+
+// Accept a workspace-relative data/… path (optionally written as wspace/data/…), an
+// absolute path containing /wspace/data/, or an exact preset label.
 function resolveCaseArgument(raw) {
-  const value = String(raw).trim()
+  const value = stripWspacePrefix(raw)
   if (value === '') return { ok: false, error: 'empty case selector' }
   for (const preset of IPSS_PRESETS) {
     if (preset.label === value.toLowerCase()) return { ok: true, input: preset.input, format: preset.format }
@@ -160,8 +179,9 @@ function resolveCaseArgument(raw) {
   }
   return {
     ok: false,
-    error: 'unrecognized case selector "' + value + '"; expected a data/... case path, an absolute path containing ' +
-      WS_DATA_MARKER + ', or a preset label (' + IPSS_PRESETS.map((preset) => preset.label).join(', ') + ')',
+    error: 'unrecognized case selector "' + value + '"; expected a data/... case path (wspace/data/... is ' +
+      'accepted too), an absolute path containing ' + WS_DATA_MARKER + ', or a preset label (' +
+      IPSS_PRESETS.map((preset) => preset.label).join(', ') + ')',
   }
 }
 
@@ -182,7 +202,7 @@ const GVY_STDOUT_LIMIT = 8000
 // Resolve the `script` argument to a workspace-relative .gvy path under the case's
 // scripts/ folder, then confirm it exists. Returns { ok, input, abs } or { ok:false, error }.
 async function resolveGvyScript(ctx, root, caseInput, raw) {
-  const value = typeof raw === 'string' ? raw.trim() : ''
+  const value = typeof raw === 'string' ? stripWspacePrefix(raw) : ''
   if (value === '') {
     return {
       ok: false,
@@ -1446,7 +1466,8 @@ function caseLoadTool(ctx) {
         case: {
           type: 'string',
           description:
-            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee' " +
+            "(also accepted as 'wspace/data/ieee/Ieee14Bus/ieee14.ieee'), " +
             "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
             "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
             'held by the bridge.',
@@ -1559,7 +1580,8 @@ function networkInfoTool(ctx) {
         case: {
           type: 'string',
           description:
-            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee' " +
+            "(also accepted as 'wspace/data/ieee/Ieee14Bus/ieee14.ieee'), " +
             "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
             "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
             'loaded in the bridge.',
@@ -1671,7 +1693,8 @@ function runAclfTool(ctx) {
         case: {
           type: 'string',
           description:
-            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee' " +
+            "(also accepted as 'wspace/data/ieee/Ieee14Bus/ieee14.ieee'), " +
             "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
             "'Texas 2K-bus'). Omit it to run the case selected in the InterPSS tab, then the case already " +
             'held by the bridge.',
@@ -2103,12 +2126,14 @@ function runGvyTool(ctx) {
           description:
             'The .gvy script to apply: a file name in the case folder\'s scripts/ directory ' +
             '(e.g. "ieee14_adjBus14.gvy"), or a workspace-relative path such as ' +
-            '"data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy".',
+            '"data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy" — the "wspace/data/..." spelling of ' +
+            'the same path is accepted too.',
         },
         case: {
           type: 'string',
           description:
-            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee', " +
+            "Optional case selector: a workspace-relative path such as 'data/ieee/Ieee14Bus/ieee14.ieee' " +
+            "(also accepted as 'wspace/data/ieee/Ieee14Bus/ieee14.ieee'), " +
             "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
             "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
             'held by the bridge. The script is always taken from that case folder\'s scripts/ directory.',

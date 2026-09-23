@@ -145,7 +145,7 @@ fallbacks use `shellQuote(javaLauncher())`, where `javaLauncher()` reads
 
 ## 3. Pack, install, verify
 
-**Always bump a minor version before packing** (e.g. `0.3.16` → `0.3.17` in
+**Always bump a minor version before packing** (e.g. `0.3.17` → `0.3.18` in
 `package.json`). Each rebuild must ship a new version so the install picks up
 the fresh tarball instead of a cached older package. Re-packing the *same*
 version is silently skipped by pnpm — the installed copy stays stale; if that
@@ -158,20 +158,20 @@ disk.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.3.16 → 0.3.17
+# bump version first, e.g. 0.3.17 → 0.3.18
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.3.17.tgz
+rm -f deepseek-ai-dsh-interpss-0.3.18.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.3.17.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.3.18.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall
 cd /Users/mzhou/.dsh/profiles/web
 pnpm remove @deepseek-ai/dsh-interpss
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.17.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.18.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 
@@ -225,7 +225,7 @@ served with the plugin bundle, so the reload is what picks it up):
   no arguments gives the case totals (no rows); `{ scope: "bus", numRec: 5 }` gives five
   lowest-voltage rows and `{ scope: "bus", sortRule: "Highest Bus Voltage" }` five highest;
   an unknown scope fails instead of silently summarizing `net`.
-- **Groovy script tool** (0.3.17+, needs the rebuilt uber JAR): with the IEEE 14 case,
+- **Groovy script tool** (0.3.17+, needs the rebuilt uber JAR; 0.3.18 also accepts a `wspace/data/…` selector): with the IEEE 14 case,
   `interpss_run_gvy({ script: "ieee14_adjBus14.gvy", case: "IEEE 14-bus" })` reports
   `load 259.00 → 262.10 MW (+3.10)` and renders its card; a second call without `reload`
   compounds the edit, `reload: true` resets it; `ieee14_adjBranch1_2.gvy` takes
