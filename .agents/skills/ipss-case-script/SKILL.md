@@ -25,7 +25,7 @@ interpss_case_load()
 ```
 
 A no-op reporting `alreadyLoaded: true` when the bridge already holds the case, so it is safe to call
-unconditionally. The script tool loads on demand too; this step just makes the load explicit and
+unconditionally (see `$ipss-case-load`). The script tool loads on demand too; this step just makes the load explicit and
 reports the bus/branch counts.
 
 ### Step 1 — run the script
@@ -174,6 +174,7 @@ the chat tools keep reporting the model the bridge holds, not the edited one.
 
 ## Related
 
+- `$ipss-case-load` — load (or switch) the case the script edits
 - `$ipss-case-aclf` — solve the edited case and write the result files
 - `$ipss-case-info` — show the loaded case's network info
 - `$ipss-case-summary` — summarize the case, edited or not

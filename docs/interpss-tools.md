@@ -363,6 +363,7 @@ case resolution and `reused` in `caseInfo`.
 
 | Skill | Use |
 | --- | --- |
+| `ipss-case-load` | Load a case into the bridge and report its counts (wraps `interpss_case_load`) |
 | `ipss-case-info` | Report the current case's network info (wraps `interpss_network_info`) |
 | `ipss-case-aclf` | Run ACLF for the current case (wraps `interpss_run_aclf`) |
 | `ipss-case-script` | Apply a `.gvy` scenario script to the current case (wraps `interpss_run_gvy`) |

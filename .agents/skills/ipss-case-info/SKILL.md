@@ -19,7 +19,7 @@ Start with `interpss_case_load`:
 interpss_case_load()
 ```
 
-It loads the case selected in the tab into the embedded bridge and is a **no-op** reporting `alreadyLoaded: true` when the bridge already holds it, so it is safe to call unconditionally. The tool below still loads on demand, so this step is a convention rather than a hard requirement — its value is making the load explicit and reporting the bus/branch counts.
+It loads the case selected in the tab into the embedded bridge and is a **no-op** reporting `alreadyLoaded: true` when the bridge already holds it, so it is safe to call unconditionally (see `$ipss-case-load`). The tool below still loads on demand, so this step is a convention rather than a hard requirement — its value is making the load explicit and reporting the bus/branch counts.
 
 ### Step 1 — report the network info
 

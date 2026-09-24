@@ -16,7 +16,7 @@ You can also use natural-language runs in the Chat tab to interact with the curr
 
 ![InterPSS DSH Plugin](../image/ipss-dsh-chat.png)
 
-For natural-language batch runs in the Chat tab (`/ipss-sim` and related skills), see the [repository README](../../README.md). 
+For natural-language runs against the **in-memory** case (Chat tools), see [InterPSS DSH Chat](#interpss-dsh-chat) below. For batch CLI-style runs (`/ipss-sim`), see the [batch chat user guide](batch_chat_user_guide.md).
 
 ### Prerequisites
 
@@ -248,7 +248,100 @@ In the report dialog:
 
 ## InterPSS DSH Chat
 
-// TODO: Add user guide for InterPSS DSH Chat usage, based on interpss-tools.md
+The Chat tab can drive the same in-memory simulation case as the InterPSS tab. The DSH plugin registers model **tools** so the agent can load a selected InterPSS case, show network info, run ACLF, summarize results, and apply Groovy what-if scripts — without leaving the conversation.
+
+Chat and the InterPSS tab share one embedded bridge: a case loaded (or solved) in either place stays in memory until another case is loaded or the DSH runtime shuts down.
+
+For the full tool contract (inputs, cards, version history), see [interpss-tools.md](../interpss-tools.md). For batch runs through the Java CLI (`/ipss-sim`), see the [batch chat user guide](batch_chat_user_guide.md).
+
+### Before you start
+
+1. Open an **iPSS Agent** workspace (same activation gate as the InterPSS tab).
+2. Optionally select a case in the **InterPSS** tab — Chat tools use that selection when you do not name a case.
+3. Prefer an explicit load first (or ask the agent to load), then ask for info, ACLF, summary, or a script.
+
+### What you can ask
+
+| Goal | Example prompt | Skill / tool |
+| --- | --- | --- |
+| Load the selected (or named) case | `Load the IEEE 118-bus case` / `Load the selected InterPSS case` | `$ipss-case-load` / `interpss_case_load` |
+| Network info | `Show network info for the current case` | `$ipss-case-info` / `interpss_network_info` |
+| Run AC load flow | `Run ACLF on the selected case` | `$ipss-case-aclf` / `interpss_run_aclf` |
+| Case summary / top-N | `Summarize the current case` / `Find the lowest voltage buses` | `$ipss-case-summary` / `interpss_case_summary` |
+| What-if scenario script | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve` | `$ipss-case-script` / `interpss_run_gvy` |
+
+Slash / skill forms (Claude Code style): `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-summary`, `$ipss-case-script`. Plain natural language works the same when the agent picks those tools.
+
+### Case selection
+
+When you do not name a case, tools resolve in this order:
+
+1. The `case` argument in the tool call (if the agent passed one)
+2. The case currently selected in the InterPSS tab
+3. The case already held in the embedded bridge
+
+You can name a case as:
+
+| Form | Example |
+| --- | --- |
+| Workspace-relative path | `data/ieee/Ieee118Bus/ieee118.ieee` |
+| Path with `wspace/` prefix | `wspace/data/ieee/Ieee14Bus/ieee14.ieee` |
+| Preset label | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
+
+### Typical workflows
+
+#### Load → network info → ACLF
+
+```text
+Load IEEE 118-bus and show network info
+Run ACLF on the selected case
+```
+
+After a successful ACLF in Chat, the tool card can show **Explore results** (Bus / Branch / Gen / Load) and a **Report** button for the AC Loadflow Markdown report — similar to the InterPSS tab explorers.
+
+#### Summary and rankings
+
+```text
+Summarize the current case
+Find the 10 lowest voltage buses
+Find the largest generation / loads / branch flows
+```
+
+Notes:
+
+- Summary reads the **in-memory** model. For solved values, run ACLF first.
+- Branch ranking is by flow **magnitude**, not rating loading. For `Loading%`, ask about the branch result CSV (or use the tab explorer).
+
+#### What-if with a Groovy script
+
+Scripts live under the case folder’s `scripts/` directory (for example `data/ieee/Ieee14Bus/scripts/`). The script **edits** the held model in place and does not solve; run ACLF afterward when you need solved results.
+
+```text
+On IEEE 14-bus, run ieee14_adjBus14.gvy, then run ACLF
+```
+
+Important:
+
+- Edits are **not** rolled back. To reset, ask to reload the case (`reload: true` on the script tool) or load another case and come back.
+- Running the same relative change twice applies it twice unless the script sets absolute values.
+- Only run scripts you trust.
+
+### Chat vs InterPSS tab vs batch Chat
+
+| | InterPSS tab | DSH Chat (this section) | Batch Chat (`/ipss-sim`) |
+| --- | --- | --- | --- |
+| Model | In-memory bridge | Same in-memory bridge | Separate Java CLI process |
+| Load | **Load** always re-parses | Tools reuse the held case when possible | Fresh process per run |
+| ACLF / explorers / report | Buttons and dialogs | Tools + ACLF card | CLI writes files under `result/` |
+| Contingency (CA) / NERC | **CA** + **Report** | Not via Chat tools today — use the tab or `/ipss-sim` | Full ACLF + CA + NERC workflow |
+| What-if scripts | — | `interpss_run_gvy` / `$ipss-case-script` | Edit case files or use CLI workflows |
+
+### Tips
+
+- Prefer naming the case when the tab selection might be stale (`source` in the tool result tells you: `argument`, `selection`, or `bridge`).
+- ACLF options still come from the case-folder `aclf_run.json` when present, otherwise `config/aclf_run.json` (same as the tab gear dialog).
+- Large PSS/E cases (for example Texas 2K) can take minutes in Chat ACLF — wait for the tool card to settle.
+- If a tool says the bridge is unavailable, rebuild the uber JAR and restart `dsh web` (see [Setup.md](../../Setup.md) / `scripts/setup-java-bridge.sh`).
 
 
 ## Tips and troubleshooting
@@ -267,9 +360,10 @@ In the report dialog:
 
 
 
-### Related (outside this tab)
+### Related
 
-- Chat / `/ipss-sim` skill — [README](../../README.md)
+- InterPSS DSH Chat tools (developer reference) — [interpss-tools.md](../interpss-tools.md)
+- Batch Chat / `/ipss-sim` — [batch_chat_user_guide.md](batch_chat_user_guide.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)
 - Install or update the plugin — [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 
