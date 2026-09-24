@@ -19,7 +19,7 @@ the voltage distribution and rating-based branch loading.
 interpss_case_load()
 ```
 
-It makes the load explicit and is a no-op when the bridge already holds the case. The summary reads
+It makes the load explicit and is a no-op when the bridge already holds the case (see `$ipss-case-load`). The summary reads
 the **in-memory model**, so it works on a loaded base case — but a base case reports base-case
 values. For a report about the solved case, run `interpss_run_aclf` first (see `$ipss-case-aclf`).
 
