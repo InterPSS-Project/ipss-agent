@@ -54,6 +54,7 @@ the shared `resolveToolCase()` helper, in this order:
 | `case` form | Example |
 | --- | --- |
 | Workspace-relative path | `data/ieee/Ieee118Bus/ieee118.ieee` |
+| Workspace-relative, as the session shows it | `wspace/data/ieee/Ieee118Bus/ieee118.ieee` (the `wspace/` and `./wspace/` prefixes are stripped before matching — 0.3.18) |
 | Absolute path containing `/wspace/data/` | `/…/ipss-agent/wspace/data/ieee/Ieee14Bus/ieee14.ieee` |
 | Preset label (case-insensitive) | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
 
@@ -364,6 +365,7 @@ case resolution and `reused` in `caseInfo`.
 | --- | --- |
 | `ipss-case-info` | Report the current case's network info (wraps `interpss_network_info`) |
 | `ipss-case-aclf` | Run ACLF for the current case (wraps `interpss_run_aclf`) |
+| `ipss-case-script` | Apply a `.gvy` scenario script to the current case (wraps `interpss_run_gvy`) |
 | `ipss-sim` | Full simulation and reporting workflow through the Java CLI (`IpssCmd`) |
 | `nerc-report-html`, `nerc-report-slides` | Follow-on artifacts from a NERC report |
 
@@ -405,6 +407,7 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.3.11 | A ranked summary call shows **no card**: its rows still reach the agent, but the card would only repeat the chat report's table, so the gate in `CaseSummaryRow` hides the row entirely |
 | 0.3.12 | The `net` totals card goes the same way: no `interpss_case_summary` call renders anything (the chat report is the summary) |
 | 0.3.17 | `interpss_run_gvy`: apply a Groovy `.gvy` script from the case folder's `scripts/` directory to the held case, with a before/after digest and captured script stdout (Java: `GvyScriptRunner` + `IpssAgentBridge.runGvy`, Groovy 4.0.x added to the uber JAR) |
+| 0.3.18 | Every `case` / `script` selector also accepts the `wspace/data/…` (and `./wspace/data/…`) spelling a session shows, not just `data/…` |
 
 ## Troubleshooting
 
@@ -422,6 +425,7 @@ objects) so a card can render without re-deriving paths from the result text.
 | `unrecognized script selector` / `must live in …/scripts/` | Scripts are confined to `<case folder>/scripts/` and must end in `.gvy`; `..` is rejected |
 | A script edit vanished | Mutations live on the held model until the case is re-parsed: pass `reload: true`, or load another case and come back |
 | A script change had no effect on the totals | Contribute-model networks (`isContributeGenLoadModel()`) carry load on the contribute objects: edit `bus.getContributeLoad(id).loadCP`, not the aggregate `bus.loadP` |
+| A branch change had no effect | `branch.status = false` drops the digest's `branches` count immediately (20 → 19 on IEEE 14), so that count is the check — a script whose status line is missing changes nothing there, and the result CSV's `Status` column stays `true` |
 | `noSuchProperty` / `MissingMethodException` from a script | The failure names the property and the script line; check the JavaBean names in `docs/groovy-script-adapter-architecture.md` |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |

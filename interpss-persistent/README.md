@@ -67,7 +67,8 @@ iPSS Agent workspace activation check.
 
 The first three tools resolve the target case through one shared helper, in this order:
 
-1. the optional `case` argument — a workspace-relative `data/…` path, an
+1. the optional `case` argument — a workspace-relative `data/…` path (its
+   `wspace/data/…` spelling is accepted too since 0.3.18), an
    absolute path containing `/wspace/data/`, or a preset label (`IEEE 118-bus`,
    `IEEE 14-bus`, `Texas 2K-bus`);
 2. the case currently selected in the InterPSS tab — the tab reports every
