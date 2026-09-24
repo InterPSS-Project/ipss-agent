@@ -2,11 +2,11 @@
 
 **[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and NERC TPL-001-5 style reporting. This repository ships agent-facing skills for **OpenAI Codex Desktop**, **Claude Code CLI**, and **DeepSeek Harness** (build and CLI details in [Setup.md](Setup.md); DSH plugin in [InstallDSHPlugin.md](InstallDSHPlugin.md)). The canonical skill is `[.agents/skills/ipss-sim/SKILL.md](.agents/skills/ipss-sim/SKILL.md)`.
 
-It is also integrated into DeepSeek Harness as a DSH Plugin. You can run power system simulation in the traditional step-by-step way ([plugin user guide](docs/user_guide/plugin_user_guide.md)):
+It is also integrated into DeepSeek Harness as a DSH Plugin. You can run power system simulation in the traditional step-by-step way ([plugin user guide](docs/user_guide/dsh_plugin_user_guide.md)):
 
 ![ipss-dsh-plugin](./docs/image/ipss-dsh-plugin.png)
 
-Or in the native AI Chat way ([agent chat user guide](docs/user_guide/agent_chat_user_guide.md)):
+Or in the native AI Chat way ([batch chat user guide](docs/user_guide/batch_chat_user_guide.md)):
 
 ![ipss-agent-chat](./docs/image/ipss-agent-chat.png)
 
@@ -51,8 +51,8 @@ Install(update) InterPSS DSH plugin
 
 ## User Guide
 
-- InterPSS DSH Plugin user guide [plugin_user_guide.md](docs/user_guide/plugin_user_guide.md), [plugin_user_guide.pdf](docs/user_guide/plugin_user_guide.pdf)
-- iPSS Agent Chat user guide [agent_chat_user_guide.md](docs/user_guide/agent_chat_user_guide.md)
+- InterPSS DSH Plugin user guide [dsh_plugin_user_guide.md](docs/user_guide/dsh_plugin_user_guide.md), [dsh_plugin_user_guide.pdf](docs/user_guide/dsh_plugin_user_guide.pdf)
+- iPSS Agent Chat (Batch) user guide [batch_chat_user_guide.md](docs/user_guide/batch_chat_user_guide.md)
 
 
 
