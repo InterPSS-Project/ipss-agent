@@ -2,7 +2,7 @@
 
 ## Overview
 
-The InterPSS DSH Plugin adds an **InterPSS** tab to the DeepSeek Harness web GUI. Use it to:
+The InterPSS DSH Plugin adds an **InterPSS** tab to the DeepSeek Harness GUI. Use it to:
 
 - Load IEEE CDF (`.ieee`) or PSS/E RAW (`.raw` / `.RAW`) cases
 - Run AC load flow (ACLF) and DC contingency analysis (CA)
@@ -12,7 +12,11 @@ The InterPSS DSH Plugin adds an **InterPSS** tab to the DeepSeek Harness web GUI
 
 ![InterPSS DSH Plugin](../image/ipss-dsh-plugin.png)
 
-For natural-language runs in the Chat tab (`/ipss-sim` and related skills), see the [repository README](../../README.md). This guide covers the InterPSS tab UI only.
+You can also use natural-language runs in the Chat tab to interact with the current in-memory simulation case.
+
+![InterPSS DSH Plugin](../image/ipss-dsh-chat.png)
+
+For natural-language batch runs in the Chat tab (`/ipss-sim` and related skills), see the [repository README](../../README.md). 
 
 ### Prerequisites
 
@@ -35,7 +39,11 @@ The InterPSS tab only enables its tools when the workspace `README.md` first `#`
 
 
 
-## Open the InterPSS tab
+## InterPSS DSH GUI Tab
+
+
+
+### Open the InterPSS tab
 
 1. After installing or updating the plugin, restart `dsh web` and hard-reload the browser page.
 2. In the conversation view, open the **InterPSS** tab (next to Chat).
@@ -45,7 +53,7 @@ The InterPSS tab only enables its tools when the workspace `README.md` first `#`
 
 
 
-## Load a simulation case
+### Load a simulation case
 
 InterPSS DSH Plugin uses an In-Memory Computing (IMC) approach. When a simulation case is loaded, the loaded InterPSS simulation model will stay in memory, available for the simulation runs until another simulation case is loaded or the DSH runtime is shutdown. Therefore, ACLF and CA buttons stay disabled until a case is loaded into the simulation model.
 
@@ -64,7 +72,7 @@ InterPSS DSH Plugin uses an In-Memory Computing (IMC) approach. When a simulatio
 
 
 
-### Prior results on case change
+#### Prior results on case change
 
 When you select a case that already has a converged result (`*_network_info.txt` and result CSVs under the case’s `result/` folder), the tab can show that prior ACLF output without re-running. Use **ACLF** again when you want a fresh solve.
 
@@ -72,7 +80,7 @@ When you select a case that already has a converged result (`*_network_info.txt`
 
 
 
-## Perform AC Load Flow Analysis
+### Perform AC Load Flow Analysis
 
 1. Load a case (see above).
 2. Optionally open **AC Loadflow options** (gear next to **ACLF**) and save settings.
@@ -87,7 +95,7 @@ On success:
 
 On failure, the tab shows `✗ Load flow failed` with error and log output.
 
-### Result files
+#### Result files
 
 Results are written under `wspace/<case-parent>/result/`:
 
@@ -107,13 +115,13 @@ Results are written under `wspace/<case-parent>/result/`:
 
 
 
-## AC Loadflow Options
+### AC Loadflow Options
 
 Click the gear button next to **ACLF** (enabled after **Load**). The dialog title is **Run AC Loadflow**. Changes apply to later ACLF runs after you click **Save** (writes `config/aclf_run.json`).
 
 Three tabs:
 
-### Main
+#### Main
 
 - **Loadflow Method** — NR, PQ, or GS
 - **Coordinate** — Polar or XY
@@ -131,7 +139,7 @@ When Include Adjustments is on, you can toggle:
 
 
 
-### NR Config
+#### NR Config
 
 - **Optimize Algorithm**
 - **Variable Update Limit**, delta voltage angle/magnitude limits
@@ -139,7 +147,7 @@ When Include Adjustments is on, you can toggle:
 
 
 
-### Adj/Ctrl Setting
+#### Adj/Ctrl Setting
 
 Available only when **Include Adjustments/Controls** is checked. Groups:
 
@@ -154,13 +162,13 @@ Use **Close** to dismiss without saving, or **Save** to persist options.
 
 
 
-## Explore Results
+### Explore Results
 
 After a successful ACLF (or when prior results are shown), use **Explore result files**.
 
 Tables support sticky headers and infinite scroll (`Showing N of M rows` until all rows are loaded).
 
-### Bus Results
+#### Bus Results
 
 1. Click **Bus** to open the bus CSV table.
 2. Click a row to select a bus (shown as **Selected bus: …**).
@@ -169,15 +177,15 @@ Tables support sticky headers and infinite scroll (`Showing N of M rows` until a
 
 
 
-### Branch / Gen / Load Results
+#### Branch / Gen / Load Results
 
 Click **Branch**, **Gen**, or **Load** to view the corresponding CSV. Numeric columns are formatted for readability where applicable.
 
-### Contingency Results
+#### Contingency Results
 
 The **Contingency** explorer button appears after a successful **CA** run in the current session (see below). It opens the contingency result CSV.
 
-### Bus connection relationships
+#### Bus connection relationships
 
 From the bus table context menu (**Connection info**), or by navigating from Gen/Load bus IDs:
 
@@ -192,7 +200,7 @@ From the bus table context menu (**Connection info**), or by navigating from Gen
 
 
 
-## Perform Contingency Analysis
+### Perform Contingency Analysis
 
 1. Place companion JSON files in the **same directory** as the case file:
   - A file whose name contains `contingenc` (contingency list)
@@ -216,7 +224,7 @@ CA requires a loaded case. You can run CA after Load even if you have not clicke
 
 
 
-## Generate Reports
+### Generate Reports
 
 1. Ensure result CSVs exist (run **ACLF**, and **CA** if you need a NERC-style report).
 2. Click **Report** when it is enabled (the tab checks that result files are available).
@@ -238,6 +246,9 @@ In the report dialog:
 
 ---
 
+## InterPSS DSH Chat
+
+// TODO: Add user guide for InterPSS DSH Chat usage, based on interpss-tools.md
 
 
 ## Tips and troubleshooting
