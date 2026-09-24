@@ -25,7 +25,7 @@ function diag(line) {
 
 const NAMESPACE = 'interpss'
 const PACKAGE = '@deepseek-ai/dsh-interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase']
 
 function jsonParam(name, wire) {
   return { name, wire, source: 'json', codec: { mode: 'src-json' } }
@@ -344,6 +344,17 @@ async function resolveAclfConfigPath(ctx, root, caseInput) {
 // Resolve the case a chat tool should act on: explicit argument first, then the
 // case selected in the InterPSS tab, then the case the bridge already holds.
 // Returns { target, source } with target null when nothing is available.
+// A tool that loads — or switches to — a case makes it the session's current case, so
+// the tab's Simu Case picker and the next no-argument call agree with the bridge
+// instead of the case the tab happened to have selected. The Client mirrors the same
+// value through `getBridgeCase`, which is why this is recorded here as well.
+function adoptLoadedCase(sessionId, target) {
+  if (target === null || target === undefined || typeof target.input !== 'string') return
+  const current = selectedCaseFor(sessionId)
+  if (current !== null && current.input === target.input) return
+  rememberSelectedCase(sessionId, target.input, target.format)
+}
+
 function resolveToolCase(sessionId, requested) {
   if (typeof requested === 'string' && requested.trim() !== '') {
     const resolved = resolveCaseArgument(requested)
@@ -611,13 +622,34 @@ let jbApi = null
 // javaBridge provider, so the two cannot drift. Used by `caseInfo` to reuse a
 // loaded case (and preserve a converged AC load flow) instead of reloading.
 let lastLoadedAbs = null
+let lastLoadedBusCount = null
+let lastLoadedBranchCount = null
 
 // Update `lastLoadedAbs` from a bridge load result (JSON string, `{ok:true,…}`).
 function rememberLoadedCase(raw, absCase) {
   try {
     const parsed = JSON.parse(raw)
-    if (parsed && parsed.ok === true && typeof absCase === 'string' && absCase !== '') lastLoadedAbs = absCase
+    if (parsed && parsed.ok === true && typeof absCase === 'string' && absCase !== '') {
+      lastLoadedAbs = absCase
+      rememberLoadedCounts(parsed.busCount, parsed.branchCount)
+    }
   } catch (e) {}
+}
+
+// Equipment counts of the case the bridge holds. The tab prints them as its
+// "\u2713 Loaded: N buses, M branches" confirmation, so a load driven from chat needs the
+// Host to publish them alongside the case path — otherwise the tab can only say which
+// case arrived, not how big it is.
+function parseNetworkCounts(text) {
+  const value = String(text === null || text === undefined ? '' : text)
+  const bus = /Number of Active Buses:\s*(\d+)/.exec(value)
+  const branch = /Number of Active Branches:\s*(\d+)/.exec(value)
+  return { busCount: bus ? Number(bus[1]) : null, branchCount: branch ? Number(branch[1]) : null }
+}
+
+function rememberLoadedCounts(busCount, branchCount) {
+  if (typeof busCount === 'number' && Number.isFinite(busCount)) lastLoadedBusCount = busCount
+  if (typeof branchCount === 'number' && Number.isFinite(branchCount)) lastLoadedBranchCount = branchCount
 }
 
 async function ensureBridge(root) {
@@ -635,7 +667,11 @@ async function ensureBridge(root) {
       jbApi = jb
       // Classpath must be set before the JVM starts.
       jb.appendClasspath([root + '/target/ipss-agent-cmd-1.0.0-uber.jar'])
-      await jb.ensureJvm({ opts: ['-Xmx4g'] })
+      // Heap for the shared model: the largest case in this workspace (the Eastern
+      // Interconnect, 78k buses / 126k branches) needs more than the 4g this used to
+      // ask for. The JVM reads it only when it starts, so a change lands on the next
+      // `dsh web` restart.
+      await jb.ensureJvm({ opts: ['-Xmx8g'] })
       const BridgeClass = await jb.importClass('org.interpss.agent.bridge.IpssAgentBridge')
       return BridgeClass.newInstanceAsync()
     })().catch((e) => {
@@ -1191,6 +1227,17 @@ class InterpssService extends TypertRemoteService {
     }
   }
 
+  // The case the bridge currently holds, for the tab's Simu Case picker: a chat tool
+  // can load (or switch) the model while the tab still shows the case the user picked,
+  // and the two must not disagree. Answers from the Host's `lastLoadedAbs` mirror, so
+  // it costs nothing and never starts the JVM just to reply.
+  async getBridgeCase() {
+    const value = { ok: true, case: lastLoadedAbs === null ? '' : relativeCasePath(lastLoadedAbs) }
+    if (lastLoadedBusCount !== null) value.busCount = lastLoadedBusCount
+    if (lastLoadedBranchCount !== null) value.branchCount = lastLoadedBranchCount
+    return value
+  }
+
   async runReport(input) {
     const casePath = input && typeof input.input === 'string' ? input.input : ''
     if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
@@ -1495,10 +1542,10 @@ function caseLoadTool(ctx) {
             (typeof value.branchCount === 'number' ? value.branchCount : '?') + ' branches'
           const head = 'InterPSS case load \u2014 ' + String(value.case || '') +
             ' (source: ' + String(value.source || '') + ')'
-          return [{
-            type: 'text',
-            text: head + '\n' + (value.alreadyLoaded === true ? 'Already loaded' : 'Loaded') + ' (' + counts + ')',
-          }]
+          // Same confirmation the tab prints after a load, so the card and the tab agree:
+          // "\u2713 Loaded: N buses, M branches".
+          const status = value.alreadyLoaded === true ? '\u2713 Already loaded: ' : '\u2713 Loaded: '
+          return [{ type: 'text', text: head + '\n' + status + counts }]
         }
         return [{ type: 'text', text: 'InterPSS case load failed: ' + String((value && value.error) || 'unknown error') }]
       },
@@ -1543,6 +1590,7 @@ function caseLoadTool(ctx) {
         if (!parsed || parsed.ok !== true) {
           return fail(String((parsed && parsed.error) || 'bridge case load failed'), source)
         }
+        adoptLoadedCase(sessionId, target)
         const value = {
           ok: true,
           case: target.input,
@@ -1651,6 +1699,9 @@ function networkInfoTool(ctx) {
         if (!parsed || parsed.ok !== true) {
           return fail(String((parsed && parsed.error) || 'bridge caseInfo failed'), source)
         }
+        // `caseInfo` loads the case when the bridge does not already hold it, so this
+        // call can switch the session's current case too.
+        if (target !== null) adoptLoadedCase(sessionId, target)
         const value = {
           ok: true,
           case: target !== null ? target.input : relativeCasePath(parsed.input),
@@ -1779,6 +1830,7 @@ function runAclfTool(ctx) {
           return fail(String((parsed && parsed.error) || 'bridge runAclf failed'), source)
         }
         const info = typeof parsed.networkInfo === 'string' ? parsed.networkInfo : ''
+        adoptLoadedCase(sessionId, target)
         const value = {
           ok: true,
           case: target.input,
@@ -2258,6 +2310,7 @@ function runGvyTool(ctx) {
           }
           return value
         }
+        adoptLoadedCase(sessionId, target)
         const value = {
           ok: true,
           case: target.input,
@@ -2353,7 +2406,11 @@ export default {
         try {
           const parsed = JSON.parse(raw)
           if (parsed && typeof parsed === 'object') {
-            if (parsed.ok === true) lastLoadedAbs = absCase
+            if (parsed.ok === true) {
+              lastLoadedAbs = absCase
+              const counts = parseNetworkCounts(parsed.networkInfo)
+              rememberLoadedCounts(counts.busCount, counts.branchCount)
+            }
             parsed.stdout = cap.out()
             parsed.stderr = cap.err()
             raw = JSON.stringify(parsed)
@@ -2381,7 +2438,10 @@ export default {
         try {
           const parsed = JSON.parse(raw)
           if (parsed && typeof parsed === 'object') {
-            if (parsed.ok === true) lastLoadedAbs = absCase
+            if (parsed.ok === true) {
+              lastLoadedAbs = absCase
+              rememberLoadedCounts(parsed.buses, parsed.branches)
+            }
             parsed.stdout = cap.out()
             parsed.stderr = cap.err()
             raw = JSON.stringify(parsed)
@@ -2420,14 +2480,14 @@ export default {
         if (text === '') {
           return JSON.stringify({ ok: false, error: 'the InterPSS bridge returned no network information for ' + target })
         }
-        const bus = /Number of Active Buses:\s*(\d+)/.exec(text)
-        const branch = /Number of Active Branches:\s*(\d+)/.exec(text)
+        const counts = parseNetworkCounts(text)
+        rememberLoadedCounts(counts.busCount, counts.branchCount)
         return JSON.stringify({
           ok: true,
           input: target,
           reused: reused,
-          busCount: bus ? Number(bus[1]) : null,
-          branchCount: branch ? Number(branch[1]) : null,
+          busCount: counts.busCount,
+          branchCount: counts.branchCount,
           lfConverged: /Loadflow converged:\s*true/i.test(text),
           networkInfo: text,
         })

@@ -94,6 +94,17 @@ selected case has not been loaded yet. It deliberately does **not** return the n
 that is `interpss_network_info`'s job — and it does not change the tab's **Load** button, which
 always re-parses by design.
 
+**Loading also moves the tab (0.3.19/0.3.22).** A tool that loads — or switches to — a case records it
+as the session's current case (`adoptLoadedCase()`), and the Client mirrors the bridge's case into the
+tab's **Simu Case** picker through the `interpss/getBridgeCase` RPC (polled while the tab is mounted,
+plus on window focus). So after a chat call loads Texas 2K, the picker shows *Texas 2K-bus* (or the
+custom-path row for a case with no preset) and the next no-argument tool call resolves to that case
+rather than to whatever the tab had selected. The RPC carries the case's bus/branch counts too, so the
+tab also prints its `✓ Loaded: N buses, M branches` indicator and refills its network-info panel —
+exactly what its own **Load** button does. Since switching views unmounts the tab, its first poll after
+a remount re-shows that indicator whenever the picker's case is the loaded one (0.3.23), so the
+confirmation survives moving between Chat and the tab.
+
 Failure payloads are the same shape as the other tools, and reuse their messages for the workspace
 gate, a missing bridge and an unrecognized selector. The one message specific to this tool is
 reached when nothing is selected and nothing is held:
@@ -343,21 +354,24 @@ Report button keeps that auto-selection.
 | Capability | InterPSS tab | Chat tool | Underlying RPC / service |
 | --- | --- | --- | --- |
 | Load the selected case | Load button (always re-parses) | `interpss_case_load` (reuses when held) | `interpss/loadCase`, `javaBridge.caseInfo` |
+| Show the case the bridge holds | Simu Case picker (mirrors it, 0.3.19) | — | `interpss/getBridgeCase` |
 | Case totals / top-N ranking | — (the tab has no equivalent) | `interpss_case_summary` | `interpss/summarizeResult` |
 | Network info | Network info panel | `interpss_network_info` | `interpss/getNetworkInfo`, `javaBridge.caseInfo` |
 | Run ACLF | ACLF button | `interpss_run_aclf` | `interpss/runAclf` |
 | Browse results | Bus/Branch/Gen/Load tabs | card's Explore row | `interpss/readCsv` |
 | Generate report | Report button | card's Report button | `interpss/runReport` |
 
-The tools add **no** `/api` endpoint. `METHODS` gains only the CA-dialog methods
-(`listCaFiles`, `getCaOptions`, `saveCaOptions`, 17 in total), which no tool calls.
+The tools add **no** `/api` endpoint of their own. `METHODS` had gained only the CA-dialog methods
+(`listCaFiles`, `getCaOptions`, `saveCaOptions`); 0.3.19 adds `getBridgeCase`, which the tab's picker
+polls and no tool calls — 18 in total.
 The one Host RPC signature that grew is `runReport`, which now accepts an optional
 `reportType` (`aclf` | `nerc`) that takes precedence over the contingency-based auto rule.
 
 The bridge's `lastLoadedAbs` mirrors `IpssAgentBridge.loadedInput` and is updated by
-`loadCase`, `runAclf` and `runContingency` — every JVM load goes through this module's
+`loadCase`, `runAclf`, `runGvy` and `runContingency` — every JVM load goes through this module's
 `javaBridge` provider, so the mirror cannot drift in practice. It backs the `bridge` source in
-case resolution and `reused` in `caseInfo`.
+case resolution, `reused` in `caseInfo`, and (0.3.19) the `case` that `getBridgeCase` hands the
+tab's picker.
 
 ## Related skills
 
@@ -409,6 +423,11 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.3.12 | The `net` totals card goes the same way: no `interpss_case_summary` call renders anything (the chat report is the summary) |
 | 0.3.17 | `interpss_run_gvy`: apply a Groovy `.gvy` script from the case folder's `scripts/` directory to the held case, with a before/after digest and captured script stdout (Java: `GvyScriptRunner` + `IpssAgentBridge.runGvy`, Groovy 4.0.x added to the uber JAR) |
 | 0.3.18 | Every `case` / `script` selector also accepts the `wspace/data/…` (and `./wspace/data/…`) spelling a session shows, not just `data/…` |
+| 0.3.19 | The tab's Simu Case picker mirrors the case the bridge holds (`interpss/getBridgeCase`, polled + on focus), and a tool that loads a case adopts it as the session's current case, so picker, selection and model agree |
+| 0.3.20 | The bridge JVM starts with `-Xmx8g` instead of `-Xmx4g`, so the 78k-bus Eastern Interconnect case fits |
+| 0.3.21 | The load card prints the tab's confirmation line, `✓ Loaded: N buses, M branches` (`✓ Already loaded: …` for a no-op) |
+| 0.3.22 | `getBridgeCase` also carries the held case's bus/branch counts, so the tab prints its `✓ Loaded: N buses, M branches` indicator and refills the network-info panel for a load driven from chat |
+| 0.3.23 | Switching between the Chat view and the InterPSS tab restores that indicator: the view's first poll re-shows `✓ Loaded: …` whenever the picker already points at the loaded case, instead of blanking on remount |
 
 ## Troubleshooting
 
@@ -417,6 +436,7 @@ objects) so a card can render without re-deriving paths from the result text.
 | Tool missing from the registry | Check `$TMPDIR/dsh-interpss-diagnostic.log` for `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary, interpss_run_gvy` and `tools=true`; a row that applied without the `tools` service logs the `NOT registered` line instead |
 | Summary absent from a card | The card needs 0.3.4+ (network info) or 0.3.2+ (ACLF). Older cards fall back to the generic row, collapsed by default |
 | `alreadyLoaded: true` when a reload was wanted | The tool reuses the held model by design; the tab's **Load** button is the way to force a re-parse |
+| The picker shows a different case than the tools use | Fixed in 0.3.19: the picker mirrors the bridge through `getBridgeCase`. On an older plugin, reload the page after a tool load — or pass `case` explicitly |
 | `interpss_case_summary` returns no rows | `scope: "net"` is the totals-only mode; pass `bus`, `gen`, `load` or `branch` for rows |
 | The summary card is missing entirely | By design since 0.3.12 (ranked scopes since 0.3.11) — no `interpss_case_summary` call renders a card; its value is in the tool result, and the chat report repeats it |
 | A ranked summary card shows no counts/mismatch | By design since 0.3.8 — the totals are on the `net` call |
@@ -429,7 +449,9 @@ objects) so a card can render without re-deriving paths from the result text.
 | A branch change had no effect | `branch.status = false` drops the digest's `branches` count immediately (20 → 19 on IEEE 14), so that count is the check — a script whose status line is missing changes nothing there, and the result CSV's `Status` column stays `true` |
 | `noSuchProperty` / `MissingMethodException` from a script | The failure names the property and the script line; check the JavaBean names in `docs/groovy-script-adapter-architecture.md` |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
+| Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx8g` (0.3.20+; `-Xmx4g` before); the CLI is a separate JVM and needs its own `-Xmx` flag. See `Setup.md` |
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |
+| `Cannot find module 'java-bridge-<platform>'` | The profile lockfile lost java-bridge's optional native package (a `pnpm remove` of the plugin can do this). In `~/.dsh/profiles/web`: `cp pnpm-lock.yaml /tmp/pnpm-lock.web.bak && rm -f pnpm-lock.yaml && pnpm install`, verify `node -e "require.resolve('java-bridge-darwin-arm64')"`, then restart `dsh web` — a failed module load cannot recover inside the running process |
 | `no simulation case is selected` | Select a case in the InterPSS tab, or pass `case` explicitly |
 | Wrong case used | Trust `source`: `selection` is the tab, `bridge` is the last case the JVM held — pass `case` to be explicit |
 | `Converged: false` | Tune `maxIterations` / `tolerance` / limit-control flags in the case-folder `aclf_run.json`; report the mismatch bus rather than retrying unchanged |

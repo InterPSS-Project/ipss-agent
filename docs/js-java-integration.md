@@ -26,7 +26,7 @@ Embed a JVM inside the Node (Cordis Host) process. Node calls Java like local fu
 
 ### Library basics
 
-1. **Start JVM** — `ensureJvm` (e.g. `-Xmx4g` for large RAW cases). In packaged Electron hosts, set `isPackagedElectron: true` and unpack `java-bridge` native binaries from asar.
+1. **Start JVM** — `ensureJvm` (e.g. `-Xmx8g` for large RAW cases). In packaged Electron hosts, set `isPackagedElectron: true` and unpack `java-bridge` native binaries from asar.
 2. **Classpath** — `appendClasspath` with the same layout Host uses today, **or** the Uber JAR from `IpssCmd.md` (`target/ipss-agent-cmd-*-uber.jar`). Prefer one documented layout; expand `lib/deps/*.jar` explicitly if wildcards are unsupported.
 3. **Call style** — every Java method gets Sync (`fooSync`) and async (`foo`). **Host must use async** for load/run so the Cordis event loop is not blocked.
 4. **Exceptions** — Java exceptions surface as JS `Error` with `cause`.
@@ -116,7 +116,7 @@ dependency, install into the DSH profile, restart) is scripted:
 ```js
 const { ensureJvm, appendClasspath, importClass } = require('java-bridge')
 
-await ensureJvm({ opts: ['-Xmx4g'] /* , isPackagedElectron: true if needed */ })
+await ensureJvm({ opts: ['-Xmx8g'] /* , isPackagedElectron: true if needed */ })
 appendClasspath([
   root + '/target/ipss-agent-cmd-1.0.0-uber.jar',
 ])

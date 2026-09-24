@@ -373,6 +373,13 @@ Follow-on report artifacts use the Codex skills `$nerc-report-html` and
 slash commands `/nerc-report-html` and `/nerc-report-slides` point at the same
 skills.
 
+**Bridge heap.** The plugin starts the embedded JVM with `-Xmx8g` (plugin 0.3.20+;
+`-Xmx4g` before that), which is what the largest case here needs — the Eastern
+Interconnect RAW is 78 478 buses / 126 015 branches. The JVM reads the flag only when
+it starts, so changing it takes a `dsh web` restart, and any case held in memory is lost
+with that restart. The CLI (`java -jar target/ipss-agent-cmd-1.0.0-uber.jar …`) is a
+separate JVM: give it its own `-Xmx` flag when running a very large case by hand.
+
 ### Quick Verification
 
 From the project root, these commands should show the registered skill files:

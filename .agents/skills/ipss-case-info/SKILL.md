@@ -117,4 +117,4 @@ Both fallbacks read a *stored* summary, so state clearly that the values come fr
 | `no simulation case is loaded in the InterPSS bridge` | Select a case in the InterPSS tab, or pass `case` explicitly |
 | `unrecognized case selector` | Use a `data/…` path, an absolute path containing `/wspace/data/`, or one of the three preset labels |
 | Wrong case reported | Trust `source`: `selection` is the tab, `bridge` is the last case the JVM held — pass `case` to be explicit |
-| Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx4g`; see `Setup.md` for heap guidance |
+| Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx8g` (4g before plugin 0.3.20); see `Setup.md` for heap guidance |

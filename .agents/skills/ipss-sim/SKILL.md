@@ -184,4 +184,4 @@ Pass the same `…/result` path to report generators in Steps 3–4.
 | NR does not converge | Raise `maxIterations` / adjust `tolerance` in `aclf_run.json` |
 | Missing uber JAR | Run `./mvnw -q clean package` |
 | Report generator can't find CSVs | Pass correct `result_dir` relative to `wspace/` |
-| OutOfMemoryError on large cases | Add heap flag: `java -Xmx4g -jar ../target/ipss-agent-cmd-1.0.0-uber.jar …` |
+| OutOfMemoryError on large cases | Add heap flag: `java -Xmx8g -jar ../target/ipss-agent-cmd-1.0.0-uber.jar …` |

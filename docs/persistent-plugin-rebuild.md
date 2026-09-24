@@ -158,21 +158,40 @@ disk.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.3.17 → 0.3.18
+# bump version first, e.g. 0.3.19 → 0.3.20
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.3.18.tgz
+rm -f deepseek-ai-dsh-interpss-0.3.20.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.3.18.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.3.20.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
-# reinstall
+# reinstall — a NEW version only needs `add`; do not `pnpm remove` first
 cd /Users/mzhou/.dsh/profiles/web
-pnpm remove @deepseek-ai/dsh-interpss
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.18.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.20.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
+```
+
+**Never `pnpm remove` as a routine step.** It rewrites the profile lockfile, and in
+0.3.19 that rewrite dropped `java-bridge`'s optional native package for this platform
+(`java-bridge-darwin-arm64`) — the next `dsh web` restart then failed every bridge call
+with `Cannot find module 'java-bridge-darwin-arm64'`, and no in-process retry can
+recover, because a failed module load is latched for the life of the process. Reach for
+`remove` only when a *same-version* repack must be relinked, and repair the lockfile
+afterwards:
+
+```bash
+# is the native bridge package resolvable? (name = java-bridge-<platform>)
+cd /Users/mzhou/.dsh/profiles/web
+node -e "console.log(require.resolve('java-bridge-darwin-arm64'))"
+
+# repair: regenerate the lockfile, keeping a backup, then restart dsh web
+cp pnpm-lock.yaml /tmp/pnpm-lock.web.bak
+rm -f pnpm-lock.yaml
+pnpm install
+node -e "console.log(require.resolve('java-bridge-darwin-arm64'))"
 ```
 
 ## 4. Post-restart verification

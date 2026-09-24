@@ -155,4 +155,4 @@ The run **overwrites** that case's `*_DF_*.csv` and `*_network_info.txt`. Any pr
 | `unrecognized case selector` | Use a `data/…` path, an absolute path containing `/wspace/data/`, or one of the three preset labels |
 | `Converged: false` | Tune `maxIterations` / `tolerance` / limit-control flags in the case-folder `aclf_run.json`; report the mismatch bus rather than retrying unchanged |
 | Wrong case solved | Trust `source`: `selection` is the tab, `bridge` is the last case the JVM held — pass `case` to be explicit |
-| Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx4g`; see `Setup.md` for heap guidance |
+| Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx8g` (4g before plugin 0.3.20); see `Setup.md` for heap guidance |

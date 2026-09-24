@@ -61,6 +61,12 @@ A large case (PSS/E 2K-bus and up) takes seconds to parse; the call is otherwise
 
 - The case becomes the bridge's **base case**: the object `interpss_network_info`,
   `interpss_run_aclf`, `interpss_run_gvy` and `interpss_case_summary` all read.
+- It also becomes the session's **current case** (plugin 0.3.19+): the tab's **Simu Case** picker
+  follows it through the `getBridgeCase` RPC, the tab prints its `✓ Loaded: N buses, M branches`
+  indicator and refills its network-info panel (0.3.22+, and it survives switching between the Chat
+  view and the tab, 0.3.23+), and the next no-argument tool call resolves
+  to it instead of the case the tab had selected. Before 0.3.19 the picker kept showing the old case —
+  pass `case` explicitly on every call when in doubt.
 - It is a **no-op** (`alreadyLoaded: true`) when the bridge already holds that exact path — so
   calling it repeatedly is safe, and it will *not* reset anything.
 - Loading **a different case replaces the held model**. A converged load flow and any
@@ -129,7 +135,7 @@ CLI invocation re-parses the case.
 | A solved state or a script edit vanished | Another case was loaded (by this tool or the tab), which replaced the held model; re-apply the edit and re-solve |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |
-| Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx4g`; see `Setup.md` for heap guidance |
+| Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx8g` (4g before plugin 0.3.20); see `Setup.md` for heap guidance |
 
 ## Related
 

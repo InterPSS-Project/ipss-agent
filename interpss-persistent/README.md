@@ -59,7 +59,7 @@ iPSS Agent workspace activation check.
 
 | Tool | Purpose |
 | --- | --- |
-| `interpss_case_load` | Load the selected simulation case into the embedded bridge. No-op (`alreadyLoaded: true`) when the bridge already holds it; call it before the other tools. |
+| `interpss_case_load` | Load the selected simulation case into the embedded bridge. No-op (`alreadyLoaded: true`) when the bridge already holds it; call it before the other tools. A load also moves the session's current case, the tab's Simu Case picker and its `✓ Loaded: N buses, M branches` indicator mirror it (0.3.19/0.3.22), and its card prints the same line (0.3.21). |
 | `interpss_network_info` | Show the InterPSS network information (active buses and branches, total generation and load, load-flow convergence, max mismatch) of a simulation case. |
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
