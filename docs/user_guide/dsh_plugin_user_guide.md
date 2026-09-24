@@ -12,14 +12,14 @@ The InterPSS DSH Plugin adds an **InterPSS** tab to the DeepSeek Harness web GUI
 
 ![InterPSS DSH Plugin](../image/ipss-dsh-plugin.png)
 
-For natural-language runs in the Chat tab (`/ipss-sim` and related skills), see the [repository README](../README.md). This guide covers the InterPSS tab UI only.
+For natural-language runs in the Chat tab (`/ipss-sim` and related skills), see the [repository README](../../README.md). This guide covers the InterPSS tab UI only.
 
 ### Prerequisites
 
-- DeepSeek Harness with the InterPSS plugin installed — see [InstallDSHPlugin.md](../InstallDSHPlugin.md)
+- DeepSeek Harness with the InterPSS plugin installed — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 - An **iPSS Agent** workspace with:
   - **Java JDK 21** on `PATH`
-  - Built CLI: `target/ipss-agent-cmd-1.0.0-uber.jar` (`./mvnw -q clean package`; see [Setup.md](../Setup.md))
+  - Built CLI: `target/ipss-agent-cmd-1.0.0-uber.jar` (`./mvnw -q clean package`; see [Setup.md](../../Setup.md))
   - Case files under `wspace/data/**`
   - ACLF options file: `config/aclf_run.json`
 
@@ -258,7 +258,7 @@ In the report dialog:
 
 ### Related (outside this tab)
 
-- Chat / `/ipss-sim` skill — [README](../README.md)
+- Chat / `/ipss-sim` skill — [README](../../README.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)
-- Install or update the plugin — [InstallDSHPlugin.md](../InstallDSHPlugin.md)
+- Install or update the plugin — [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 

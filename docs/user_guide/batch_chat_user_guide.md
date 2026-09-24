@@ -1,4 +1,4 @@
-# iPSS Agent Chat User Guide
+# iPSS Agent Chat (Batch) User Guide
 
 The iPSS Agent supports natrual language chat that allows you to run power-system simulations and generate reports.
 
@@ -39,7 +39,7 @@ Claude Code: use the prompts above, or the slash commands `/nerc-report-html` an
 
 ### Direct prompt simulation
 
-Natural-language equivalents of the Java CLI (see [IpssCmd.md](IpssCmd.md)):
+Natural-language equivalents of the Java CLI (see [IpssCmd.md](../../IpssCmd.md)):
 
 ```text
 Run aclf psse <case_file>
