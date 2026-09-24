@@ -1,5 +1,5 @@
 return {
-  inject: ['slots'],
+  inject: ['slots', 'timer'],
   apply(ctx) {
     const callRemote = (method, input) => host.call('interpss/' + method, input || {}).then((value) => value)
     const PRESETS = [
@@ -11,6 +11,25 @@ return {
     let lastSelection = { mode: '0', customFormat: 'ieee', customInput: '' }
     let checkSeq = 0
     let reportSeq = 0
+    // The bridge-held case this tab has already mirrored into its picker. A chat tool
+    // can load another case while the tab shows one the user picked, so the picker
+    // follows the bridge — but only when the bridge case *changes*, which leaves a
+    // deliberate, not-yet-loaded picker choice alone.
+    let bridgeCaseSeen = ''
+
+    // Which picker state shows a case path: a preset index, or the custom-path row
+    // (PSS/E for .raw, IEEE CDF otherwise). Pure, so the sync effect stays a one-liner.
+    function bridgeCaseSelection(input) {
+      const index = PRESETS.findIndex((p) => p.input === input)
+      if (index >= 0) {
+        return { mode: String(index), customInput: '', customFormat: PRESETS[index].format }
+      }
+      return {
+        mode: 'custom',
+        customInput: input,
+        customFormat: /\.raw$/i.test(input) ? 'psse' : 'ieee',
+      }
+    }
 
     // Editable fields of the AC Loadflow Option dialog, keyed by the real
     // config/aclf_run.json property names. The value's JS type drives the form
@@ -542,6 +561,102 @@ return {
         }
         onCaseChanged(input)
       }, [])
+
+      // Mirror the case the Host holds into the picker. A chat call to
+      // interpss_case_load (or any tool that loads one) switches the model, and the tab
+      // must not keep showing another case as "the current simulation case". Polled
+      // because the Host cannot push into this view; `getBridgeCase` answers from the
+      // Host's mirror, so it does not start the JVM just to reply.
+      React.useEffect(() => {
+        let alive = true
+        // Switching between the Chat view and this tab unmounts and remounts the view,
+        // which drops `caseLoaded`/`caseLoadedInfo`. The first answer therefore always
+        // restores the confirmation when the picker already points at the loaded case —
+        // otherwise the "✓ Loaded: …" line would vanish every time the user comes back.
+        let first = true
+        const sync = () => {
+          callRemote('getBridgeCase', { sessionId }).then(
+            (res) => {
+              if (!alive || res === null || res === undefined || res.ok !== true) return
+              const input = typeof res.case === 'string' ? res.case : ''
+              if (input === '') return
+              if (first) {
+                first = false
+                if (input === selectionInput()) {
+                  bridgeCaseSeen = input
+                  showLoaded(input, res)
+                  return
+                }
+                // A different case: follow it only when this view has not already shown
+                // it, so a deliberate pick the user has not loaded yet survives a switch.
+                if (input === bridgeCaseSeen) return
+                bridgeCaseSeen = input
+                adoptBridgeCase(input, res)
+                return
+              }
+              if (input === bridgeCaseSeen) return
+              bridgeCaseSeen = input
+              if (input === selectionInput()) {
+                // Same case, but a Host load may still have published fresh counts: show
+                // the confirmation rather than leaving the picker silent.
+                showLoaded(input, res)
+                return
+              }
+              adoptBridgeCase(input, res)
+            },
+            () => {},
+          )
+        }
+        sync()
+        // A dynamic Client half has no setInterval/window: the Cordis timer service owns
+        // the repeat and its disposer is returned from this effect. The persistent
+        // bundle's window-focus refresh has no equivalent here, so the poll is the only
+        // trigger.
+        const stopPolling = ctx.timer.interval(sync, 4000)
+        return () => {
+          alive = false
+          stopPolling()
+        }
+      }, [])
+
+      // The case the picker currently points at, read from the module-level selection
+      // so the effect's closure never sees stale component state.
+      function selectionInput() {
+        if (lastSelection.mode === 'custom') return lastSelection.customInput.trim()
+        const p = PRESETS[Number(lastSelection.mode)]
+        return p ? p.input : ''
+      }
+
+      // Show a Host-loaded case: select its preset when one matches, otherwise the
+      // custom-path row, and let onCaseChanged record the selection Host-side (which is
+      // also what makes the next no-argument tool call resolve to this case).
+      function adoptBridgeCase(input, info) {
+        const selection = bridgeCaseSelection(input)
+        lastSelection.mode = selection.mode
+        lastSelection.customInput = selection.customInput === '' ? lastSelection.customInput : selection.customInput
+        lastSelection.customFormat = selection.customFormat
+        setMode(selection.mode)
+        setCustomFormat(selection.customFormat)
+        if (selection.mode === 'custom') setCustomInput(input)
+        onCaseChanged(input)
+        showLoaded(input, info)
+      }
+
+      // The tab's own Load button prints "✓ Loaded: N buses, M branches" and fills the
+      // network-info panel. A load driven from chat must look the same, so mirror both
+      // here — after onCaseChanged(), which clears these states.
+      function showLoaded(input, info) {
+        const counts = info === null || info === undefined ? {} : info
+        setCaseLoading(false)
+        setCaseLoadError(null)
+        setCaseLoaded(true)
+        setCaseLoadedInfo((counts.busCount != null ? counts.busCount : '?') + ' buses, ' +
+          (counts.branchCount != null ? counts.branchCount : '?') + ' branches')
+        callRemote('getNetworkInfo', { sessionId }).then(
+          (res) => { if (res && res.ok && res.networkInfo) setCaseNetworkInfo(res.networkInfo) },
+          () => {},
+        )
+      }
 
       const [mode, setMode] = React.useState(lastSelection.mode)
       const [customFormat, setCustomFormat] = React.useState(lastSelection.customFormat)

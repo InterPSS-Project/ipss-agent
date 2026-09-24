@@ -5,7 +5,7 @@ plugin** (`interpss-dynamic/`) so both deliver identical behavior/UI.
 
 ## 1. Client (rebuild `lib/client.js` from `interpss-dynamic/client-body.js`)
 
-Wrap the dynamic body in the persistent module loader, with two substitutions:
+Wrap the dynamic body in the persistent module loader, with three substitutions:
 
 1. `return { inject: ['slots'], apply(ctx) { … } }` → `module.exports = { … }`
 2. Transport swap (`host.call` → `/api` Typert):
@@ -35,6 +35,16 @@ window.__ModuleLoader__.load({
   }});
 ```
 
+3. **Timers and globals.** A dynamic Client half gets only `ctx`, `React`, `host`,
+   `styles` and `console` — no `setInterval`, `clearInterval` or `window`. The
+   bridge-case mirroring effect therefore uses the Cordis timer service
+   (`inject: ['slots', 'timer']` with `ctx.timer.interval(sync, 4000)`, whose
+   disposer is returned from the effect) and has no window-focus refresh. The
+   persistent browser bundle uses `setInterval(sync, 4000)` plus
+   `window.addEventListener('focus', …)` and keeps that version. This is the one
+   deliberate divergence between the two tab bodies; everything else stays
+   byte-identical, so a rebuild must re-apply it.
+
 Mechanically, only the **tab body** changes between rebuilds: splice the dynamic
 file's region from `    const PRESETS = [` up to (excluding) its
 `    const slots = ctx.get('slots')` into the persistent file between the
@@ -52,11 +62,18 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
 
 - `inject: ['typert']` on the default export (else `apply()` runs before the
   typert registry and `/api` endpoints silently 404)
-- `METHODS` matches the dynamic list (17): `isActivated, checkResult,
+- `METHODS` matches the dynamic list (18): `isActivated, checkResult,
   checkResultFiles, listCases, readCsv, busConnections, runAclf, runCa,
   runReport, getAclfOptions, saveAclfOptions, listCaFiles, getCaOptions,
-  saveCaOptions, loadCase, summarizeResult, getNetworkInfo`
+  saveCaOptions, loadCase, summarizeResult, getNetworkInfo, getBridgeCase`
 - `readCsv` whitelist includes `contingency`: `_DF_(bus|branch|gen|load|contingency)\.csv`
+- **`getBridgeCase`**: the persistent Host answers from its module-level
+  `lastLoadedAbs` / `lastLoadedBusCount` / `lastLoadedBranchCount` mirror. A
+  dynamic Host has no such mirror, so it delegates to
+  `javaBridge.caseInfo('ieee', '')` and converts the absolute path back with its
+  `relativeCasePath()` helper (anchored on `/wspace/data/`). Both return
+  `{ ok, case, busCount?, branchCount? }` with `case` wspace-relative, and neither
+  boots the JVM merely to answer
 - **CA run config** (since 0.3.16): the case-folder `ca_run.json` is resolved by
   `resolveCaRunConfig(ctx, root, parent, explicit)` — explicit dialog payload →
   case file → per-case filename discovery — and its `custom` entries become the
@@ -158,19 +175,19 @@ disk.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.3.19 → 0.3.20
+# bump version first, e.g. 0.3.23 → 0.4.0
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.3.20.tgz
+rm -f deepseek-ai-dsh-interpss-0.4.0.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.3.20.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.4.0.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall — a NEW version only needs `add`; do not `pnpm remove` first
 cd /Users/mzhou/.dsh/profiles/web
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.3.20.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.4.0.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 
@@ -203,9 +220,17 @@ served with the plugin bundle, so the reload is what picks it up):
   SHA-256 matches `lib/client.js`
 - `POST /api/interpss/<method>` with
   `{"type":"client-request","rpcId":"x","method":"interpss/<method>","payload":{"args":{"input":{}}}}`:
-  - `isActivated`, `listCases`, `getAclfOptions`, `listCaFiles`, `getCaOptions`, `runCa`, `getNetworkInfo` → `200`, `ok:true`
+  - `isActivated`, `listCases`, `getAclfOptions`, `listCaFiles`, `getCaOptions`, `runCa`, `getNetworkInfo`, `getBridgeCase` → `200`, `ok:true`
   - unknown method → `404` (proves only registered endpoints respond)
 - Composition row present: `dsh --profile web --dump-config` → `- id: interpss`
+- **Bridge-case mirroring**: with no simulation case loaded, `getBridgeCase`
+  answers `{ ok: true, case: '' }` (never an error). Load a case from chat with
+  `interpss_case_load`, then switch back to the InterPSS tab: the *Simu Case*
+  picker moves to that case (preset or custom row) and shows
+  `✓ Loaded: N buses, M branches` within one poll interval, without pressing Load.
+  A deliberate, not-yet-loaded picker choice survives a tab switch — the
+  regression symptom is a picker that silently reverts or a "✓ Loaded" line that
+  disappears every time the view remounts
 - **CA dialog** (since 0.3.16): with the Texas 2K case selected and no
   `ca_run.json`, pressing **CA** opens *Run Contingency Analysis* pre-filled with
   `2k_contingencies_115kVAbove.json` (2359) and `2k_monitored_branches.json`

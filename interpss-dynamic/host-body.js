@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -138,6 +138,15 @@ return {
       const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
       const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
       return { parent: parent, stem: stem }
+    }
+
+    // Absolute bridge path -> wspace-relative data/... path, anchored on the unique
+    // "/wspace/data/" marker so a home directory that itself contains "wspace"
+    // cannot shift the result.
+    function relativeCasePath(absPath) {
+      const marker = '/wspace/data/'
+      const i = String(absPath).indexOf(marker)
+      return i >= 0 ? 'data/' + String(absPath).slice(i + marker.length) : String(absPath)
     }
 
     // Case-specific aclf_run.json wins (same folder as the case), then the
@@ -829,6 +838,28 @@ return {
         }
       },
 
+      // The case the bridge currently holds, for the tab's Simu Case picker: a chat
+      // tool can load (or switch) the model while the tab still shows the case the
+      // user picked, and the two must not disagree. The persistent Host answers this
+      // from its own `lastLoadedAbs` mirror; a dynamic Host has no such mirror, so it
+      // asks the javaBridge provider, whose caseInfo() answers from the same mirror
+      // and never boots the JVM just to reply.
+      async getBridgeCase(args) {
+        if (javaBridge === undefined || typeof javaBridge.caseInfo !== 'function') {
+          return { ok: false, error: 'in-process bridge unavailable (install the persistent InterPSS plugin)' }
+        }
+        try {
+          const parsed = JSON.parse(await javaBridge.caseInfo('ieee', ''))
+          if (parsed === null || parsed.ok !== true) return { ok: true, case: '' }
+          const value = { ok: true, case: relativeCasePath(parsed.input) }
+          if (parsed.busCount !== null && parsed.busCount !== undefined) value.busCount = parsed.busCount
+          if (parsed.branchCount !== null && parsed.branchCount !== undefined) value.branchCount = parsed.branchCount
+          return value
+        } catch (e) {
+          return { ok: false, error: 'bridge getBridgeCase failed: ' + (e && e.message ? e.message : String(e)) }
+        }
+      },
+
       async runReport(args) {
         const casePath = args && typeof args.input === 'string' ? args.input : ''
         if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
@@ -846,17 +877,22 @@ return {
         let displayName = args && typeof args.displayName === 'string' && args.displayName.trim() !== '' ? args.displayName.trim() : stem
         displayName = String(displayName).replace(/[\r\n\t'"]/g, ' ').trim()
 
-        // NERC when a contingency CSV is present, otherwise AC Loadflow report.
+        // An explicit `reportType` ("aclf" | "nerc") wins; otherwise NERC when a
+        // contingency CSV is present, else the AC Loadflow report.
         const fs = ctx.get('fs')
-        let hasContingency = false
-        if (fs !== undefined) {
-          try {
-            const target = await fs.resolve(root + '/wspace/' + resultDir + '/' + stem + '_DF_contingency.csv')
-            hasContingency = (await fs.stat(target)) !== undefined
-          } catch (e) {}
+        const requestedType = args && typeof args.reportType === 'string' ? args.reportType.trim().toLowerCase() : ''
+        let reportType = requestedType === 'aclf' || requestedType === 'nerc' ? requestedType : ''
+        if (reportType === '') {
+          let hasContingency = false
+          if (fs !== undefined) {
+            try {
+              const target = await fs.resolve(root + '/wspace/' + resultDir + '/' + stem + '_DF_contingency.csv')
+              hasContingency = (await fs.stat(target)) !== undefined
+            } catch (e) {}
+          }
+          reportType = hasContingency ? 'nerc' : 'aclf'
         }
-        const reportType = hasContingency ? 'nerc' : 'aclf'
-        const reportFile = hasContingency ? 'NERC_TPL_001_5_Report.md' : 'AC_Loadflow_Report.md'
+        const reportFile = reportType === 'nerc' ? 'NERC_TPL_001_5_Report.md' : 'AC_Loadflow_Report.md'
 
         // In-process bridge path (preferred): no JVM spawn, cached network.
         if (javaBridge !== undefined && typeof javaBridge.runReport === 'function') {
