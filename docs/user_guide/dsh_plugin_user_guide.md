@@ -14,7 +14,7 @@ The InterPSS DSH Plugin adds an **InterPSS** tab to the DeepSeek Harness GUI. Us
 
 You can also use natural-language runs in the Chat tab to interact with the current in-memory simulation case.
 
-![InterPSS DSH Plugin](../image/ipss-dsh-chat.png)
+![InterPSS DSH Chat](../image/ipss-dsh-chat.png)
 
 For natural-language runs against the **in-memory** case (Chat tools), see [InterPSS DSH Chat](#interpss-dsh-chat) below. For batch CLI-style runs (`/ipss-sim`), see the [batch chat user guide](batch_chat_user_guide.md).
 
@@ -55,7 +55,7 @@ The InterPSS tab only enables its tools when the workspace `README.md` first `#`
 
 ### Load a simulation case
 
-InterPSS DSH Plugin uses an In-Memory Computing (IMC) approach. When a simulation case is loaded, the loaded InterPSS simulation model will stay in memory, available for the simulation runs until another simulation case is loaded or the DSH runtime is shutdown. Therefore, ACLF and CA buttons stay disabled until a case is loaded into the simulation model.
+InterPSS DSH Plugin uses an In-Memory Computing (IMC) approach. When a simulation case is loaded, the loaded InterPSS simulation model will stay in memory, available for the simulation runs until another simulation case is loaded or the DSH runtime is shutdown. Therefore, ACLF and CA buttons stay disabled until a case is loaded into the simulation model. The same in-memory model is what DSH Chat tools use; a Chat load also updates this tab’s **Simu Case** picker and Loaded indicator (plugin 0.3.19+).
 
 1. Choose a case from **Simu Case**:
   - **IEEE 118-bus** — `data/ieee/Ieee118Bus/ieee118.ieee`
@@ -117,7 +117,13 @@ Results are written under `wspace/<case-parent>/result/`:
 
 ### AC Loadflow Options
 
-Click the gear button next to **ACLF** (enabled after **Load**). The dialog title is **Run AC Loadflow**. Changes apply to later ACLF runs after you click **Save** (writes `config/aclf_run.json`).
+Click the gear button next to **ACLF** (enabled after **Load**). The dialog title is **Run AC Loadflow**. Changes apply to later ACLF runs after you click **Save**.
+
+**Where options are stored:**
+
+- **Save** writes the case-folder file `wspace/<case-parent>/aclf_run.json` (same folder as the case file).
+- ACLF runs prefer that case-folder file when it exists; otherwise they use the project default `config/aclf_run.json`.
+- Chat ACLF (`interpss_run_aclf`) uses the same two-tier rule.
 
 Three tabs:
 
@@ -202,21 +208,38 @@ From the bus table context menu (**Connection info**), or by navigating from Gen
 
 ### Perform Contingency Analysis
 
-1. Place companion JSON files in the **same directory** as the case file:
-  - A file whose name contains `contingenc` (contingency list)
-  - A file whose name contains `monitor` (monitored branches)
-2. **Load** the case.
-3. Click **CA** (title: “Run DC contingency analysis”).
+1. **Load** the case.
+2. Click **CA**. This opens the **Run Contingency Analysis** dialog (it does not start the run immediately).
+
+#### Run Contingency Analysis dialog
+
+The dialog has two sections. Each can use a built-in default or a user-defined `.json` from the case folder:
+
+| Section | Default | Custom |
+| --- | --- | --- |
+| **Define Contingency Branches** | Consider all N-1 contingencies | User-defined contingency — pick a `.json` with a `contingencies` array |
+| **Define Monitored Branches** | Monitor all branches | Monitor selected branches — pick a `.json` with a `monitored_branches` array |
+
+For a custom pick:
+
+- Click the search icon next to the custom radio, then choose a `.json` in the case folder.
+- A green line shows the entry count (for example `User-defined contingencies: 2359 (…json)`).
+- Invalid or missing shape shows a red error; **OK** stays blocked until custom picks are valid.
+
+**Starting values:** if the case folder already has `ca_run.json`, the dialog loads it. Otherwise it suggests companion files by name (filenames containing `contingenc` / `monitor`) when present.
+
+| Button | Effect |
+| --- | --- |
+| **OK** | Saves `wspace/<case-parent>/ca_run.json`, closes the dialog, and runs CA |
+| **Cancel** / ✕ | Closes without writing or running |
+
+`ca_run.json` is the same file the Java CLI reads for CA, so GUI and batch runs stay aligned.
 
 On success:
 
 - `✓ Contingency analysis complete`
 - Contingency result file name (typically `<stem>_DF_contingency.csv`)
 - A **Contingency** button to open that CSV in the explorer
-
-If the companion JSONs are missing, the host returns an error such as:
-
-> Contingency analysis requires contingency and monitored-branches JSON files in case-dir.
 
 CA requires a loaded case. You can run CA after Load even if you have not clicked **ACLF** in this session; contingency CSV exploration for the new CA run appears once CA succeeds.
 
@@ -251,6 +274,8 @@ In the report dialog:
 The Chat tab can drive the same in-memory simulation case as the InterPSS tab. The DSH plugin registers model **tools** so the agent can load a selected InterPSS case, show network info, run ACLF, summarize results, and apply Groovy what-if scripts — without leaving the conversation.
 
 Chat and the InterPSS tab share one embedded bridge: a case loaded (or solved) in either place stays in memory until another case is loaded or the DSH runtime shuts down.
+
+**Tab stays in sync with Chat loads (plugin 0.3.19+).** When a Chat tool loads or switches cases, the InterPSS tab’s **Simu Case** picker follows that case, shows `✓ Loaded: N buses, M branches`, and refills the network-info panel — the same confirmation as the tab’s own **Load** button. Switching between Chat and the tab keeps that indicator (0.3.23+).
 
 For the full tool contract (inputs, cards, version history), see [interpss-tools.md](../interpss-tools.md). For batch runs through the Java CLI (`/ipss-sim`), see the [batch chat user guide](batch_chat_user_guide.md).
 
@@ -288,6 +313,8 @@ You can name a case as:
 | Path with `wspace/` prefix | `wspace/data/ieee/Ieee14Bus/ieee14.ieee` |
 | Preset label | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
 
+`interpss_case_load` is a **no-op** (`alreadyLoaded: true`) when the bridge already holds that exact case — it does not re-parse. To force a re-parse of the same case, use the tab’s **Load** button (or `reload: true` on a script run).
+
 ### Typical workflows
 
 #### Load → network info → ACLF
@@ -297,7 +324,7 @@ Load IEEE 118-bus and show network info
 Run ACLF on the selected case
 ```
 
-After a successful ACLF in Chat, the tool card can show **Explore results** (Bus / Branch / Gen / Load) and a **Report** button for the AC Loadflow Markdown report — similar to the InterPSS tab explorers.
+After a successful ACLF in Chat, the tool card can show **Explore results** (Bus / Branch / Gen / Load) and a **Report** button for the AC Loadflow Markdown report — similar to the InterPSS tab explorers. That Chat **Report** always generates the AC Loadflow report (`reportType: aclf`), even if a contingency CSV also exists; use the InterPSS tab **Report** button when you want the contingency-based auto pick (NERC vs ACLF).
 
 #### Summary and rankings
 
@@ -311,6 +338,7 @@ Notes:
 
 - Summary reads the **in-memory** model. For solved values, run ACLF first.
 - Branch ranking is by flow **magnitude**, not rating loading. For `Loading%`, ask about the branch result CSV (or use the tab explorer).
+- Successful summary calls show **no tool card** by design — the agent’s chat reply is the summary.
 
 #### What-if with a Groovy script
 
@@ -324,6 +352,7 @@ Important:
 
 - Edits are **not** rolled back. To reset, ask to reload the case (`reload: true` on the script tool) or load another case and come back.
 - Running the same relative change twice applies it twice unless the script sets absolute values.
+- Loading a **different** case replaces the held model — any prior ACLF solution or script edits on the old case are gone.
 - Only run scripts you trust.
 
 ### Chat vs InterPSS tab vs batch Chat
@@ -331,9 +360,9 @@ Important:
 | | InterPSS tab | DSH Chat (this section) | Batch Chat (`/ipss-sim`) |
 | --- | --- | --- | --- |
 | Model | In-memory bridge | Same in-memory bridge | Separate Java CLI process |
-| Load | **Load** always re-parses | Tools reuse the held case when possible | Fresh process per run |
-| ACLF / explorers / report | Buttons and dialogs | Tools + ACLF card | CLI writes files under `result/` |
-| Contingency (CA) / NERC | **CA** + **Report** | Not via Chat tools today — use the tab or `/ipss-sim` | Full ACLF + CA + NERC workflow |
+| Load | **Load** always re-parses | Tools reuse the held case when possible; picker mirrors the bridge | Fresh process per run |
+| ACLF / explorers / report | Buttons and dialogs | Tools + ACLF card (ACLF report only) | CLI writes files under `result/` |
+| Contingency (CA) / NERC | **CA** dialog + **Report** | Not via Chat tools today — use the tab or `/ipss-sim` | Full ACLF + CA + NERC workflow |
 | What-if scripts | — | `interpss_run_gvy` / `$ipss-case-script` | Edit case files or use CLI workflows |
 
 ### Tips
@@ -342,6 +371,7 @@ Important:
 - ACLF options still come from the case-folder `aclf_run.json` when present, otherwise `config/aclf_run.json` (same as the tab gear dialog).
 - Large PSS/E cases (for example Texas 2K) can take minutes in Chat ACLF — wait for the tool card to settle.
 - If a tool says the bridge is unavailable, rebuild the uber JAR and restart `dsh web` (see [Setup.md](../../Setup.md) / `scripts/setup-java-bridge.sh`).
+- Very large cases need enough JVM heap; the plugin bridge uses `-Xmx8g` (0.3.20+).
 
 
 ## Tips and troubleshooting
@@ -352,10 +382,12 @@ Important:
 | “InterPSS is not available in this workspace…” | Workspace `README.md` first H1 must be exactly `iPSS Agent`.                                                        |
 | **ACLF** / **CA** greyed out                   | Click **Load** successfully first.                                                                                  |
 | Case picker empty                              | No matching `.ieee` or `.raw`/`.RAW` under `wspace/data` for the selected format.                                   |
-| CA fails with JSON message                     | Add contingency and monitored-branch JSON files in the case directory (name must contain `contingenc` / `monitor`). |
+| CA dialog custom pick errors                   | Pick a case-folder `.json` with a `contingencies` or `monitored_branches` array; check the green count / red error line. |
+| Tab picker shows a different case than Chat    | Update the plugin to 0.3.19+ (picker mirrors the bridge), or pass `case` explicitly in Chat.                        |
 | **Report** greyed out                          | No converged result CSVs yet — run ACLF (and CA for NERC).                                                          |
 | Gear disabled                                  | Load a case first.                                                                                                  |
 | Adj/Ctrl Setting tab disabled                  | Enable **Include Adjustments/Controls** on the Main options tab.                                                    |
+| Chat load did not re-parse the same case       | Expected — use the tab **Load** button to force a re-parse.                                                         |
 
 
 
