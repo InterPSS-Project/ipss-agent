@@ -16,9 +16,10 @@ Reference implementation: `interpss-persistent/lib/index.js` (Host) and
 | `interpss_network_info` | Show the network information of a simulation case | Loads the case into the embedded JVM when it is not already held |
 | `interpss_run_aclf` | Run an AC load flow (ACLF) and report convergence | Writes `<stem>_DF_{bus,branch,gen,load}.csv` and `<stem>_network_info.txt` under `wspace/<case dir>/result/` |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals, or a top-N ranking by scope | None — reads the in-memory model |
+| `interpss_run_ca` | DC contingency analysis (N-1 screening) with the CA dialog bypassed, and report the overload summary | Writes `<stem>_DF_contingency.csv` under `wspace/<case dir>/result/` |
 | `interpss_run_gvy` | Apply a Groovy (`.gvy`) scenario script from the case folder's `scripts/` directory to the bridge-held case | Mutates the held model in place (no rollback); `reload: true` re-parses the case first |
 
-All five are registered once at the end of `apply()` and are **global to the host process**;
+All six are registered once at the end of `apply()` and are **global to the host process**;
 every call is gated on the iPSS Agent workspace check, so a non-`iPSS Agent` workspace gets an
 explicit failure message rather than a missing tool.
 
@@ -146,7 +147,7 @@ Behaviour:
 
 - Reuses the model already loaded in the bridge (no re-parse), otherwise loads the case first;
   the solve itself always runs.
-- Solver options come from the **case-folder** `aclf_run.json` when present, otherwise
+- Solver options come from the case-folder `config/aclf_run.json` when present, otherwise
   `config/aclf_run.json` — the same two-tier rule as `ProjectPaths`, shared with the tab's
   `runAclf` RPC through `resolveAclfConfigPath()`.
 - Writes `<stem>_DF_bus.csv`, `<stem>_DF_branch.csv`, `<stem>_DF_gen.csv`,
@@ -171,6 +172,57 @@ Behaviour:
   balance, so the tool and the report disagreed.)
 - Large cases (PSS/E 2K-bus and up) can take minutes (the settle pass adds at most one more
   solve, and only on a case that needs it).
+
+## `interpss_run_ca`
+
+| | |
+| --- | --- |
+| Input | `{ case?: string, contingencyFile?: string, monitorFile?: string }` — all optional |
+| Output | `{ ok, case, source, format, resultDir, contingencyCsv, contingencyFile?, monitoredBranchFile?, threshold?, contingencies?, monitoredBranches?, overloads?, caSummary, error? }` |
+| `presentationMeta` | `{ ok, case, source, resultDir, contingencyCsv }` |
+| Card key | `interpss_run_ca` (0.4.1+; its **Explore result → Contingency** row since 0.4.2) |
+
+A DC contingency analysis driven entirely from chat — **the Contingency Analysis dialog is not
+involved and nothing is prompted for**. It calls the same `javaBridge.runContingency()` the tab's
+dialog uses, so the result file is identical; the tool simply resolves the inputs itself:
+
+1. the `contingencyFile` / `monitorFile` argument;
+2. the case folder's `config/ca_run.json` (what the dialog would have saved);
+3. the case-folder discovery heuristic (first `*contingenc*.json`, first `*monitor*.json`);
+4. the Java defaults — N-1 outages on every branch not connected to the reference bus, every branch
+   monitored, 90 % overload threshold.
+
+| Argument form | Resolves to |
+| --- | --- |
+| `2k_contingencies_115kVAbove.json` | `wspace/<case dir>/2k_contingencies_115kVAbove.json` |
+| `data/psse/Texas2K/x.json` | that path under `wspace/` (the `wspace/` and `./wspace/` prefixes are stripped) |
+| an absolute path containing `/wspace/data/` | the same file, converted to the `data/…` form |
+
+A non-`.json` file, a `..` segment, a path outside `wspace/` or a file that does not exist is rejected
+before the bridge is called.
+
+`render()` prints the threshold, the contingency / monitored-branch / overload counts, the inputs
+actually used (`all N-1 outages` / `all branches monitored` when the defaults applied) and the CSV
+path. `caSummary` carries the runner's raw `ContAnalysisSummary` text for cross-checking.
+
+Behaviour and caveats:
+
+- The runner solves its **own DC load flow**, so the case only has to be loaded — not solved — and a
+  prior `interpss_run_aclf` does not change the result. It is screening, not an AC assessment.
+- It **overwrites** `<stem>_DF_contingency.csv`; a NERC report built from the previous file becomes
+  stale.
+- Large cases take minutes (Texas 2K is ~3200 N-1 outages at 3220 monitored branches).
+- The CSV columns are `BranchID, BranchName, BranchCode, IsXfmr, ContingencyName, OutageBranchId,
+  OutageBranchName, BasecaseFlowMW, PostFlowMW, LineRatingMW, LoadingPercent` — one row per
+  (monitored branch, contingency) pair above the threshold.
+
+The card carries an **Explore result** row with a single **Contingency** button, paging the
+contingency CSV through the same `interpss/readCsv` endpoint the tab's Contingency tab uses (100 rows
+per page, next page auto-loaded on scroll). The table opens **sorted by `LoadingPercent`, worst first**, and any
+column header is clickable to sort by it (a second click flips the direction) — `readCsv` sorts the
+whole file before slicing a page, so the order holds across paging. It reuses the ACLF card's panel with one scope and no
+**Report** button — generating the NERC TPL-001-5 report stays a separate step, since that report
+needs the ACLF CSVs too.
 
 ## `interpss_case_summary`
 
@@ -278,7 +330,7 @@ interpss_run_aclf()          # solves the edited case and rewrites the result CS
 
 ## Tool cards
 
-Five cards are registered in the session-scoped `tool.call.toolview` slot, keyed by the wire
+Six cards are registered in the session-scoped `tool.call.toolview` slot, keyed by the wire
 tool name:
 
 ```js
@@ -302,12 +354,16 @@ slots.inject('tool.call.toolview', () => slots.register(
   { name: 'tool.call.toolview', key: 'interpss_run_gvy' },
   (props) => React.createElement(RunGvyCard, { block: props && props.block }),
 ))
+slots.inject('tool.call.toolview', () => slots.register(
+  { name: 'tool.call.toolview', key: 'interpss_run_ca' },
+  (props) => React.createElement(RunCaCard, { block: props && props.block }),
+))
 ```
 
 The short-result tools share one implementation: `toolTextCard(label)` returns a hook-free
 component that renders the settled text directly (or a title line while running), and
-`NetworkInfoCard` / `CaseLoadCard` / `CaseSummaryCard` / `RunGvyCard` are that factory bound to
-their labels. Only the ACLF card needs hooks, because it fetches rows.
+`NetworkInfoCard` / `CaseLoadCard` / `CaseSummaryCard` / `RunGvyCard` / `RunCaCard` are that
+factory bound to their labels. Only the ACLF card needs hooks, because it fetches rows.
 
 `CaseSummaryRow` wraps `CaseSummaryCard` with one gate: **every settled, successful** summary block
 returns `null`, so nothing is shown for any scope. Because a keyed `toolview` replaces the whole tool
@@ -358,6 +414,7 @@ Report button keeps that auto-selection.
 | Case totals / top-N ranking | — (the tab has no equivalent) | `interpss_case_summary` | `interpss/summarizeResult` |
 | Network info | Network info panel | `interpss_network_info` | `interpss/getNetworkInfo`, `javaBridge.caseInfo` |
 | Run ACLF | ACLF button | `interpss_run_aclf` | `interpss/runAclf` |
+| Run DC contingency analysis | CA dialog (or bypassed) | `interpss_run_ca` (dialog-free) | `interpss/runCa`, `javaBridge.runContingency` |
 | Browse results | Bus/Branch/Gen/Load tabs | card's Explore row | `interpss/readCsv` |
 | Generate report | Report button | card's Report button | `interpss/runReport` |
 
@@ -381,6 +438,7 @@ tab's picker.
 | `ipss-case-info` | Report the current case's network info (wraps `interpss_network_info`) |
 | `ipss-case-aclf` | Run ACLF for the current case (wraps `interpss_run_aclf`) |
 | `ipss-case-script` | Apply a `.gvy` scenario script to the current case (wraps `interpss_run_gvy`) |
+| `ipss-case-ca` | DC contingency analysis for the current case, dialog-free (wraps `interpss_run_ca`) |
 | `ipss-sim` | Full simulation and reporting workflow through the Java CLI (`IpssCmd`) |
 | `nerc-report-html`, `nerc-report-slides` | Follow-on artifacts from a NERC report |
 
@@ -428,6 +486,10 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.3.21 | The load card prints the tab's confirmation line, `✓ Loaded: N buses, M branches` (`✓ Already loaded: …` for a no-op) |
 | 0.3.22 | `getBridgeCase` also carries the held case's bus/branch counts, so the tab prints its `✓ Loaded: N buses, M branches` indicator and refills the network-info panel for a load driven from chat |
 | 0.3.23 | Switching between the Chat view and the InterPSS tab restores that indicator: the view's first poll re-shows `✓ Loaded: …` whenever the picker already points at the loaded case, instead of blanking on remount |
+| 0.4.2 | The CA card gains an **Explore result → Contingency** row (the ACLF explorer panel parameterized: one scope, no Report button, its own labels) |
+| 0.4.3 | Explorer tables sort: `readCsv` takes `sortColumn`/`sortDesc` and sorts the whole file before paging, headers are clickable with a ▲/▼ marker, and the CA table opens worst-`LoadingPercent`-first |
+| 0.4.4 | The tab's result tables sort too: `renderCsvTable`/`renderBusTable` gain clickable headers (▲/▼) and the tab's **Contingency** table opens worst-`LoadingPercent`-first, paging and all |
+| 0.4.1 | `interpss_run_ca`: DC contingency analysis from chat with the CA dialog bypassed (explicit inputs → `ca_run.json` → case-folder discovery → N-1 defaults), plus its card and the `ipss-case-ca` skill |
 | 0.4.0 | Version-only release: the first 0.4.x, carrying 0.3.17–0.3.23 unchanged (the `interpss_run_gvy` tool and its skill, the `ipss-case-load` skill, `wspace/…` selector spellings, the Simu Case picker + `✓ Loaded:` sync, `-Xmx8g`, and the load card's confirmation line) |
 
 ## Troubleshooting
@@ -450,10 +512,15 @@ objects) so a card can render without re-deriving paths from the result text.
 | A branch change had no effect | `branch.status = false` drops the digest's `branches` count immediately (20 → 19 on IEEE 14), so that count is the check — a script whose status line is missing changes nothing there, and the result CSV's `Status` column stays `true` |
 | `noSuchProperty` / `MissingMethodException` from a script | The failure names the property and the script line; check the JavaBean names in `docs/groovy-script-adapter-architecture.md` |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
+| `contingencyFile not found` / `monitorFile not found` | The CA argument is wrong or the file is not under `wspace/`; omit it to fall back to `config/ca_run.json`, discovery and the Java N-1 defaults |
+| `interpss_run_ca` reports zero overloads | Expected on a lightly loaded case — the default threshold is 90 % of rating; check `threshold` and the monitored set |
+| The tab's Contingency table is not sorted | Needs 0.4.4+: the tab reads through the same `readCsv` sort, and its Contingency table defaults to `LoadingPercent` descending; Bus/Branch/Gen/Load keep file order |
+| A sorted explorer table reorders only some rows | Fixed in 0.4.3: the Host sorts before slicing the page, so paging follows the order; a column it cannot find returns the file order and no sort marker |
+| The CA card shows no **Explore result** row | The row needs 0.4.2+ and a settled, successful call; a failed or still-running call, or a replayed older block, falls back to the plain text card |
 | Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx8g` (0.3.20+; `-Xmx4g` before); the CLI is a separate JVM and needs its own `-Xmx` flag. See `Setup.md` |
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |
 | `Cannot find module 'java-bridge-<platform>'` | The profile lockfile lost java-bridge's optional native package (a `pnpm remove` of the plugin can do this). In `~/.dsh/profiles/web`: `cp pnpm-lock.yaml /tmp/pnpm-lock.web.bak && rm -f pnpm-lock.yaml && pnpm install`, verify `node -e "require.resolve('java-bridge-darwin-arm64')"`, then restart `dsh web` — a failed module load cannot recover inside the running process |
 | `no simulation case is selected` | Select a case in the InterPSS tab, or pass `case` explicitly |
 | Wrong case used | Trust `source`: `selection` is the tab, `bridge` is the last case the JVM held — pass `case` to be explicit |
-| `Converged: false` | Tune `maxIterations` / `tolerance` / limit-control flags in the case-folder `aclf_run.json`; report the mismatch bus rather than retrying unchanged |
+| `Converged: false` | Tune `maxIterations` / `tolerance` / limit-control flags in the case-folder `config/aclf_run.json`; report the mismatch bus rather than retrying unchanged |
 | A change to `lib/client.js` has no effect | The Client half is served with the plugin bundle: reinstall the package, restart `dsh web`, then hard-reload the page |

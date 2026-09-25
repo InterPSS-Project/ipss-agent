@@ -202,7 +202,7 @@ class ContingencyRunnerTest {
         assertThat(summary.numMonitored()).isEqualTo(3);
     }
 
-    /** Write the case-folder {@code ca_run.json}; a null file key leaves the mode at {@code all}. */
+    /** Write the case {@code config/ca_run.json}; a null file key leaves the mode at {@code all}. */
     private void writeCaRunConfig(String contingencyFile, String monitoredBranchFile) throws Exception {
         writeCaRunConfig(contingencyFile, monitoredBranchFile,
                 contingencyFile == null ? "all" : "custom",
@@ -212,6 +212,7 @@ class ContingencyRunnerTest {
     private void writeCaRunConfig(String contingencyFile, String monitoredBranchFile,
             String contingencyMode, String monitorMode) throws Exception {
         Path config = paths.caseCaRunConfig(AgentTestSupport.IEEE14_INPUT);
+        Files.createDirectories(config.getParent());
         StringBuilder json = new StringBuilder("{\n");
         json.append("  \"contingencyMode\": \"").append(contingencyMode).append("\",\n");
         json.append("  \"contingencyFile\": ").append(quote(contingencyFile)).append(",\n");

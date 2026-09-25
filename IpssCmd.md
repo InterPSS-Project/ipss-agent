@@ -49,7 +49,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf psse data/psse/Texas2K/Te
 
 For ACLF, `IpssCmd` resolves `aclf_run.json` with a two-tier lookup:
 
-1. **Case-specific (preferred):** `wspace/<input_parent>/aclf_run.json` if it exists.
+1. **Case-specific (preferred):** `wspace/<input_parent>/config/aclf_run.json` if it exists.
 2. **Project default (fallback):** `config/aclf_run.json` at the project root.
 
 It loads the file with `AclfRunConfigRec.loadAclfRunConfig` and applies it with
@@ -62,7 +62,7 @@ Both contingency inputs are optional. `IpssCmd` resolves each of them
 independently, most specific first:
 
 1. **Explicit CLI argument** — `cont_file` / `monitor_file`; must exist.
-2. **Case `ca_run.json`** — `wspace/<input_parent>/ca_run.json`, for whichever
+2. **Case `ca_run.json`** — `wspace/<input_parent>/config/ca_run.json`, for whichever
    section it selects with `custom`. The line `Using ca_run.json: ...` on stderr
    shows the file it read. A named file that does not exist is an error.
 3. **Built-in defaults** — all N-1 branch outages, every branch monitored.

@@ -167,7 +167,7 @@ public final class ContingencyRunner {
 
     /**
      * Resolve the contingency/monitor files for a run. Explicit CLI arguments
-     * win and must exist; otherwise the case-folder {@code ca_run.json} supplies
+     * win and must exist; otherwise the case {@code config/ca_run.json} supplies
      * the {@code custom} entries; otherwise both are null and the built-in
      * defaults apply (N-1 outages, all branches monitored). The GUI tab writes
      * the same file, so both entry points agree.

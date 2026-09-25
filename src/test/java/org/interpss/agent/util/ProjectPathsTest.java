@@ -51,7 +51,7 @@ class ProjectPathsTest {
 
         Path config = paths.resolveAclfRunConfig(AgentTestSupport.IEEE14_INPUT);
         assertThat(config).isRegularFile();
-        assertThat(config.toString()).contains("data/ieee/Ieee14Bus/aclf_run.json");
+        assertThat(config.toString()).contains("data/ieee/Ieee14Bus/config/aclf_run.json");
     }
 
     @Test
@@ -69,7 +69,7 @@ class ProjectPathsTest {
 
         Path config = paths.caseCaRunConfig(AgentTestSupport.IEEE14_INPUT);
 
-        assertThat(config.toString()).endsWith("data/ieee/Ieee14Bus/ca_run.json");
+        assertThat(config.toString()).endsWith("data/ieee/Ieee14Bus/config/ca_run.json");
         assertThat(config).doesNotExist();
     }
 
@@ -79,7 +79,7 @@ class ProjectPathsTest {
 
         Path config = paths.caseCaRunConfig("ieee14.ieee");
 
-        assertThat(config).isEqualTo(paths.wspaceDir().resolve("ca_run.json"));
+        assertThat(config).isEqualTo(paths.wspaceDir().resolve("config").resolve("ca_run.json"));
     }
 
     @Test

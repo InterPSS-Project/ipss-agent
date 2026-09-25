@@ -74,7 +74,7 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   `relativeCasePath()` helper (anchored on `/wspace/data/`). Both return
   `{ ok, case, busCount?, branchCount? }` with `case` wspace-relative, and neither
   boots the JVM merely to answer
-- **CA run config** (since 0.3.16): the case-folder `ca_run.json` is resolved by
+- **CA run config** (since 0.3.16): the case-folder `config/ca_run.json` is resolved by
   `resolveCaRunConfig(ctx, root, parent, explicit)` — explicit dialog payload →
   case file → per-case filename discovery — and its `custom` entries become the
   absolute `contPath` / `monitorPath` the bridge already takes
@@ -109,7 +109,7 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   (argument → tab selection → bridge-held `lastLoadedAbs`); `casePartsOf()` and
   `resolveAclfConfigPath()` are also shared with the service, so the tools and
   the `/api` RPCs cannot drift. `runAclfTool` passes the case-folder
-  `aclf_run.json` (else `config/aclf_run.json`) and
+  `config/aclf_run.json` (else project `config/aclf_run.json`) and
   `wspace/<case dir>/result` to the bridge, and reports non-convergence as
   `ok: true, converged: false`
 - **ACLF result explorer** (Client half): `runAclfTool.output.presentationMeta`
@@ -232,18 +232,19 @@ served with the plugin bundle, so the reload is what picks it up):
   regression symptom is a picker that silently reverts or a "✓ Loaded" line that
   disappears every time the view remounts
 - **CA dialog** (since 0.3.16): with the Texas 2K case selected and no
-  `ca_run.json`, pressing **CA** opens *Run Contingency Analysis* pre-filled with
+  `config/ca_run.json`, pressing **CA** opens *Run Contingency Analysis* pre-filled with
   `2k_contingencies_115kVAbove.json` (2359) and `2k_monitored_branches.json`
   (1308) and their green count lines. **OK** writes
-  `wspace/data/psse/Texas2K/ca_run.json` (four keys), closes the dialog, runs CA
+  `wspace/data/psse/Texas2K/config/ca_run.json` (four keys), closes the dialog, runs CA
   (the CA info tab shows the summary) and rewrites `*_DF_contingency.csv`;
   **Cancel** writes nothing and runs nothing. Deleting the file and reopening the
   dialog reproduces the discovery defaults — the regression symptom is an empty
   or `all`/`all` dialog for a case that has companion JSON files.
 - **Chat tools**: the tool registry lists `interpss_case_load`,
-  `interpss_network_info`, `interpss_run_aclf`, `interpss_case_summary` and `interpss_run_gvy`, and the
+  `interpss_network_info`, `interpss_run_aclf`, `interpss_case_summary`, `interpss_run_gvy` and
+  `interpss_run_ca`, and the
   plugin's `$TMPDIR/dsh-interpss-diagnostic.log` contains
-  `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary, interpss_run_gvy`
+  `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary, interpss_run_gvy, interpss_run_ca`
   and `tools=true`. In an iPSS Agent workspace:
   - a chat call with no argument returns the case selected in the InterPSS tab
     (result `source: selection`) — select a case **without** pressing Load first

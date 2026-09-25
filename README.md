@@ -68,6 +68,7 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 | Interactive HTML dashboards               | `[.agents/skills/nerc-report-html/SKILL.md](.agents/skills/nerc-report-html/SKILL.md)`     |
 | NERC slide decks                          | `[.agents/skills/nerc-report-slides/SKILL.md](.agents/skills/nerc-report-slides/SKILL.md)` |
 | Load a simulation case into the bridge    | [.agents/skills/ipss-case-load/SKILL.md](.agents/skills/ipss-case-load/SKILL.md)           |
+| Run DC contingency analysis for the current case | [.agents/skills/ipss-case-ca/SKILL.md](.agents/skills/ipss-case-ca/SKILL.md)             |
 | Current case network info                 | [.agents/skills/ipss-case-info/SKILL.md](.agents/skills/ipss-case-info/SKILL.md)           |
 | Run ACLF for the current case             | [.agents/skills/ipss-case-aclf/SKILL.md](.agents/skills/ipss-case-aclf/SKILL.md)           |
 | Summary report for the current case       | [.agents/skills/ipss-case-summary/SKILL.md](.agents/skills/ipss-case-summary/SKILL.md)     |

@@ -9,8 +9,8 @@ import com.google.gson.Gson;
 
 /**
  * The per-case contingency-analysis run configuration, persisted as
- * {@code ca_run.json} beside the case file (the same location as
- * {@code aclf_run.json}).
+ * {@code config/ca_run.json} under the case folder (the same directory as
+ * {@code config/aclf_run.json}).
  * <p>
  * Both files are wspace-relative paths, matching the CLI's positional
  * {@code cont_file} / {@code monitor_file} arguments:

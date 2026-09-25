@@ -184,7 +184,7 @@ artifacts).
 `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For
 ACLF, `IpssCmd` resolves the file with a **two-tier lookup**:
 
-1. **Case-specific (preferred):** `<input_parent>/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/aclf_run.json` for input under that folder).
+1. **Case-specific (preferred):** `<input_parent>/config/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/config/aclf_run.json` for input under that folder).
 2. **Project default (fallback):** `config/aclf_run.json` at the project root.
 
 The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied
@@ -196,8 +196,8 @@ Edit the JSON to tune convergence or solver behavior.
 
 `ca_run.json` (also written by the InterPSS tab's **CA** dialog) selects the
 contingency and monitored-branch inputs for DC contingency analysis. It lives
-beside the case file — `wspace/<input_parent>/ca_run.json` — next to that case's
-`aclf_run.json`. There is no project-level default, because contingency lists are
+under the case folder — `wspace/<input_parent>/config/ca_run.json` — next to that
+case's `aclf_run.json`. There is no project-level default, because contingency lists are
 case-specific; `IpssCmd` resolves each section independently:
 
 1. **Explicit CLI argument** — `cont_file` / `monitor_file`.

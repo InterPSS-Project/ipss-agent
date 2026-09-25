@@ -166,7 +166,7 @@ GvyScriptRunner.runOnNet(net, <case dir>/scripts/<name>.gvy)
 
 **ACLF config resolution** (two-tier, printed as `Using config file: …`):
 
-1. Case-specific: `wspace/<input_parent>/aclf_run.json`
+1. Case-specific: `wspace/<input_parent>/config/aclf_run.json`
 2. Project default: `config/aclf_run.json`
 
 ### Step 3 — Contingency analysis (CA, optional)
@@ -186,7 +186,7 @@ branch and every branch monitored.
 `Using ca_run.json: …`), per section and most specific first:
 
 1. Explicit CLI argument: `cont_file` / `monitor_file`
-2. Case-specific: `wspace/<input_parent>/ca_run.json` (the `custom` entry)
+2. Case-specific: `wspace/<input_parent>/config/ca_run.json` (the `custom` entry)
 3. Built-in default: N-1 contingencies / monitor every branch
 
 There is no project-level default — contingency lists are case-specific. The
@@ -348,7 +348,7 @@ Loaded by `AclfRunConfigRec` in `AclfRunner.runOnNet()`. Controls:
 
 Editable from the DSH GUI via `getAclfOptions` / `saveAclfOptions`.
 
-### `wspace/<input_parent>/ca_run.json`
+### `wspace/<input_parent>/config/ca_run.json`
 
 Per-case contingency-analysis run settings, persisting what the tab's **CA**
 dialog collects and what `ContingencyRunner.resolveInputs` reads for the CLI.
@@ -460,7 +460,7 @@ Used at runtime by agent code:
 3. **CSV-driven reports** — Markdown generators analyze exported DataFrames; they never re-run load flow.
 4. **Agent skills as orchestration** — LLM skills shell out to the CLI; they do not embed simulation logic.
 5. **JSON bridge boundary** — Node/DSH code never traverses Java EMF objects; only paths and JSON cross the boundary.
-6. **Case-specific overrides** — per-case `aclf_run.json` and `ca_run.json` under `<input_parent>/` override project and built-in defaults.
+6. **Case-specific overrides** — per-case `aclf_run.json` and `ca_run.json` under `<input_parent>/config/` override project and built-in defaults.
 7. **Settled results** — a load flow that converges before its last adjustment is re-solved
    (`AclfRunner.settle()`), and every artifact reports `net.maxMismatch(NR)`, so the returned CSVs,
    the network info and the tools can never describe a state the model does not satisfy.

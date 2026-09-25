@@ -114,7 +114,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf psse data/psse/Texas2K/Te
 
 **ACLF config lookup** (printed as `Using config file: …`):
 
-1. Case-specific: `<input_parent>/aclf_run.json` (preferred)
+1. Case-specific: `<input_parent>/config/aclf_run.json` (preferred)
 2. Project default: `config/aclf_run.json`
 
 Tune NR method, `maxIterations`, tolerance, and limit controls in either JSON.
@@ -125,7 +125,7 @@ The contingency and monitored-branch JSON paths are optional (explicit or
 auto-discovered). `IpssCmd` resolves each section independently:
 
 1. Explicit CLI argument (the positional paths below)
-2. Case `ca_run.json` at `<input_parent>/ca_run.json` (written by the InterPSS
+2. Case `ca_run.json` at `<input_parent>/config/ca_run.json` (written by the InterPSS
    tab's **CA** dialog) — its `custom` entry
 3. Built-in defaults: all N-1 branch outages, every branch monitored
 

@@ -50,7 +50,7 @@ Pass `case` only to solve a different case than the selected one.
 ### What the run does
 
 - Reuses the model already loaded in the embedded bridge (no re-parse); otherwise loads the case first.
-- Solves with the **case-folder** `aclf_run.json` when present, otherwise the project default `config/aclf_run.json` — the same two-tier rule as `ProjectPaths`. Tune `lfMethod`, `maxIterations`, tolerance and limit controls there.
+- Solves with the case-folder `config/aclf_run.json` when present, otherwise the project default `config/aclf_run.json` — the same two-tier rule as `ProjectPaths`. Tune `lfMethod`, `maxIterations`, tolerance and limit controls there.
 - Writes, under `wspace/<case dir>/result/`:
 
 | File | Content |
@@ -95,7 +95,7 @@ Max Mismatch: dPmax :  0.00001 at Bus : Bus104,     dQmax :  0.00005 at Bus : Bu
 | `Max Mismatch` | Largest P/Q mismatch and its bus, in pu on the 100 MVA base; the residual on a converged run (typically ≤ 1e-5), the failure magnitude otherwise. The runner re-solves when a converged run still violates a bus balance — a switched-shunt step or a PV→PQ conversion applied after the last NR iteration — so a settled run reports the residual of the state it actually returns |
 | `Results:` | `wspace/<case dir>/result/`, where the five files were written |
 
-On non-convergence, do not re-run the identical call and do not report the case as solved. Report the mismatch and the bus, then either read the network info for context or tune the solver options in the case's `aclf_run.json` before trying again.
+On non-convergence, do not re-run the identical call and do not report the case as solved. Report the mismatch and the bus, then either read the network info for context or tune the solver options in the case's `config/aclf_run.json` before trying again.
 
 ### Result explorer on the card
 
@@ -153,6 +153,6 @@ The run **overwrites** that case's `*_DF_*.csv` and `*_network_info.txt`. Any pr
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |
 | `no simulation case is selected` | Select a case in the InterPSS tab, or pass `case` explicitly |
 | `unrecognized case selector` | Use a `data/…` path, an absolute path containing `/wspace/data/`, or one of the three preset labels |
-| `Converged: false` | Tune `maxIterations` / `tolerance` / limit-control flags in the case-folder `aclf_run.json`; report the mismatch bus rather than retrying unchanged |
+| `Converged: false` | Tune `maxIterations` / `tolerance` / limit-control flags in the case-folder `config/aclf_run.json`; report the mismatch bus rather than retrying unchanged |
 | Wrong case solved | Trust `source`: `selection` is the tab, `bridge` is the last case the JVM held — pass `case` to be explicit |
 | Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx8g` (4g before plugin 0.3.20); see `Setup.md` for heap guidance |

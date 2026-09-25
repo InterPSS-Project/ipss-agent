@@ -121,7 +121,7 @@ Click the gear button next to **ACLF** (enabled after **Load**). The dialog titl
 
 **Where options are stored:**
 
-- **Save** writes the case-folder file `wspace/<case-parent>/aclf_run.json` (same folder as the case file).
+- **Save** writes the case-folder file `wspace/<case-parent>/config/aclf_run.json`.
 - ACLF runs prefer that case-folder file when it exists; otherwise they use the project default `config/aclf_run.json`.
 - Chat ACLF (`interpss_run_aclf`) uses the same two-tier rule.
 
@@ -230,16 +230,16 @@ For a custom pick:
 - A green line shows the entry count (for example `User-defined contingencies: 2359 (…json)`).
 - Invalid or missing shape shows a red error; **OK** stays blocked until custom picks are valid.
 
-**Starting values:** if the case folder already has `ca_run.json`, the dialog loads it. Otherwise it suggests companion files by name (filenames containing `contingenc` / `monitor`) when present.
+**Starting values:** if the case folder already has `config/ca_run.json`, the dialog loads it. Otherwise it suggests companion files by name (filenames containing `contingenc` / `monitor`) when present.
 
 
 | Button         | Effect                                                                   |
 | -------------- | ------------------------------------------------------------------------ |
-| **OK**         | Saves `wspace/<case-parent>/ca_run.json`, closes the dialog, and runs CA |
+| **OK**         | Saves `wspace/<case-parent>/config/ca_run.json`, closes the dialog, and runs CA |
 | **Cancel** / ✕ | Closes without writing or running                                        |
 
 
-`ca_run.json` is the same file the Java CLI reads for CA, so GUI and batch runs stay aligned.
+`config/ca_run.json` is the same file the Java CLI reads for CA, so GUI and batch runs stay aligned.
 
 On success:
 
@@ -392,7 +392,7 @@ Important:
 ### Tips
 
 - Prefer naming the case when the tab selection might be stale (`source` in the tool result tells you: `argument`, `selection`, or `bridge`).
-- ACLF options still come from the case-folder `aclf_run.json` when present, otherwise `config/aclf_run.json` (same as the tab gear dialog).
+- ACLF options still come from the case-folder `config/aclf_run.json` when present, otherwise `config/aclf_run.json` (same as the tab gear dialog).
 - Large PSS/E cases (for example Texas 2K) can take minutes in Chat ACLF — wait for the tool card to settle.
 - If a tool says the bridge is unavailable, rebuild the uber JAR and restart `dsh web` (see [Setup.md](../../Setup.md) / `scripts/setup-java-bridge.sh`).
 - Very large cases need enough JVM heap; the plugin bridge uses `-Xmx8g` (0.3.20+).

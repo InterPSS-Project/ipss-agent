@@ -34,7 +34,7 @@ parameters and results, no build-time Typert compiler required.
 - **CA dialog** — the CA button opens a *Run Contingency Analysis* dialog that picks
   the contingency and monitored-branch inputs (all N-1 / every branch, or a `.json`
   from the case folder, with the entry count shown after the pick), saves them as
-  `ca_run.json` beside that case's `aclf_run.json`, and runs CA — the same file the
+  `config/ca_run.json` beside that case's `config/aclf_run.json`, and runs CA — the same file the
   CLI reads (OK = save + run, Cancel = write nothing).
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
@@ -59,10 +59,11 @@ iPSS Agent workspace activation check.
 
 | Tool | Purpose |
 | --- | --- |
-| `interpss_case_load` | Load the selected simulation case into the embedded bridge. No-op (`alreadyLoaded: true`) when the bridge already holds it; call it before the other tools. A load also moves the session's current case, the tab's Simu Case picker and its `✓ Loaded: N buses, M branches` indicator mirror it (0.3.19/0.3.22), and its card prints the same line (0.3.21). |
+| `interpss_case_load` | Load the selected simulation case into the embedded bridge. No-op (`alreadyLoaded: true`) when the bridge already holds it; call it before the other tools. Result tables in the **InterPSS tab** sort by any column (0.4.4+), with the Contingency table opening worst-loading-first. A load also moves the session's current case, the tab's Simu Case picker and its `✓ Loaded: N buses, M branches` indicator mirror it (0.3.19/0.3.22), and its card prints the same line (0.3.21). |
 | `interpss_network_info` | Show the InterPSS network information (active buses and branches, total generation and load, load-flow convergence, max mismatch) of a simulation case. |
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
+| `interpss_run_ca` | Run a DC contingency analysis (N-1 screening) on the held case without the CA dialog: inputs come from `contingencyFile`/`monitorFile`, else the case-folder `config/ca_run.json`, else case-folder discovery, else the Java N-1 defaults. Writes `<stem>_DF_contingency.csv`, browsable from the card's **Explore result → Contingency** row (0.4.2+), which opens sorted by `LoadingPercent` with clickable headers (0.4.3+). |
 | `interpss_run_gvy` | Apply a Groovy (`.gvy`) scenario script from the case folder's `scripts/` directory to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. |
 
 The first three tools resolve the target case through one shared helper, in this order:
@@ -111,7 +112,7 @@ what it changed. Groovy 4.0.x is a Maven dependency merged into the uber JAR.
 `interpss_run_aclf` solves the case and writes
 `<stem>_DF_{bus,branch,gen,load}.csv` plus `<stem>_network_info.txt` under
 `wspace/<case dir>/result/`, so the report tools can consume them. Solver options
-come from the case-folder `aclf_run.json` when present, otherwise
+come from the case-folder `config/aclf_run.json` when present, otherwise
 `config/aclf_run.json` — the same two-tier rule as `ProjectPaths`. A run that
 does not converge is still a successful call (`converged: false`); large cases
 can take minutes.

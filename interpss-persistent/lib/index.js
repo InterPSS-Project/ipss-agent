@@ -190,6 +190,47 @@ function relativeCasePath(absPath) {
   return marker >= 0 ? 'data/' + String(absPath).slice(marker + WS_DATA_MARKER.length) : String(absPath)
 }
 
+// --- Chat tools: DC contingency analysis -------------------------------------
+// A CA input file is addressed the way the tab's dialog addresses it: relative to
+// wspace/ ("data/<case dir>/x.json"). A bare name resolves inside the *resolved case's*
+// folder, so the common case needs no path at all.
+function resolveCaFileArgument(caseInput, raw) {
+  const value = typeof raw === 'string' ? stripWspacePrefix(raw) : ''
+  if (value === '') return { ok: false, error: 'empty JSON file selector' }
+  if (value.indexOf('..') >= 0) return { ok: false, error: 'the file path must not contain "..": ' + value }
+  const pathRe = /^data\/[A-Za-z0-9_.\/-]+\.json$/i
+  if (pathRe.test(value)) return { ok: true, input: value }
+  if (!value.includes('/') && /\.json$/i.test(value)) {
+    const { parent } = casePartsOf(caseInput)
+    return { ok: true, input: wspaceJoin(parent, value) }
+  }
+  const marker = value.indexOf(WS_DATA_MARKER)
+  if (marker >= 0) {
+    const candidate = 'data/' + value.slice(marker + WS_DATA_MARKER.length)
+    if (pathRe.test(candidate)) return { ok: true, input: candidate }
+  }
+  return {
+    ok: false,
+    error: 'unrecognized JSON file selector "' + value + '": expected a file name in the case folder, ' +
+      'a data/... path (wspace/data/... is accepted too), or an absolute path containing ' + WS_DATA_MARKER,
+  }
+}
+
+// The Java runner prints ContAnalysisSummary as "Label=value" lines; lift the numbers so
+// the card can show them without the caller parsing that text.
+function parseCaSummary(text) {
+  const pick = (label) => {
+    const m = new RegExp(label + '=([0-9.]+)').exec(String(text === null || text === undefined ? '' : text))
+    return m ? Number(m[1]) : null
+  }
+  return {
+    threshold: pick('Threshold'),
+    contingencies: pick('Contingencies'),
+    monitoredBranches: pick('Monitored Branches'),
+    overloads: pick('Overloading Branches'),
+  }
+}
+
 // --- Chat tools: Groovy scenario scripts -------------------------------------
 // A scenario script lives next to the case it edits: wspace/data/<case dir>/scripts/<name>.gvy.
 // The Java runner reads the file and evaluates it against the bridge-held network
@@ -325,13 +366,17 @@ function casePartsOf(caseInput) {
   return { parent, stem }
 }
 
-// Case-specific aclf_run.json (same folder as the case) wins, then the project
+function wspaceJoin(parent, name) {
+  return parent === '' ? name : parent + '/' + name
+}
+
+// Case-specific config/aclf_run.json (under the case folder) wins, then the project
 // default config/aclf_run.json. Shared by the `interpss` service and `runAclfTool`.
 async function resolveAclfConfigPath(ctx, root, caseInput) {
   const fs = ctx.get('fs')
   if (fs === undefined) return root + '/config/aclf_run.json'
   const { parent } = casePartsOf(caseInput)
-  const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+  const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
   const defCfg = root + '/config/aclf_run.json'
   try {
     const target = await fs.resolve(caseCfg)
@@ -424,10 +469,10 @@ const DEFAULT_ACLF_CONFIG = {
   psXfrPContrlAccFactor: 1.0,
 }
 
-// Contingency-analysis run config (ca_run.json, beside aclf_run.json in the
-// case folder) written by the CA dialog and read by `runCa`. Contingency inputs
-// are case-specific, so there is no project-level default: an absent file falls
-// back to the per-case suggestion below, which reproduces the filename
+// Contingency-analysis run config (config/ca_run.json, beside config/aclf_run.json
+// under the case folder) written by the CA dialog and read by `runCa`. Contingency
+// inputs are case-specific, so there is no project-level default: an absent file
+// falls back to the per-case suggestion below, which reproduces the filename
 // discovery the CA run has always used.
 const DEFAULT_CA_CONFIG = {
   contingencyMode: 'all',
@@ -440,16 +485,12 @@ const DEFAULT_CA_CONFIG = {
 // parsing every .json in the case folder; skip absurd ones.
 const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
 
-function wspaceJoin(parent, name) {
-  return parent === '' ? name : parent + '/' + name
-}
-
 function caConfigPath(root, parent) {
-  return root + '/wspace/' + wspaceJoin(parent, 'ca_run.json')
+  return root + '/wspace/' + wspaceJoin(parent, 'config/ca_run.json')
 }
 
 function caConfigRel(parent) {
-  return wspaceJoin(parent, 'ca_run.json')
+  return wspaceJoin(parent, 'config/ca_run.json')
 }
 
 // Case-folder .json files that can be contingency inputs: our own two config
@@ -710,6 +751,41 @@ function captureStdio() {
   return { out: () => '', err: () => '', stop: () => {} }
 }
 
+// Sort CSV data rows by one header column. Numeric when every non-empty value in that
+// column parses as a finite number (LoadingPercent, flows, ratings), lexicographic
+// otherwise. An unknown column is not an error: the caller gets the file order back and
+// `column: null`, so a UI can avoid claiming a sort it did not get.
+function applyCsvSort(rows, header, column, desc) {
+  const names = String(header).split(',')
+  const wanted = typeof column === 'string' ? column.trim().toLowerCase() : ''
+  if (wanted === '') return { rows: rows, column: null, desc: false }
+  const index = names.findIndex((name) => name.trim().toLowerCase() === wanted)
+  if (index < 0) return { rows: rows, column: null, desc: false }
+  const valueOf = (line) => {
+    const cells = String(line).split(',')
+    return index < cells.length ? cells[index].trim() : ''
+  }
+  const numeric = rows.every((line) => {
+    const value = valueOf(line)
+    return value === '' || Number.isFinite(Number(value))
+  })
+  const compare = (a, b) => {
+    const left = valueOf(a)
+    const right = valueOf(b)
+    let result
+    if (numeric) {
+      const l = left === '' ? Number.NEGATIVE_INFINITY : Number(left)
+      const r = right === '' ? Number.NEGATIVE_INFINITY : Number(right)
+      result = l < r ? -1 : l > r ? 1 : 0
+    } else {
+      result = left.localeCompare(right)
+    }
+    return desc ? -result : result
+  }
+  const sorted = rows.slice().sort(compare)
+  return { rows: sorted, column: names[index].trim(), desc: desc }
+}
+
 class InterpssService extends TypertRemoteService {
   constructor(ctx) {
     super(ctx, NAMESPACE)
@@ -851,13 +927,28 @@ class InterpssService extends TypertRemoteService {
     }
     const lines = String(text).replace(/\r\n/g, '\n').split('\n')
     while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
-    if (lines.length === 0) return { ok: true, header: '', rows: [], totalRows: 0, hasMore: false }
+    if (lines.length === 0) {
+      return { ok: true, header: '', rows: [], totalRows: 0, hasMore: false, sortColumn: null, sortDesc: false }
+    }
     const header = lines[0]
-    const totalRows = Math.max(0, lines.length - 1)
-    const dataStart = 1 + start
-    const dataEnd = Math.min(dataStart + limit, lines.length)
-    const rows = dataStart < lines.length ? lines.slice(dataStart, dataEnd) : []
-    return { ok: true, header: header, rows: rows, totalRows: totalRows, hasMore: dataEnd < lines.length }
+    let data = lines.slice(1)
+    // Sorting happens here, before the page is sliced, so a sorted table is sorted over
+    // the whole file rather than over the rows the caller happens to have loaded.
+    const applied = applyCsvSort(data, header, input && input.sortColumn, input && input.sortDesc === true)
+    data = applied.rows
+    const totalRows = data.length
+    const dataStart = Math.min(start, data.length)
+    const dataEnd = Math.min(dataStart + limit, data.length)
+    const rows = dataStart < data.length ? data.slice(dataStart, dataEnd) : []
+    return {
+      ok: true,
+      header: header,
+      rows: rows,
+      totalRows: totalRows,
+      hasMore: dataEnd < data.length,
+      sortColumn: applied.column,
+      sortDesc: applied.desc,
+    }
   }
 
       async busConnections(input) {
@@ -1335,7 +1426,7 @@ class InterpssService extends TypertRemoteService {
     let cfgPath = defCfg
     if (caseInput !== '') {
       const { parent } = this.caseParts(caseInput)
-      const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+      const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
       try {
         const target = await fs.resolve(caseCfg)
         const info = await fs.stat(target)
@@ -1367,7 +1458,7 @@ class InterpssService extends TypertRemoteService {
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
     if (caseInput === '') return { ok: false, error: 'no case selected' }
     const { parent } = this.caseParts(caseInput)
-    const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+    const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
     try {
       const target = await fs.resolve(caseCfg)
       await fs.writeText(target, JSON.stringify(config, null, 2) + '\n')
@@ -1453,7 +1544,7 @@ class InterpssService extends TypertRemoteService {
     return { ok: true, config: validated.config, source: 'case', path: cfgRel }
   }
 
-  // Persist the dialog's configuration as <case folder>/ca_run.json.
+  // Persist the dialog's configuration as <case folder>/config/ca_run.json.
   async saveCaOptions(input) {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
@@ -1735,7 +1826,7 @@ function runAclfTool(ctx) {
       'the resulting network information. Writes <case>_DF_bus.csv, <case>_DF_branch.csv, <case>_DF_gen.csv, ' +
       '<case>_DF_load.csv and <case>_network_info.txt under wspace/<case dir>/result/. The case comes from ' +
       'the `case` argument when given, otherwise from the case selected in the InterPSS tab, otherwise from ' +
-      'the case the bridge already holds. Solver options come from the case folder aclf_run.json when ' +
+      'the case the bridge already holds. Solver options come from the case folder config/aclf_run.json when ' +
       'present, otherwise config/aclf_run.json. Large cases can take minutes.',
     parameters: {
       type: 'object',
@@ -2337,6 +2428,199 @@ function runGvyTool(ctx) {
   }
 }
 
+// --- Chat tool: interpss_run_ca ----------------------------------------------
+// DC contingency analysis with the dialog bypassed: the inputs come from an explicit
+// contingencyFile/monitorFile, else the case folder's config/ca_run.json, else the case-folder
+// discovery (*contingenc*.json / *monitor*.json), else the Java defaults (N-1 outages on
+// every branch not connected to the reference bus, every branch monitored). The runner
+// solves its own DC load flow, so no ACLF run is needed first.
+function runCaTool(ctx) {
+  return {
+    name: 'interpss_run_ca',
+    description:
+      LOAD_FIRST_HINT +
+      'Run a DC contingency analysis (CA) on a power-system case in the embedded InterPSS bridge and report ' +
+      'the overload summary. No dialog is involved and nothing is prompted for: the contingency and ' +
+      'monitored-branch inputs come from the `contingencyFile` / `monitorFile` arguments when given, ' +
+      'otherwise from the case folder config/ca_run.json, otherwise from the case folder discovery ' +
+      '(*contingenc*.json / *monitor*.json), otherwise from the Java defaults (N-1 outages on every branch ' +
+      'not connected to the reference bus, every branch monitored, 90% overload threshold). Writes ' +
+      '<stem>_DF_contingency.csv under wspace/<case dir>/result/ — the file the NERC TPL-001-5 report and ' +
+      'the ACLF card Report button consume. The runner solves its own DC load flow, so the case only has ' +
+      'to be loaded, not solved; large cases (PSS/E 2K-bus and up) take minutes.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        case: {
+          type: 'string',
+          description:
+            "Optional case selector: a workspace-relative path such as 'data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW', " +
+            "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
+            "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
+            'held by the bridge.',
+        },
+        contingencyFile: {
+          type: 'string',
+          description:
+            'Optional contingency JSON: a file name in the case folder (e.g. ' +
+            '"2k_contingencies_115kVAbove.json"), or a workspace-relative path such as ' +
+            '"data/psse/Texas2K/2k_contingencies_115kVAbove.json". Omit it to use the case folder config/ca_run.json, ' +
+            'then the case-folder discovery, then all N-1 outages.',
+        },
+        monitorFile: {
+          type: 'string',
+          description:
+            'Optional monitored-branch JSON, addressable like `contingencyFile`. Omit it to use the case ' +
+            'folder config/ca_run.json, then the case-folder discovery, then every branch.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          format: { type: 'string' },
+          resultDir: { type: 'string' },
+          contingencyCsv: { type: 'string' },
+          contingencyFile: { type: 'string' },
+          monitoredBranchFile: { type: 'string' },
+          threshold: { type: 'number' },
+          contingencies: { type: 'number' },
+          monitoredBranches: { type: 'number' },
+          overloads: { type: 'number' },
+          caSummary: { type: 'string' },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (value && value.ok === true) {
+          const amount = (n) => (typeof n === 'number' && Number.isFinite(n) ? String(n) : '?')
+          const inputs = [
+            typeof value.contingencyFile === 'string' && value.contingencyFile !== ''
+              ? value.contingencyFile
+              : 'all N-1 outages',
+            typeof value.monitoredBranchFile === 'string' && value.monitoredBranchFile !== ''
+              ? value.monitoredBranchFile
+              : 'all branches monitored',
+          ]
+          return [{
+            type: 'text',
+            text: [
+              'InterPSS DC contingency analysis \u2014 ' + String(value.case || '') +
+                ' (source: ' + String(value.source || '') + ')',
+              'Threshold ' + amount(value.threshold) + '% \u00b7 ' + amount(value.contingencies) +
+                ' contingencies \u00b7 ' + amount(value.monitoredBranches) + ' monitored branches \u00b7 ' +
+                amount(value.overloads) + ' overload rows',
+              'Inputs: ' + inputs.join(' \u00b7 '),
+              'Results: wspace/' + String(value.resultDir || '') + ' (' + String(value.contingencyCsv || '') + ')',
+            ].join('\n'),
+          }]
+        }
+        return [{
+          type: 'text',
+          text: 'InterPSS DC contingency analysis failed: ' + String((value && value.error) || 'unknown error'),
+        }]
+      },
+      // Persisted to the card's block.meta so the card can render without the generic
+      // row's expand toggle.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          source: String(value.source || ''),
+          resultDir: String(value.resultDir || ''),
+          contingencyCsv: String(value.contingencyCsv || ''),
+        }
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS contingency analysis', kind: 'execute', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      const resolvedCase = resolveToolCase(sessionId, args && typeof args.case === 'string' ? args.case : '')
+      if (resolvedCase.error !== undefined) return fail(resolvedCase.error, 'argument')
+      if (resolvedCase.target === null) {
+        return fail('no simulation case is selected: pick one in the InterPSS tab, or pass `case` (a data/... path, an absolute path containing /wspace/data/, or a preset label)', 'none')
+      }
+      const target = resolvedCase.target
+      const source = resolvedCase.source
+
+      // Explicit inputs replace the case's ca_run.json; anything omitted keeps following
+      // the dialog-free resolution order (ca_run.json -> discovery -> Java defaults).
+      const hasCont = args && typeof args.contingencyFile === 'string' && args.contingencyFile.trim() !== ''
+      const hasMon = args && typeof args.monitorFile === 'string' && args.monitorFile.trim() !== ''
+      let explicit
+      if (hasCont || hasMon) {
+        const cont = hasCont ? resolveCaFileArgument(target.input, args.contingencyFile) : { ok: true, input: '' }
+        if (cont.ok !== true) return fail(cont.error, 'argument')
+        const mon = hasMon ? resolveCaFileArgument(target.input, args.monitorFile) : { ok: true, input: '' }
+        if (mon.ok !== true) return fail(mon.error, 'argument')
+        explicit = {
+          contingencyMode: cont.input === '' ? 'all' : 'custom',
+          contingencyFile: cont.input === '' ? null : cont.input,
+          monitorMode: mon.input === '' ? 'all' : 'custom',
+          monitoredBranchFile: mon.input === '' ? null : mon.input,
+        }
+      }
+      const { parent, stem } = casePartsOf(target.input)
+      const configured = await resolveCaRunConfig(ctx, root, parent, explicit)
+      if (configured.ok !== true) return fail(configured.error, 'argument')
+      const caConfig = configured.config
+
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.runContingency !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
+      }
+      try {
+        const absCase = root + '/wspace/' + target.input
+        const absResults = root + '/wspace/' + parent + '/result'
+        const absCont = caConfig.contingencyFile === null ? null : root + '/wspace/' + caConfig.contingencyFile
+        const absMon = caConfig.monitoredBranchFile === null ? null : root + '/wspace/' + caConfig.monitoredBranchFile
+        const raw = await bridge.runContingency(target.format, absCase, absCont, absMon, absResults, stem)
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          return fail(String((parsed && parsed.error) || 'bridge runContingency failed'), source)
+        }
+        adoptLoadedCase(sessionId, target)
+        const summary = typeof parsed.caSummary === 'string' ? parsed.caSummary : ''
+        const value = {
+          ok: true,
+          case: target.input,
+          source: source,
+          format: target.format,
+          resultDir: parent + '/result',
+          contingencyCsv: typeof parsed.contingencyFile === 'string'
+            ? parsed.contingencyFile
+            : stem + '_DF_contingency.csv',
+          caSummary: summary,
+        }
+        if (caConfig.contingencyFile !== null) value.contingencyFile = caConfig.contingencyFile
+        if (caConfig.monitoredBranchFile !== null) value.monitoredBranchFile = caConfig.monitoredBranchFile
+        const numbers = parseCaSummary(summary)
+        for (const key of Object.keys(numbers)) {
+          if (numbers[key] !== null) value[key] = numbers[key]
+        }
+        return value
+      } catch (e) {
+        return fail('InterPSS DC contingency analysis failed: ' + (e && e.message ? e.message : String(e)), source)
+      }
+    },
+  }
+}
+
 function truncateStdout(text) {
   return text.length > GVY_STDOUT_LIMIT
     ? text.slice(0, GVY_STDOUT_LIMIT) + '\n\u2026 (truncated)'
@@ -2544,7 +2828,7 @@ export default {
     // call is gated on the iPSS Agent workspace activation check.
     const tools = ctx.get('tools')
     if (tools !== undefined) {
-      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx), runGvyTool(ctx)]
+      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx), runGvyTool(ctx), runCaTool(ctx)]
       for (const definition of chatToolDefs) {
         ctx.effect(() => tools.register(definition))
       }
