@@ -365,7 +365,7 @@ Deliberately **not** a project-level default: contingency lists are case-specifi
 Written and read from the GUI via `getCaOptions` / `saveCaOptions`; the candidate
 files in the case folder (and their entry counts) come from `listCaFiles`. The tab's
 **Run Contingency Analysis** dialog edits all four input keys plus `overloadThreshold`
-(rendered as **Violation Check Loading (%)**), and `interpss_run_ca` accepts the same
+(rendered as **Over Loading Threshold(%)**), and `interpss_run_ca` accepts the same
 threshold as its `overloadThreshold` argument; both reach the runner through
 `IpssAgentBridge.runContingency(…, double overloadThreshold)`, which validates it and
 defaults it to 90. `ContingencyRunner` applies it as the DC contingency analyser's

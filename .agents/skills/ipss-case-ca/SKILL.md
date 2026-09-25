@@ -47,15 +47,15 @@ Nothing is prompted for. Each of the two inputs is resolved independently:
 4. the Java defaults — **N-1 outages for every branch not connected to the reference bus**, and
    **every branch monitored**, at a 90 % overload threshold.
 
-`overloadThreshold` (plugin 0.4.6+) takes the same ladder and sets the **violation check loading** —
+`overloadThreshold` (plugin 0.4.6+) takes the same ladder and sets the **over loading threshold** —
 the percentage at or above which a monitored branch is reported:
 
 ```
 interpss_run_ca(overloadThreshold: 80)     # report from 80 % instead of 90 %
 ```
 
-It is the value the tab's **Run Contingency Analysis** dialog collects in its **Violation Check
-Loading (%)** field, so an argument and a dialog run agree. It must satisfy `0 < t <= 1000`; anything
+It is the value the tab's **Run Contingency Analysis** dialog collects in its **Over Loading
+Threshold(%)** field, so an argument and a dialog run agree. It must satisfy `0 < t <= 1000`; anything
 else is rejected before the bridge is called. Omit it and `ca_run.json`'s `overloadThreshold` (or 90)
 applies — the resolved number always comes back as `threshold`. An argument overrides **only the key
 it names** (plugin 0.4.7+), so passing `overloadThreshold` alone keeps the case's contingency and

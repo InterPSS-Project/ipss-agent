@@ -215,13 +215,13 @@ From the bus table context menu (**Connection info**), or by navigating from Gen
 
 #### Run Contingency Analysis dialog
 
-The dialog shows the **Violation Check Loading (%)** field at the top, then the two sections. Each
+The dialog shows the **Over Loading Threshold(%)** field at the top, then the two sections. Each
 section can use a built-in default or a user-defined `.json` from the case folder:
 
 
 | Field / Section                 | Default                        | Custom                                                                       |
 | ------------------------------- | ------------------------------ | ---------------------------------------------------------------------------- |
-| **Violation Check Loading (%)** | `90`                           | Any percentage `0 < t <= 1000` — a branch whose post-contingency loading reaches it is reported as an overload (0.4.6+) |
+| **Over Loading Threshold(%)** | `90`                           | Any percentage `0 < t <= 1000` — a branch whose post-contingency loading reaches it is reported as an overload (0.4.6+) |
 | **Define Contingency Branches** | Consider all N-1 contingencies | User-defined contingency — pick a `.json` with a `contingencies` array       |
 | **Define Monitored Branches**   | Monitor all branches           | Monitor selected branches — pick a `.json` with a `monitored_branches` array |
 
@@ -234,12 +234,12 @@ For a custom pick:
 
 **Starting values:** if the case folder already has `config/ca_run.json`, the dialog loads it (including `overloadThreshold`; a file without that key — or no file at all — starts at `90`). Otherwise it suggests companion files by name (filenames containing `contingenc` / `monitor`) when present.
 
-An out-of-range threshold blocks **OK** with `violation check loading must be a percentage between 0 and 1000`.
+An out-of-range threshold blocks **OK** with `over loading threshold must be a percentage between 0 and 1000`.
 
 
 | Button         | Effect                                                                   |
 | -------------- | ------------------------------------------------------------------------ |
-| **OK**         | Saves `wspace/<case-parent>/config/ca_run.json` — the violation-check loading and both section choices (0.4.7+), closes the dialog, and runs CA |
+| **OK**         | Saves `wspace/<case-parent>/config/ca_run.json` — the over loading threshold and both section choices (0.4.7+), closes the dialog, and runs CA |
 | **Cancel** / ✕ | Closes without writing or running                                        |
 
 

@@ -1578,7 +1578,7 @@ class InterpssService extends TypertRemoteService {
       contingencyFile: validated.config.contingencyFile,
       monitorMode: validated.config.monitorMode,
       monitoredBranchFile: validated.config.monitoredBranchFile,
-      // The dialog's violation-check loading. It must round-trip, or the next dialog
+      // The dialog's over loading threshold. It must round-trip, or the next dialog
       // open, the CLI and `interpss_run_ca` silently fall back to 90.
       overloadThreshold: validated.config.overloadThreshold,
     }
@@ -2464,7 +2464,7 @@ function runCaTool(ctx) {
       'otherwise from the case folder config/ca_run.json, otherwise from the case folder discovery ' +
       '(*contingenc*.json / *monitor*.json), otherwise from the Java defaults (N-1 outages on every branch ' +
       'not connected to the reference bus, every branch monitored). `overloadThreshold` sets the ' +
-      'violation-check loading in percent (default 90, overridable per call or in config/ca_run.json). Writes ' +
+      'over loading threshold in percent (default 90, overridable per call or in config/ca_run.json). Writes ' +
       '<stem>_DF_contingency.csv under wspace/<case dir>/result/ — the file the NERC TPL-001-5 report and ' +
       'the ACLF card Report button consume. The runner solves its own DC load flow, so the case only has ' +
       'to be loaded, not solved; large cases (PSS/E 2K-bus and up) take minutes.',
@@ -2497,7 +2497,7 @@ function runCaTool(ctx) {
         overloadThreshold: {
           type: 'number',
           description:
-            'Optional violation-check loading in percent (default 90): a monitored branch whose ' +
+            'Optional over loading threshold in percent (default 90): a monitored branch whose ' +
             'post-contingency loading reaches it is written to the result CSV. Overrides the case ' +
             'folder config/ca_run.json for this run.',
         },

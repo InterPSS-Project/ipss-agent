@@ -87,7 +87,7 @@ dialog writes, so a run configured in the GUI is reproduced by the CLI.
 | `contingencyFile` | path under `wspace/` | Contingency JSON (`{"contingencies": [...]}`); required when `contingencyMode` is `custom` |
 | `monitorMode` | `all` (default) \| `custom` | Monitor every branch, or only the listed ones |
 | `monitoredBranchFile` | path under `wspace/` | Monitored-branch JSON (`{"monitored_branches": [...]}`); required when `monitorMode` is `custom` |
-| `overloadThreshold` | `0 < t <= 1000` (default `90`) | Loading percentage at or above which a monitored branch is reported as an overload; the InterPSS tab's **CA** dialog collects the same value as **Violation Check Loading (%)** |
+| `overloadThreshold` | `0 < t <= 1000` (default `90`) | Loading percentage at or above which a monitored branch is reported as an overload; the InterPSS tab's **CA** dialog collects the same value as **Over Loading Threshold(%)** |
 
 Example using the Texas 2K case files shipped under `wspace/data/psse/Texas2K/`:
 

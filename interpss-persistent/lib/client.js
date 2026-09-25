@@ -977,7 +977,7 @@ module.exports = {
         if (caForm === null) return 'the run configuration is still loading'
         const threshold = Number(caForm.overloadThreshold)
         if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1000) {
-          return 'violation check loading must be a percentage between 0 and 1000'
+          return 'over loading threshold must be a percentage between 0 and 1000'
         }
         const kinds = ['contingency', 'monitored']
         for (const kind of kinds) {
@@ -1026,7 +1026,7 @@ module.exports = {
                 contingencyFile: res.config.contingencyFile || null,
                 monitorMode: res.config.monitorMode === 'custom' ? 'custom' : 'all',
                 monitoredBranchFile: res.config.monitoredBranchFile || null,
-                // The violation-check loading the dialog shows; kept as typed so the input
+                // The over loading threshold the dialog shows; kept as typed so the input
                 // behaves normally, validated and coerced on OK.
                 overloadThreshold: typeof res.config.overloadThreshold === 'number'
                   ? String(res.config.overloadThreshold)
@@ -1807,7 +1807,7 @@ module.exports = {
             React.createElement('button', { onClick: cancelCaDialog, style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
           ),
           caForm !== null ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' } },
-            React.createElement('span', { style: { fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, 'Violation Check Loading (%):'),
+            React.createElement('span', { style: { fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, 'Over Loading Threshold(%):'),
             React.createElement('input', {
               type: 'number',
               min: 1,

@@ -192,8 +192,8 @@ dialog uses, so the result file is identical; the tool simply resolves the input
 4. the Java defaults — N-1 outages on every branch not connected to the reference bus, every branch
    monitored, 90 % overload threshold.
 
-`overloadThreshold` (0.4.6+) follows the same ladder and is the value the dialog's **Violation Check
-Loading (%)** field writes: the argument wins, else the case's `config/ca_run.json`, else 90. It is a
+`overloadThreshold` (0.4.6+) follows the same ladder and is the value the dialog's **Over Loading
+Threshold(%)** field writes: the argument wins, else the case's `config/ca_run.json`, else 90. It is a
 loading percentage (`0 < t <= 1000`); anything else is rejected before the bridge is called. Each
 argument overrides **only the keys it names** (0.4.7+), so `interpss_run_ca(overloadThreshold: 80)`
 keeps the case's own contingency and monitored-branch selection and just reports from 80 % — the same
@@ -503,8 +503,9 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.4.3 | Explorer tables sort: `readCsv` takes `sortColumn`/`sortDesc` and sorts the whole file before paging, headers are clickable with a ▲/▼ marker, and the CA table opens worst-`LoadingPercent`-first |
 | 0.4.4 | The tab's result tables sort too: `renderCsvTable`/`renderBusTable` gain clickable headers (▲/▼) and the tab's **Contingency** table opens worst-`LoadingPercent`-first, paging and all |
 | 0.4.5 | Version-only repack of the configuration relocation: `aclf_run.json` and `ca_run.json` move to `<case folder>/config/` (the project default stays `config/aclf_run.json`), and every tool/RPC/dialog path follows — `ProjectPaths`, `getAclfOptions`/`getCaOptions`/`saveCaOptions` and the tools' descriptions |
-| 0.4.6 | A configurable **Violation Check Loading (%)** replaces the fixed 90 % threshold: the CA dialog renders a numeric field (seeded from `getCaOptions`, validated before OK), `interpss_run_ca` accepts `overloadThreshold`, `config/ca_run.json` gains the key, and the value reaches the runner through `runContingency`/`resolveInputs`/`setOverloadThreshold` instead of a constant |
+| 0.4.6 | A configurable **over loading threshold** replaces the fixed 90 % threshold: the CA dialog renders a numeric field (seeded from `getCaOptions`, validated before OK), `interpss_run_ca` accepts `overloadThreshold`, `config/ca_run.json` gains the key, and the value reaches the runner through `runContingency`/`resolveInputs`/`setOverloadThreshold` instead of a constant |
 | 0.4.7 | Two CA-round-trip fixes: `saveCaOptions` persists `overloadThreshold` with the other four keys (0.4.6 dropped it, so a dialog run at 80 % reopened at 90 % and a later CLI/tool run used 90), and the tool merges its arguments **per key** over the resolved case config instead of replacing it — `interpss_run_ca(overloadThreshold: 80)` no longer discards the case's contingency/monitored-branch selection |
+| 0.4.8 | The dialog field is labelled **Over Loading Threshold(%)** (it read *Violation Check Loading (%)* in 0.4.6/0.4.7), and its validation message follows: `over loading threshold must be a percentage between 0 and 1000` |
 | 0.4.1 | `interpss_run_ca`: DC contingency analysis from chat with the CA dialog bypassed (explicit inputs → `ca_run.json` → case-folder discovery → N-1 defaults), plus its card and the `ipss-case-ca` skill |
 | 0.4.0 | Version-only release: the first 0.4.x, carrying 0.3.17–0.3.23 unchanged (the `interpss_run_gvy` tool and its skill, the `ipss-case-load` skill, `wspace/…` selector spellings, the Simu Case picker + `✓ Loaded:` sync, `-Xmx8g`, and the load card's confirmation line) |
 

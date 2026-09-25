@@ -206,7 +206,7 @@ case-specific; `IpssCmd` resolves each section independently:
 
 The CLI prints `Using ca_run.json: <path>` to stderr when it reads the file. Its optional
 `overloadThreshold` key (a percentage, `0 < t <= 1000`) is the loading at which a monitored branch is
-reported as an overload; the tab's **CA** dialog edits it as **Violation Check Loading (%)**, and both
+reported as an overload; the tab's **CA** dialog edits it as **Over Loading Threshold(%)**, and both
 fall back to `90`.
 
 ```json
