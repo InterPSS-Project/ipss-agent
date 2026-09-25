@@ -41,7 +41,7 @@ The InterPSS tab only enables its tools when the workspace `README.md` first `#`
 
 ## InterPSS DSH GUI Tab
 
-
+Open the iPSS Agent folder as a workspace in DSH. You can then run the power system simulation workflow or chat following the DSH plugin user guide.
 
 ### Open the InterPSS tab
 
@@ -211,14 +211,18 @@ From the bus table context menu (**Connection info**), or by navigating from Gen
 1. **Load** the case.
 2. Click **CA**. This opens the **Run Contingency Analysis** dialog (it does not start the run immediately).
 
+
+
 #### Run Contingency Analysis dialog
 
 The dialog has two sections. Each can use a built-in default or a user-defined `.json` from the case folder:
 
-| Section | Default | Custom |
-| --- | --- | --- |
-| **Define Contingency Branches** | Consider all N-1 contingencies | User-defined contingency — pick a `.json` with a `contingencies` array |
-| **Define Monitored Branches** | Monitor all branches | Monitor selected branches — pick a `.json` with a `monitored_branches` array |
+
+| Section                         | Default                        | Custom                                                                       |
+| ------------------------------- | ------------------------------ | ---------------------------------------------------------------------------- |
+| **Define Contingency Branches** | Consider all N-1 contingencies | User-defined contingency — pick a `.json` with a `contingencies` array       |
+| **Define Monitored Branches**   | Monitor all branches           | Monitor selected branches — pick a `.json` with a `monitored_branches` array |
+
 
 For a custom pick:
 
@@ -228,10 +232,12 @@ For a custom pick:
 
 **Starting values:** if the case folder already has `ca_run.json`, the dialog loads it. Otherwise it suggests companion files by name (filenames containing `contingenc` / `monitor`) when present.
 
-| Button | Effect |
-| --- | --- |
-| **OK** | Saves `wspace/<case-parent>/ca_run.json`, closes the dialog, and runs CA |
-| **Cancel** / ✕ | Closes without writing or running |
+
+| Button         | Effect                                                                   |
+| -------------- | ------------------------------------------------------------------------ |
+| **OK**         | Saves `wspace/<case-parent>/ca_run.json`, closes the dialog, and runs CA |
+| **Cancel** / ✕ | Closes without writing or running                                        |
+
 
 `ca_run.json` is the same file the Java CLI reads for CA, so GUI and batch runs stay aligned.
 
@@ -269,6 +275,8 @@ In the report dialog:
 
 ---
 
+
+
 ## InterPSS DSH Chat
 
 The Chat tab can drive the same in-memory simulation case as the InterPSS tab. The DSH plugin registers model **tools** so the agent can load a selected InterPSS case, show network info, run ACLF, summarize results, and apply Groovy what-if scripts — without leaving the conversation.
@@ -285,15 +293,19 @@ For the full tool contract (inputs, cards, version history), see [interpss-tools
 2. Optionally select a case in the **InterPSS** tab — Chat tools use that selection when you do not name a case.
 3. Prefer an explicit load first (or ask the agent to load), then ask for info, ACLF, summary, or a script.
 
+
+
 ### What you can ask
 
-| Goal | Example prompt | Skill / tool |
-| --- | --- | --- |
-| Load the selected (or named) case | `Load the IEEE 118-bus case` / `Load the selected InterPSS case` | `$ipss-case-load` / `interpss_case_load` |
-| Network info | `Show network info for the current case` | `$ipss-case-info` / `interpss_network_info` |
-| Run AC load flow | `Run ACLF on the selected case` | `$ipss-case-aclf` / `interpss_run_aclf` |
-| Case summary / top-N | `Summarize the current case` / `Find the lowest voltage buses` | `$ipss-case-summary` / `interpss_case_summary` |
-| What-if scenario script | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve` | `$ipss-case-script` / `interpss_run_gvy` |
+
+| Goal                              | Example prompt                                                   | Skill / tool                                   |
+| --------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------- |
+| Load the selected (or named) case | `Load the IEEE 118-bus case` / `Load the selected InterPSS case` | `$ipss-case-load` / `interpss_case_load`       |
+| Network info                      | `Show network info for the current case`                         | `$ipss-case-info` / `interpss_network_info`    |
+| Run AC load flow                  | `Run ACLF on the selected case`                                  | `$ipss-case-aclf` / `interpss_run_aclf`        |
+| Case summary / top-N              | `Summarize the current case` / `Find the lowest voltage buses`   | `$ipss-case-summary` / `interpss_case_summary` |
+| What-if scenario script           | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve`             | `$ipss-case-script` / `interpss_run_gvy`       |
+
 
 Slash / skill forms (Claude Code style): `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-summary`, `$ipss-case-script`. Plain natural language works the same when the agent picks those tools.
 
@@ -307,15 +319,19 @@ When you do not name a case, tools resolve in this order:
 
 You can name a case as:
 
-| Form | Example |
-| --- | --- |
-| Workspace-relative path | `data/ieee/Ieee118Bus/ieee118.ieee` |
-| Path with `wspace/` prefix | `wspace/data/ieee/Ieee14Bus/ieee14.ieee` |
-| Preset label | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
+
+| Form                       | Example                                       |
+| -------------------------- | --------------------------------------------- |
+| Workspace-relative path    | `data/ieee/Ieee118Bus/ieee118.ieee`           |
+| Path with `wspace/` prefix | `wspace/data/ieee/Ieee14Bus/ieee14.ieee`      |
+| Preset label               | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
+
 
 `interpss_case_load` is a **no-op** (`alreadyLoaded: true`) when the bridge already holds that exact case — it does not re-parse. To force a re-parse of the same case, use the tab’s **Load** button (or `reload: true` on a script run).
 
 ### Typical workflows
+
+
 
 #### Load → network info → ACLF
 
@@ -340,6 +356,8 @@ Notes:
 - Branch ranking is by flow **magnitude**, not rating loading. For `Loading%`, ask about the branch result CSV (or use the tab explorer).
 - Successful summary calls show **no tool card** by design — the agent’s chat reply is the summary.
 
+
+
 #### What-if with a Groovy script
 
 Scripts live under the case folder’s `scripts/` directory (for example `data/ieee/Ieee14Bus/scripts/`). The script **edits** the held model in place and does not solve; run ACLF afterward when you need solved results.
@@ -355,15 +373,21 @@ Important:
 - Loading a **different** case replaces the held model — any prior ACLF solution or script edits on the old case are gone.
 - Only run scripts you trust.
 
+
+
 ### Chat vs InterPSS tab vs batch Chat
 
-| | InterPSS tab | DSH Chat (this section) | Batch Chat (`/ipss-sim`) |
-| --- | --- | --- | --- |
-| Model | In-memory bridge | Same in-memory bridge | Separate Java CLI process |
-| Load | **Load** always re-parses | Tools reuse the held case when possible; picker mirrors the bridge | Fresh process per run |
-| ACLF / explorers / report | Buttons and dialogs | Tools + ACLF card (ACLF report only) | CLI writes files under `result/` |
-| Contingency (CA) / NERC | **CA** dialog + **Report** | Not via Chat tools today — use the tab or `/ipss-sim` | Full ACLF + CA + NERC workflow |
-| What-if scripts | — | `interpss_run_gvy` / `$ipss-case-script` | Edit case files or use CLI workflows |
+
+|                           | InterPSS tab               | DSH Chat (this section)                                            | Batch Chat (`/ipss-sim`)             |
+| ------------------------- | -------------------------- | ------------------------------------------------------------------ | ------------------------------------ |
+| Model                     | In-memory bridge           | Same in-memory bridge                                              | Separate Java CLI process            |
+| Load                      | **Load** always re-parses  | Tools reuse the held case when possible; picker mirrors the bridge | Fresh process per run                |
+| ACLF / explorers / report | Buttons and dialogs        | Tools + ACLF card (ACLF report only)                               | CLI writes files under `result/`     |
+| Contingency (CA) / NERC   | **CA** dialog + **Report** | Not via Chat tools today — use the tab or `/ipss-sim`              | Full ACLF + CA + NERC workflow       |
+| What-if scripts           | —                          | `interpss_run_gvy` / `$ipss-case-script`                           | Edit case files or use CLI workflows |
+
+
+
 
 ### Tips
 
@@ -374,20 +398,21 @@ Important:
 - Very large cases need enough JVM heap; the plugin bridge uses `-Xmx8g` (0.3.20+).
 
 
+
 ## Tips and troubleshooting
 
 
-| Symptom                                        | What to check                                                                                                       |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| “InterPSS is not available in this workspace…” | Workspace `README.md` first H1 must be exactly `iPSS Agent`.                                                        |
-| **ACLF** / **CA** greyed out                   | Click **Load** successfully first.                                                                                  |
-| Case picker empty                              | No matching `.ieee` or `.raw`/`.RAW` under `wspace/data` for the selected format.                                   |
+| Symptom                                        | What to check                                                                                                            |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| “InterPSS is not available in this workspace…” | Workspace `README.md` first H1 must be exactly `iPSS Agent`.                                                             |
+| **ACLF** / **CA** greyed out                   | Click **Load** successfully first.                                                                                       |
+| Case picker empty                              | No matching `.ieee` or `.raw`/`.RAW` under `wspace/data` for the selected format.                                        |
 | CA dialog custom pick errors                   | Pick a case-folder `.json` with a `contingencies` or `monitored_branches` array; check the green count / red error line. |
-| Tab picker shows a different case than Chat    | Update the plugin to 0.3.19+ (picker mirrors the bridge), or pass `case` explicitly in Chat.                        |
-| **Report** greyed out                          | No converged result CSVs yet — run ACLF (and CA for NERC).                                                          |
-| Gear disabled                                  | Load a case first.                                                                                                  |
-| Adj/Ctrl Setting tab disabled                  | Enable **Include Adjustments/Controls** on the Main options tab.                                                    |
-| Chat load did not re-parse the same case       | Expected — use the tab **Load** button to force a re-parse.                                                         |
+| Tab picker shows a different case than Chat    | Update the plugin to 0.3.19+ (picker mirrors the bridge), or pass `case` explicitly in Chat.                             |
+| **Report** greyed out                          | No converged result CSVs yet — run ACLF (and CA for NERC).                                                               |
+| Gear disabled                                  | Load a case first.                                                                                                       |
+| Adj/Ctrl Setting tab disabled                  | Enable **Include Adjustments/Controls** on the Main options tab.                                                         |
+| Chat load did not re-parse the same case       | Expected — use the tab **Load** button to force a re-parse.                                                              |
 
 
 

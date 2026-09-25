@@ -44,12 +44,12 @@ Prompt DeepSeek Harness to install InterPSS DSH plugin:
 ```text
 Install(update) InterPSS DSH plugin
 ```
-
+Open the iPSS Agent folder as a workspace in DSH. You can then run the power system simulation workflow or chat following the DSH plugin user guide.
 
 
 ## User Guide
 
-- InterPSS DSH Plugin user guide [dsh_plugin_user_guide.md](docs/user_guide/dsh_plugin_user_guide.md), [dsh_plugin_user_guide.pdf](docs/user_guide/dsh_plugin_user_guide.pdf)
+- InterPSS DSH Plugin user guide [dsh_plugin_user_guide.md](docs/user_guide/dsh_plugin_user_guide.md)
 - iPSS Agent Chat (Batch) user guide [batch_chat_user_guide.md](docs/user_guide/batch_chat_user_guide.md)
 
 
