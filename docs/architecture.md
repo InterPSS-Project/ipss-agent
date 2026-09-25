@@ -360,9 +360,16 @@ Deliberately **not** a project-level default: contingency lists are case-specifi
 | `contingencyFile` | path under `wspace/` | `{"contingencies": [...]}` JSON; required when `contingencyMode` is `custom` |
 | `monitorMode` | `all` (default) \| `custom` | Monitor every branch, or only the listed ones |
 | `monitoredBranchFile` | path under `wspace/` | `{"monitored_branches": [...]}` JSON; required when `monitorMode` is `custom` |
+| `overloadThreshold` | `0 < t <= 1000` (default `90`) | Loading percentage at or above which a monitored branch is reported as an overload |
 
 Written and read from the GUI via `getCaOptions` / `saveCaOptions`; the candidate
-files in the case folder (and their entry counts) come from `listCaFiles`. When
+files in the case folder (and their entry counts) come from `listCaFiles`. The tab's
+**Run Contingency Analysis** dialog edits all four input keys plus `overloadThreshold`
+(rendered as **Violation Check Loading (%)**), and `interpss_run_ca` accepts the same
+threshold as its `overloadThreshold` argument; both reach the runner through
+`IpssAgentBridge.runContingency(…, double overloadThreshold)`, which validates it and
+defaults it to 90. `ContingencyRunner` applies it as the DC contingency analyser's
+overload threshold rather than a constant. When
 the file is absent the dialog and `runCa` fall back to per-case filename discovery
 (first `*contingenc*.json` / `*monitor*.json`) and then to `all`/`all`, so a case
 that never opened the dialog behaves as before.

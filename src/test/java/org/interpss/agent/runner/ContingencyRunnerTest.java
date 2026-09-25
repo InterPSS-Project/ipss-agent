@@ -48,6 +48,37 @@ class ContingencyRunnerTest {
         assertThat(summary.numOverloads()).isNotEqualTo(11);
     }
 
+    /** The violation-check loading the caller asks for is what the run reports. */
+    @Test
+    void runOnNet_honoursTheOverloadThreshold() throws Exception {
+        var strict = IeeeFileAdapter.createAclfNet(caseFilePath.toString());
+        ContingencyRunner.ContAnalysisSummary high =
+                ContingencyRunner.runOnNet(strict, resultsDir, "strict", null, null, 100.0);
+        assertThat(high.threshold()).isEqualTo(100.0);
+
+        var loose = IeeeFileAdapter.createAclfNet(caseFilePath.toString());
+        ContingencyRunner.ContAnalysisSummary low =
+                ContingencyRunner.runOnNet(loose, resultsDir, "loose", null, null, 50.0);
+        assertThat(low.threshold()).isEqualTo(50.0);
+        // A lower threshold can only add overloading rows, never remove them.
+        assertThat(low.numOverloads()).isGreaterThanOrEqualTo(high.numOverloads());
+    }
+
+    /** config/ca_run.json carries the threshold into a run that names no explicit files. */
+    @Test
+    void run_readsTheThresholdFromTheCaseConfig() throws Exception {
+        Path configDir = paths.resolveWspace("data/ieee/Ieee14Bus/config");
+        Files.createDirectories(configDir);
+        Files.writeString(configDir.resolve("ca_run.json"),
+                "{\"overloadThreshold\": 55}\n");
+        CliArgs noFiles = new CliArgs("ca", "ieee", AgentTestSupport.IEEE14_INPUT, null, null);
+
+        ContingencyRunner.ContAnalysisSummary summary =
+                ContingencyRunner.run(paths, noFiles, caseFilePath.toString(), resultsDir, "cfg");
+
+        assertThat(summary.threshold()).isEqualTo(55.0);
+    }
+
     @Test
     void run_withLoadedNetwork_writesContingencyCsv() throws Exception {
         var net = IeeeFileAdapter.createAclfNet(caseFilePath.toString());

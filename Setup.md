@@ -204,7 +204,10 @@ case-specific; `IpssCmd` resolves each section independently:
 2. **Case `ca_run.json`** — the `custom` entry for that section.
 3. **Built-in defaults** — all N-1 branch outages, every branch monitored.
 
-The CLI prints `Using ca_run.json: <path>` to stderr when it reads the file.
+The CLI prints `Using ca_run.json: <path>` to stderr when it reads the file. Its optional
+`overloadThreshold` key (a percentage, `0 < t <= 1000`) is the loading at which a monitored branch is
+reported as an overload; the tab's **CA** dialog edits it as **Violation Check Loading (%)**, and both
+fall back to `90`.
 
 ```json
 {

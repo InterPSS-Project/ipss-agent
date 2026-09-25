@@ -479,6 +479,10 @@ const DEFAULT_CA_CONFIG = {
   contingencyFile: null,
   monitorMode: 'all',
   monitoredBranchFile: null,
+  // Violation-check loading (%): a monitored branch at or above it after a contingency
+  // lands in the result CSV. The CA dialog's field, the tool's `overloadThreshold` and
+  // config/ca_run.json all feed this one number.
+  overloadThreshold: 90,
 }
 
 // The dialog reports how many entries a candidate file holds, which means
@@ -576,6 +580,17 @@ async function validateCaConfig(ctx, root, value, requireFiles) {
     return { ok: false, error: 'the run configuration must be a JSON object' }
   }
   const out = Object.assign({}, DEFAULT_CA_CONFIG)
+  if (value.overloadThreshold !== undefined && value.overloadThreshold !== null && value.overloadThreshold !== '') {
+    const threshold = Number(value.overloadThreshold)
+    if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1000) {
+      return {
+        ok: false,
+        error: 'overloadThreshold must be a loading percentage between 0 and 1000 (got ' +
+          JSON.stringify(value.overloadThreshold) + ')',
+      }
+    }
+    out.overloadThreshold = threshold
+  }
   const fields = [
     ['contingencyMode', 'contingencyFile'],
     ['monitorMode', 'monitoredBranchFile'],
@@ -1206,7 +1221,8 @@ class InterpssService extends TypertRemoteService {
         const absCont = contRel !== null ? root + '/wspace/' + contRel : null
         const absMon = monRel !== null ? root + '/wspace/' + monRel : null
         const absResults = root + '/wspace/' + resultDir
-        const raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
+        const raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
+          caConfig.overloadThreshold)
         const parsed = JSON.parse(raw)
         if (parsed && parsed.ok) {
           return {
@@ -1562,6 +1578,9 @@ class InterpssService extends TypertRemoteService {
       contingencyFile: validated.config.contingencyFile,
       monitorMode: validated.config.monitorMode,
       monitoredBranchFile: validated.config.monitoredBranchFile,
+      // The dialog's violation-check loading. It must round-trip, or the next dialog
+      // open, the CLI and `interpss_run_ca` silently fall back to 90.
+      overloadThreshold: validated.config.overloadThreshold,
     }
     try {
       const target = await fs.resolve(caConfigPath(root, parent))
@@ -2444,7 +2463,8 @@ function runCaTool(ctx) {
       'monitored-branch inputs come from the `contingencyFile` / `monitorFile` arguments when given, ' +
       'otherwise from the case folder config/ca_run.json, otherwise from the case folder discovery ' +
       '(*contingenc*.json / *monitor*.json), otherwise from the Java defaults (N-1 outages on every branch ' +
-      'not connected to the reference bus, every branch monitored, 90% overload threshold). Writes ' +
+      'not connected to the reference bus, every branch monitored). `overloadThreshold` sets the ' +
+      'violation-check loading in percent (default 90, overridable per call or in config/ca_run.json). Writes ' +
       '<stem>_DF_contingency.csv under wspace/<case dir>/result/ — the file the NERC TPL-001-5 report and ' +
       'the ACLF card Report button consume. The runner solves its own DC load flow, so the case only has ' +
       'to be loaded, not solved; large cases (PSS/E 2K-bus and up) take minutes.',
@@ -2473,6 +2493,13 @@ function runCaTool(ctx) {
           description:
             'Optional monitored-branch JSON, addressable like `contingencyFile`. Omit it to use the case ' +
             'folder config/ca_run.json, then the case-folder discovery, then every branch.',
+        },
+        overloadThreshold: {
+          type: 'number',
+          description:
+            'Optional violation-check loading in percent (default 90): a monitored branch whose ' +
+            'post-contingency loading reaches it is written to the result CSV. Overrides the case ' +
+            'folder config/ca_run.json for this run.',
         },
       },
     },
@@ -2558,26 +2585,39 @@ function runCaTool(ctx) {
       const target = resolvedCase.target
       const source = resolvedCase.source
 
-      // Explicit inputs replace the case's ca_run.json; anything omitted keeps following
-      // the dialog-free resolution order (ca_run.json -> discovery -> Java defaults).
+      const { parent, stem } = casePartsOf(target.input)
+
+      // Arguments override the case's ca_run.json per key; anything omitted keeps following the
+      // dialog-free resolution order (ca_run.json -> discovery -> Java defaults), so passing only
+      // `overloadThreshold` still runs the case's own contingency and monitored-branch selections.
       const hasCont = args && typeof args.contingencyFile === 'string' && args.contingencyFile.trim() !== ''
       const hasMon = args && typeof args.monitorFile === 'string' && args.monitorFile.trim() !== ''
-      let explicit
-      if (hasCont || hasMon) {
-        const cont = hasCont ? resolveCaFileArgument(target.input, args.contingencyFile) : { ok: true, input: '' }
+      const hasThreshold = args && typeof args.overloadThreshold === 'number' &&
+        Number.isFinite(args.overloadThreshold)
+      const explicit = {}
+      if (hasCont) {
+        const cont = resolveCaFileArgument(target.input, args.contingencyFile)
         if (cont.ok !== true) return fail(cont.error, 'argument')
-        const mon = hasMon ? resolveCaFileArgument(target.input, args.monitorFile) : { ok: true, input: '' }
-        if (mon.ok !== true) return fail(mon.error, 'argument')
-        explicit = {
-          contingencyMode: cont.input === '' ? 'all' : 'custom',
-          contingencyFile: cont.input === '' ? null : cont.input,
-          monitorMode: mon.input === '' ? 'all' : 'custom',
-          monitoredBranchFile: mon.input === '' ? null : mon.input,
-        }
+        explicit.contingencyMode = 'custom'
+        explicit.contingencyFile = cont.input
       }
-      const { parent, stem } = casePartsOf(target.input)
-      const configured = await resolveCaRunConfig(ctx, root, parent, explicit)
-      if (configured.ok !== true) return fail(configured.error, 'argument')
+      if (hasMon) {
+        const mon = resolveCaFileArgument(target.input, args.monitorFile)
+        if (mon.ok !== true) return fail(mon.error, 'argument')
+        explicit.monitorMode = 'custom'
+        explicit.monitoredBranchFile = mon.input
+      }
+      if (hasThreshold) explicit.overloadThreshold = args.overloadThreshold
+
+      const resolvedConfig = await resolveCaRunConfig(ctx, root, parent, undefined)
+      if (resolvedConfig.ok !== true) return fail(resolvedConfig.error, 'argument')
+      let configured = resolvedConfig
+      if (Object.keys(explicit).length > 0) {
+        const merged = Object.assign({}, resolvedConfig.config, explicit)
+        const validated = await validateCaConfig(ctx, root, merged, true)
+        if (!validated.ok) return fail('invalid run configuration: ' + validated.error, 'argument')
+        configured = { ok: true, config: validated.config, source: resolvedConfig.source }
+      }
       const caConfig = configured.config
 
       const bridge = ctx.get('javaBridge')
@@ -2589,7 +2629,8 @@ function runCaTool(ctx) {
         const absResults = root + '/wspace/' + parent + '/result'
         const absCont = caConfig.contingencyFile === null ? null : root + '/wspace/' + caConfig.contingencyFile
         const absMon = caConfig.monitoredBranchFile === null ? null : root + '/wspace/' + caConfig.monitoredBranchFile
-        const raw = await bridge.runContingency(target.format, absCase, absCont, absMon, absResults, stem)
+        const raw = await bridge.runContingency(target.format, absCase, absCont, absMon, absResults, stem,
+          caConfig.overloadThreshold)
         const parsed = JSON.parse(raw)
         if (!parsed || parsed.ok !== true) {
           return fail(String((parsed && parsed.error) || 'bridge runContingency failed'), source)
@@ -2780,12 +2821,15 @@ export default {
         const bridge = await ensureBridge(projectRoot || rootFor(''))
         return bridge.runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)
       },
-      async runContingency(format, absCase, absCont, absMon, absResults, stem) {
+      async runContingency(format, absCase, absCont, absMon, absResults, stem, overloadThreshold) {
         const bridge = await ensureBridge(rootFor(absCase))
         const cap = captureStdio()
+        const threshold = typeof overloadThreshold === 'number' && Number.isFinite(overloadThreshold)
+          ? overloadThreshold
+          : 90
         let raw
         try {
-          raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
+          raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem, threshold)
         } finally {
           cap.stop()
         }

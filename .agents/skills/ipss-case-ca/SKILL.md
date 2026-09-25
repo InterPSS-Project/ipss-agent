@@ -47,6 +47,20 @@ Nothing is prompted for. Each of the two inputs is resolved independently:
 4. the Java defaults — **N-1 outages for every branch not connected to the reference bus**, and
    **every branch monitored**, at a 90 % overload threshold.
 
+`overloadThreshold` (plugin 0.4.6+) takes the same ladder and sets the **violation check loading** —
+the percentage at or above which a monitored branch is reported:
+
+```
+interpss_run_ca(overloadThreshold: 80)     # report from 80 % instead of 90 %
+```
+
+It is the value the tab's **Run Contingency Analysis** dialog collects in its **Violation Check
+Loading (%)** field, so an argument and a dialog run agree. It must satisfy `0 < t <= 1000`; anything
+else is rejected before the bridge is called. Omit it and `ca_run.json`'s `overloadThreshold` (or 90)
+applies — the resolved number always comes back as `threshold`. An argument overrides **only the key
+it names** (plugin 0.4.7+), so passing `overloadThreshold` alone keeps the case's contingency and
+monitored-branch selection.
+
 | Argument form | Example |
 |---|---|
 | File name in the resolved case's folder | `2k_contingencies_115kVAbove.json` |
@@ -64,7 +78,7 @@ bridge is called; a file that does not exist is rejected too, naming the argumen
 | `contingencies` | Contingency cases applied (the N-1 set, or the entries in the contingency file) |
 | `monitoredBranches` | Branches whose post-contingency loading was checked |
 | `overloads` | Overloading rows written to the CSV — one per (monitored branch, contingency) pair above the threshold |
-| `threshold` | Overload threshold in percent (90 unless the runner's config changes) |
+| `threshold` | The overload threshold actually applied, in percent — the `overloadThreshold` argument, else `config/ca_run.json`, else 90 |
 | `contingencyCsv` | `<stem>_DF_contingency.csv` under `wspace/<case dir>/result/` |
 | `contingencyFile` / `monitoredBranchFile` | The inputs actually used; absent means the Java defaults (`all N-1 outages` / `all branches monitored`) |
 | `caSummary` | The runner's raw `ContAnalysisSummary` text, in case a number needs checking |
@@ -119,8 +133,9 @@ Typical order for a study: `$ipss-case-load` → `$ipss-case-script` (optional s
 
 ## Caveats
 
-- **DC only.** The screening uses a DC load flow with losses and a 90 % threshold; it neither proves
-  nor replaces an AC assessment. A branch that passes DC screening can still violate in AC.
+- **DC only.** The screening uses a DC load flow with losses and the configured overload threshold
+  (90 % by default); it neither proves nor replaces an AC assessment. A branch that passes DC screening
+  can still violate in AC.
 - **Base-case flows come from the runner**, not from a previous ACLF: the summary is independent of
   whether `interpss_run_aclf` has run, and it does not change the model's solved state.
 - The run **overwrites** `<stem>_DF_contingency.csv`; an existing NERC report built from the older
@@ -155,7 +170,8 @@ report overloads — state that those values come from the last run, not from a 
 | `Invalid case path` / `unrecognized JSON file selector` | Use a case `data/…` path (or preset label) and a JSON name in the case folder or a `data/…json` path |
 | `contingencyFile not found` / `monitorFile not found` | The argument is wrong or the file is not under `wspace/`; omit the argument to fall back to `config/ca_run.json`, discovery and the Java defaults |
 | `no simulation case is selected` | Select a case in the InterPSS tab, or pass `case` explicitly |
-| No overloads reported | Expected on a lightly loaded case: the default threshold is 90 % of rating; check `threshold` and the monitored set in the result |
+| No overloads reported | Expected on a lightly loaded case: the default threshold is 90 % of rating; check `threshold` and the monitored set in the result, or pass a lower `overloadThreshold` |
+| `overloadThreshold must be a loading percentage between 0 and 1000` | The threshold argument is out of range or not a number; pass a percentage such as `80`, or omit it for `ca_run.json`/90 |
 | The CSV looks empty | Nothing crossed the threshold — the file has a header and no rows |
 | `the in-process InterPSS bridge is unavailable` | Install `java-bridge` and build the uber JAR (`scripts/setup-java-bridge.sh`), then restart `dsh web` |
 | Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx8g`; see `Setup.md` for heap guidance |

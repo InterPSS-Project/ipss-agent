@@ -912,7 +912,7 @@ module.exports = {
       }
 
       // --- Run Contingency Analysis dialog -----------------------------------
-      // The CA button opens this dialog; OK saves the four-key config/ca_run.json in
+      // The CA button opens this dialog; OK saves the five-key config/ca_run.json in
       // the case folder and runs CA with it. Cancel writes nothing.
 
       function caCountFor(file, kind) {
@@ -975,6 +975,10 @@ module.exports = {
       // Only the picked custom sections must be valid before OK runs.
       function caFormError() {
         if (caForm === null) return 'the run configuration is still loading'
+        const threshold = Number(caForm.overloadThreshold)
+        if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1000) {
+          return 'violation check loading must be a percentage between 0 and 1000'
+        }
         const kinds = ['contingency', 'monitored']
         for (const kind of kinds) {
           const mode = kind === 'contingency' ? caForm.contingencyMode : caForm.monitorMode
@@ -1022,6 +1026,11 @@ module.exports = {
                 contingencyFile: res.config.contingencyFile || null,
                 monitorMode: res.config.monitorMode === 'custom' ? 'custom' : 'all',
                 monitoredBranchFile: res.config.monitoredBranchFile || null,
+                // The violation-check loading the dialog shows; kept as typed so the input
+                // behaves normally, validated and coerced on OK.
+                overloadThreshold: typeof res.config.overloadThreshold === 'number'
+                  ? String(res.config.overloadThreshold)
+                  : '90',
               })
               setCaWarning(res.warning || null)
             } else {
@@ -1031,6 +1040,12 @@ module.exports = {
           (err) => { setCaLoading(false); setCaDialogError(String(err && err.message ? err.message : err)) },
         )
         loadCaFiles(c)
+      }
+
+      function setCaThreshold(value) {
+        if (caForm === null) return
+        setCaDialogError(null)
+        setCaForm({ ...caForm, overloadThreshold: value })
       }
 
       function setCaMode(kind, mode) {
@@ -1086,6 +1101,7 @@ module.exports = {
           contingencyFile: caForm.contingencyMode === 'custom' ? caForm.contingencyFile : null,
           monitorMode: caForm.monitorMode,
           monitoredBranchFile: caForm.monitorMode === 'custom' ? caForm.monitoredBranchFile : null,
+          overloadThreshold: Number(caForm.overloadThreshold),
         }
         setCaSaving(true)
         setCaDialogError(null)
@@ -1790,6 +1806,19 @@ module.exports = {
             React.createElement('div', { style: { fontWeight: 600, fontSize: '16px' } }, 'Run Contingency Analysis'),
             React.createElement('button', { onClick: cancelCaDialog, style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
           ),
+          caForm !== null ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' } },
+            React.createElement('span', { style: { fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, 'Violation Check Loading (%):'),
+            React.createElement('input', {
+              type: 'number',
+              min: 1,
+              max: 1000,
+              step: 1,
+              value: caForm.overloadThreshold,
+              onChange: (e) => setCaThreshold(e.target.value),
+              title: 'A monitored branch whose post-contingency loading reaches this percentage is reported',
+              style: { width: '92px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', textAlign: 'center' },
+            }),
+          ) : null,
           caCase !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginBottom: '10px' } }, 'Case: ' + caCase.displayName) : null,
           caLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
           caForm === null ? React.createElement('pre', { style: { ...mono, maxHeight: '180px', overflow: 'auto' } }, caDialogError || 'no run configuration available') :

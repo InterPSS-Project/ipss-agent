@@ -20,24 +20,31 @@ import com.google.gson.Gson;
  *   "contingencyMode": "all" | "custom",
  *   "contingencyFile": "data/psse/Texas2K/2k_contingencies_115kVAbove.json",
  *   "monitorMode": "all" | "custom",
- *   "monitoredBranchFile": "data/psse/Texas2K/2k_monitored_branches.json"
+ *   "monitoredBranchFile": "data/psse/Texas2K/2k_monitored_branches.json",
+ *   "overloadThreshold": 90
  * }
  * </pre>
  *
- * A missing key defaults to {@link #ALL} with no file. Unlike
+ * A missing key defaults to {@link #ALL} with no file, and a missing
+ * {@code overloadThreshold} to {@link #DEFAULT_OVERLOAD_THRESHOLD}. The
+ * threshold is the violation-check loading percentage the dialog shows: a
+ * monitored branch whose post-contingency loading reaches it is reported. Unlike
  * {@code aclf_run.json} there is no project-level default: contingency and
  * monitored-branch lists are case-specific, so an absent {@code ca_run.json}
  * falls through to the runner's built-in defaults (all N-1 outages, all
  * branches monitored).
  */
 public record CaRunConfig(String contingencyMode, String contingencyFile,
-        String monitorMode, String monitoredBranchFile) {
+        String monitorMode, String monitoredBranchFile, Double overloadThreshold) {
 
     public static final String ALL = "all";
     public static final String CUSTOM = "custom";
 
-    /** All N-1 contingencies / monitor every branch. */
-    public static final CaRunConfig DEFAULT = new CaRunConfig(ALL, null, ALL, null);
+    /** Violation-check loading (%) used when the file does not set one. */
+    public static final double DEFAULT_OVERLOAD_THRESHOLD = 90.0;
+
+    /** All N-1 contingencies / monitor every branch / 90% threshold. */
+    public static final CaRunConfig DEFAULT = new CaRunConfig(ALL, null, ALL, null, null);
 
     /**
      * Read {@code configFile}. Unknown keys are ignored, blank values become
@@ -54,7 +61,8 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
                 mode(raw.contingencyMode(), configFile, "contingencyMode"),
                 blankToNull(raw.contingencyFile()),
                 mode(raw.monitorMode(), configFile, "monitorMode"),
-                blankToNull(raw.monitoredBranchFile()));
+                blankToNull(raw.monitoredBranchFile()),
+                threshold(raw.overloadThreshold(), configFile));
     }
 
     public boolean contingencyIsCustom() {
@@ -85,6 +93,23 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
                     + "' (expected " + ALL + "|" + CUSTOM + ")");
         }
         return normalized;
+    }
+
+    /** The configured violation-check loading (%), or the default when unset. */
+    public double overloadThresholdOrDefault() {
+        return overloadThreshold == null ? DEFAULT_OVERLOAD_THRESHOLD : overloadThreshold;
+    }
+
+    /** Reject a threshold the runner could not honour rather than silently defaulting. */
+    private static Double threshold(Double value, Path configFile) {
+        if (value == null) {
+            return null;
+        }
+        if (!Double.isFinite(value) || value <= 0.0 || value > 1000.0) {
+            throw new IllegalStateException(configFile
+                    + ": overloadThreshold must be a loading percentage between 0 and 1000, got " + value);
+        }
+        return value;
     }
 
     private static String blankToNull(String value) {

@@ -12,6 +12,7 @@ import org.interpss.agent.report.ReportType;
 import org.interpss.agent.runner.AclfRunner;
 import org.interpss.agent.runner.ContingencyRunner;
 import org.interpss.agent.runner.GvyScriptRunner;
+import org.interpss.agent.util.CaRunConfig;
 import org.interpss.agent.util.IpssNetworkInfo;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.result.AclfResultAdapter;
@@ -90,6 +91,17 @@ public final class IpssAgentBridge {
     public synchronized String runContingency(String format, String absoluteCasePath,
             String absoluteContPath, String absoluteMonitorPath,
             String absoluteResultsDir, String stem) {
+        return runContingency(format, absoluteCasePath, absoluteContPath, absoluteMonitorPath,
+                absoluteResultsDir, stem, CaRunConfig.DEFAULT_OVERLOAD_THRESHOLD);
+    }
+
+    /**
+     * As above, with the violation-check loading (%) the caller asked for — the CA
+     * dialog's field, the tool's `overloadThreshold`, or `config/ca_run.json`.
+     */
+    public synchronized String runContingency(String format, String absoluteCasePath,
+            String absoluteContPath, String absoluteMonitorPath,
+            String absoluteResultsDir, String stem, double overloadThreshold) {
         try {
             AclfNetwork net = repo.getAclfNetBase();
             if (net == null || loadedInput == null || !loadedInput.equals(absoluteCasePath)) {
@@ -100,7 +112,7 @@ public final class IpssAgentBridge {
             Path resultsDir = Paths.get(absoluteResultsDir);
             Files.createDirectories(resultsDir);
             ContingencyRunner.ContAnalysisSummary summary = ContingencyRunner.runOnNet(net, resultsDir, stem,
-                    optionalPath(absoluteContPath), optionalPath(absoluteMonitorPath));
+                    optionalPath(absoluteContPath), optionalPath(absoluteMonitorPath), overloadThreshold);
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("format", format);

@@ -177,7 +177,7 @@ Behaviour:
 
 | | |
 | --- | --- |
-| Input | `{ case?: string, contingencyFile?: string, monitorFile?: string }` — all optional |
+| Input | `{ case?: string, contingencyFile?: string, monitorFile?: string, overloadThreshold?: number }` — all optional |
 | Output | `{ ok, case, source, format, resultDir, contingencyCsv, contingencyFile?, monitoredBranchFile?, threshold?, contingencies?, monitoredBranches?, overloads?, caSummary, error? }` |
 | `presentationMeta` | `{ ok, case, source, resultDir, contingencyCsv }` |
 | Card key | `interpss_run_ca` (0.4.1+; its **Explore result → Contingency** row since 0.4.2) |
@@ -192,6 +192,18 @@ dialog uses, so the result file is identical; the tool simply resolves the input
 4. the Java defaults — N-1 outages on every branch not connected to the reference bus, every branch
    monitored, 90 % overload threshold.
 
+`overloadThreshold` (0.4.6+) follows the same ladder and is the value the dialog's **Violation Check
+Loading (%)** field writes: the argument wins, else the case's `config/ca_run.json`, else 90. It is a
+loading percentage (`0 < t <= 1000`); anything else is rejected before the bridge is called. Each
+argument overrides **only the keys it names** (0.4.7+), so `interpss_run_ca(overloadThreshold: 80)`
+keeps the case's own contingency and monitored-branch selection and just reports from 80 % — the same
+way `contingencyFile` alone keeps the case's monitored set. The threshold is no longer a constant, so
+`ca_run.json` carries a fifth key, and the dialog's **OK** persists it alongside the other four:
+
+```json
+{ "contingencyMode": "custom", "contingencyFile": "…", "monitorMode": "all", "monitoredBranchFile": null, "overloadThreshold": 85 }
+```
+
 | Argument form | Resolves to |
 | --- | --- |
 | `2k_contingencies_115kVAbove.json` | `wspace/<case dir>/2k_contingencies_115kVAbove.json` |
@@ -201,9 +213,10 @@ dialog uses, so the result file is identical; the tool simply resolves the input
 A non-`.json` file, a `..` segment, a path outside `wspace/` or a file that does not exist is rejected
 before the bridge is called.
 
-`render()` prints the threshold, the contingency / monitored-branch / overload counts, the inputs
-actually used (`all N-1 outages` / `all branches monitored` when the defaults applied) and the CSV
-path. `caSummary` carries the runner's raw `ContAnalysisSummary` text for cross-checking.
+`render()` prints the threshold it used (the resolved one — argument, `ca_run.json` or 90), the
+contingency / monitored-branch / overload counts, the inputs actually used (`all N-1 outages` / `all
+branches monitored` when the defaults applied) and the CSV path. `caSummary` carries the runner's raw
+`ContAnalysisSummary` text for cross-checking.
 
 Behaviour and caveats:
 
@@ -489,6 +502,9 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.4.2 | The CA card gains an **Explore result → Contingency** row (the ACLF explorer panel parameterized: one scope, no Report button, its own labels) |
 | 0.4.3 | Explorer tables sort: `readCsv` takes `sortColumn`/`sortDesc` and sorts the whole file before paging, headers are clickable with a ▲/▼ marker, and the CA table opens worst-`LoadingPercent`-first |
 | 0.4.4 | The tab's result tables sort too: `renderCsvTable`/`renderBusTable` gain clickable headers (▲/▼) and the tab's **Contingency** table opens worst-`LoadingPercent`-first, paging and all |
+| 0.4.5 | Version-only repack of the configuration relocation: `aclf_run.json` and `ca_run.json` move to `<case folder>/config/` (the project default stays `config/aclf_run.json`), and every tool/RPC/dialog path follows — `ProjectPaths`, `getAclfOptions`/`getCaOptions`/`saveCaOptions` and the tools' descriptions |
+| 0.4.6 | A configurable **Violation Check Loading (%)** replaces the fixed 90 % threshold: the CA dialog renders a numeric field (seeded from `getCaOptions`, validated before OK), `interpss_run_ca` accepts `overloadThreshold`, `config/ca_run.json` gains the key, and the value reaches the runner through `runContingency`/`resolveInputs`/`setOverloadThreshold` instead of a constant |
+| 0.4.7 | Two CA-round-trip fixes: `saveCaOptions` persists `overloadThreshold` with the other four keys (0.4.6 dropped it, so a dialog run at 80 % reopened at 90 % and a later CLI/tool run used 90), and the tool merges its arguments **per key** over the resolved case config instead of replacing it — `interpss_run_ca(overloadThreshold: 80)` no longer discards the case's contingency/monitored-branch selection |
 | 0.4.1 | `interpss_run_ca`: DC contingency analysis from chat with the CA dialog bypassed (explicit inputs → `ca_run.json` → case-folder discovery → N-1 defaults), plus its card and the `ipss-case-ca` skill |
 | 0.4.0 | Version-only release: the first 0.4.x, carrying 0.3.17–0.3.23 unchanged (the `interpss_run_gvy` tool and its skill, the `ipss-case-load` skill, `wspace/…` selector spellings, the Simu Case picker + `✓ Loaded:` sync, `-Xmx8g`, and the load card's confirmation line) |
 
@@ -513,7 +529,8 @@ objects) so a card can render without re-deriving paths from the result text.
 | `noSuchProperty` / `MissingMethodException` from a script | The failure names the property and the script line; check the JavaBean names in `docs/groovy-script-adapter-architecture.md` |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
 | `contingencyFile not found` / `monitorFile not found` | The CA argument is wrong or the file is not under `wspace/`; omit it to fall back to `config/ca_run.json`, discovery and the Java N-1 defaults |
-| `interpss_run_ca` reports zero overloads | Expected on a lightly loaded case — the default threshold is 90 % of rating; check `threshold` and the monitored set |
+| `interpss_run_ca` reports zero overloads | Expected on a lightly loaded case — the default threshold is 90 % of rating; check `threshold` and the monitored set, or pass a lower `overloadThreshold` |
+| `overloadThreshold must be a loading percentage between 0 and 1000` | The CA threshold argument is out of range or not a number (the dialog's field validates the same way); pass a percentage such as `80`, or omit it for `config/ca_run.json`/90 |
 | The tab's Contingency table is not sorted | Needs 0.4.4+: the tab reads through the same `readCsv` sort, and its Contingency table defaults to `LoadingPercent` descending; Bus/Branch/Gen/Load keep file order |
 | A sorted explorer table reorders only some rows | Fixed in 0.4.3: the Host sorts before slicing the page, so paging follows the order; a column it cannot find returns the file order and no sort marker |
 | The CA card shows no **Explore result** row | The row needs 0.4.2+ and a settled, successful call; a failed or still-running call, or a replayed older block, falls back to the plain text card |
