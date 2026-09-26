@@ -41,7 +41,15 @@ The InterPSS tab only enables its tools when the workspace `README.md` first `#`
 
 ## InterPSS DSH GUI Tab
 
-Open the iPSS Agent folder as a workspace in DSH. You can then run the power system simulation workflow or chat following the DSH plugin user guide.
+Open the iPSS Agent folder as a workspace in DSH. Create a new chat session under the workspace, select the Creater mode (recommended), prompt the following ipss-case-aclf command to run a sample AC Loadflow:
+
+```text
+/ipss-case-aclf @<ieee14.ieee>
+```
+
+![InterPSS DSH Start](../image/ipss-dsh-chat-start.png)
+
+You can then run the power system simulation workflow or chat following the procedures below.
 
 ### Open the InterPSS tab
 
@@ -219,11 +227,11 @@ The dialog shows the **Over Loading Threshold(%)** field at the top, then the tw
 section can use a built-in default or a user-defined `.json` from the case folder:
 
 
-| Field / Section                 | Default                        | Custom                                                                       |
-| ------------------------------- | ------------------------------ | ---------------------------------------------------------------------------- |
-| **Over Loading Threshold(%)** | `90`                           | Any percentage `0 < t <= 1000` — a branch whose post-contingency loading reaches it is reported as an overload (0.4.6+) |
-| **Define Contingency Branches** | Consider all N-1 contingencies | User-defined contingency — pick a `.json` with a `contingencies` array       |
-| **Define Monitored Branches**   | Monitor all branches           | Monitor selected branches — pick a `.json` with a `monitored_branches` array |
+| Field / Section                 | Default                        | Custom                                                                                                                  |
+| ------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| **Over Loading Threshold(%)**   | `90`                           | Any percentage `0 < t <= 1000` — a branch whose post-contingency loading reaches it is reported as an overload (0.4.6+) |
+| **Define Contingency Branches** | Consider all N-1 contingencies | User-defined contingency — pick a `.json` with a `contingencies` array                                                  |
+| **Define Monitored Branches**   | Monitor all branches           | Monitor selected branches — pick a `.json` with a `monitored_branches` array                                            |
 
 
 For a custom pick:
@@ -237,10 +245,10 @@ For a custom pick:
 An out-of-range threshold blocks **OK** with `over loading threshold must be a percentage between 0 and 1000`.
 
 
-| Button         | Effect                                                                   |
-| -------------- | ------------------------------------------------------------------------ |
+| Button         | Effect                                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | **OK**         | Saves `wspace/<case-parent>/config/ca_run.json` — the over loading threshold and both section choices (0.4.7+), closes the dialog, and runs CA |
-| **Cancel** / ✕ | Closes without writing or running                                        |
+| **Cancel** / ✕ | Closes without writing or running                                                                                                              |
 
 
 `config/ca_run.json` is the same file the Java CLI reads for CA, so GUI and batch runs stay aligned.
