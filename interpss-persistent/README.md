@@ -67,7 +67,7 @@ iPSS Agent workspace activation check.
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
 | `interpss_run_ca` | Run a DC contingency analysis (N-1 screening) on the held case without the CA dialog: inputs come from `contingencyFile`/`monitorFile`, else the case-folder `config/ca_run.json`, else case-folder discovery, else the Java N-1 defaults; `overloadThreshold` (0.4.6+) sets the over loading threshold the run reports against (argument → `ca_run.json` → 90). Writes `<stem>_DF_contingency.csv`, browsable from the card's **Explore result → Contingency** row (0.4.2+), which opens sorted by `LoadingPercent` with clickable headers (0.4.3+). |
-| `interpss_run_gvy` | Apply a Groovy (`.gvy`) scenario script from the case folder's `scripts/` directory to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. |
+| `interpss_run_gvy` | Apply Groovy to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. `script` takes a `.gvy` file from the case folder's `scripts/` directory or, since 0.4.9, the source itself — whitespace or statement punctuation marks source, a single bare word is a file name. |
 
 The first three tools resolve the target case through one shared helper, in this order:
 
@@ -103,7 +103,7 @@ so the Host slices it instead of forwarding it; and an unknown `scope` is reject
 would silently fall back to `net`. Branch ranking is by flow magnitude, not rating loading.
 
 `interpss_run_gvy` edits the held model through InterPSS's Groovy script adapter
-(`org.interpss.script.gvy.AclfNetGvyScriptProcessor`, binding `aclfnet`). The script
+(`org.interpss.agent.script.gvy.AclfNetDshGvyScriptProcessor`, bindings `aclfnet` + `senAlgo`). The script
 file is resolved inside the **case folder's `scripts/` directory** (a bare file
 name, or a `data/…/scripts/x.gvy` path); the Host and the Java bridge both refuse
 anything else. Scripts mutate the model in place with no rollback, so `reload: true`

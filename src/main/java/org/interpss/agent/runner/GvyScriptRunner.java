@@ -8,18 +8,21 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import org.apache.commons.math3.complex.Complex;
+import org.interpss.agent.script.gvy.AclfNetDshGvyScriptProcessor;
 import org.interpss.numeric.datatype.Unit.UnitType;
-import org.interpss.script.gvy.AclfNetGvyScriptProcessor;
 
 import com.interpss.core.aclf.AclfNetwork;
 
 /**
- * Evaluates a Groovy {@code .gvy} script against a live {@link AclfNetwork}.
+ * Evaluates Groovy source against a live {@link AclfNetwork} — either the text of a
+ * {@code .gvy} file ({@link #runOnNet(AclfNetwork, Path)}) or an inline string
+ * ({@link #runSourceOnNet(AclfNetwork, String, String)}), the adapter's two entry points.
  *
- * <p>The script sees the network under the {@code aclfnet} binding and mutates it in
- * place — the same instance, with no copy-on-eval and no rollback — exactly as
- * {@link AclfNetGvyScriptProcessor} defines it. {@code Complex} is available without an
- * import because {@code BaseGvyScriptProcessor} prepends {@code GVY_IMPORTS}.
+ * <p>The script sees the network under the {@code aclfnet} binding (plus {@code senAlgo},
+ * the DC sensitivity analyser) and mutates it in place — the same instance, with no
+ * copy-on-eval and no rollback — exactly as {@link AclfNetDshGvyScriptProcessor} defines
+ * it. {@code Complex} and the sensitivity imports are available without an import because
+ * {@code BaseDshGvyScriptProcessor} prepends {@code GVY_IMPORTS}.
  *
  * <p>File I/O stays here, outside the processor: the processor only evaluates strings.
  */
@@ -27,6 +30,12 @@ public final class GvyScriptRunner {
 
     /** Refuse anything larger; scenario scripts are a few lines, not datasets. */
     public static final long MAX_SCRIPT_BYTES = 256 * 1024;
+
+    /**
+     * Lines {@code GVY_IMPORTS} prepends to every script, so a stack line can be mapped
+     * back to the caller's own line numbering.
+     */
+    private static final int GVY_IMPORT_LINES = countLines(AclfNetDshGvyScriptProcessor.GVY_IMPORTS);
 
     /** The generated script class, used to pull a line number out of a failing stack. */
     private static final Pattern SCRIPT_LINE = Pattern.compile("Script\\d*\\.groovy:(\\d+)");
@@ -100,13 +109,33 @@ public final class GvyScriptRunner {
         }
 
         String code = Files.readString(scriptFile, StandardCharsets.UTF_8);
+        return runSourceOnNet(net, code, scriptFile.toString());
+    }
+
+    /**
+     * Evaluate Groovy {@code code} against {@code net}, which is mutated in place — the
+     * processor's inline entry point, so a caller need not write a {@code .gvy} file.
+     * {@code label} names the script in the returned digest (the file path for
+     * {@link #runOnNet(AclfNetwork, Path)}, a description of the source otherwise).
+     */
+    public static Result runSourceOnNet(AclfNetwork net, String code, String label) throws ScriptError {
+        if (net == null) {
+            throw new ScriptError("no network is loaded", 0, null);
+        }
+        if (code == null || code.isBlank()) {
+            throw new ScriptError("the script source is empty", 0, null);
+        }
+        long size = code.getBytes(StandardCharsets.UTF_8).length;
+        if (size > MAX_SCRIPT_BYTES) {
+            throw new ScriptError("script is too large (" + size + " bytes; limit " + MAX_SCRIPT_BYTES + ")", 0, null);
+        }
         double loadBefore = totalLoadMw(net);
         double genBefore = totalGenerationMw(net);
 
         long started = System.nanoTime();
         Object returned;
         try {
-            returned = new AclfNetGvyScriptProcessor(net).evaluate(code);
+            returned = new AclfNetDshGvyScriptProcessor(net).evaluate(code);
         } catch (RuntimeException | Error e) {
             throw new ScriptError(describe(e), scriptLine(e), e);
         }
@@ -114,7 +143,8 @@ public final class GvyScriptRunner {
 
         Reported reported = reported(returned);
         return new Result(
-                scriptFile.toString(), reported.value, reported.type, elapsedMs,
+                label == null || label.isBlank() ? "inline Groovy" : label,
+                reported.value, reported.type, elapsedMs,
                 net.getNoActiveBus(), net.getNoActiveBranch(),
                 totalLoadMw(net), totalGenerationMw(net),
                 loadBefore, genBefore, net.isLfConverged());
@@ -164,8 +194,23 @@ public final class GvyScriptRunner {
         return message.isEmpty() ? name : name + ": " + message.trim();
     }
 
-    /** 1-based script line from a Groovy stack trace, or 0 when absent. */
+    /**
+     * 1-based line <em>in the caller's script</em> from a Groovy stack trace, or 0 when the
+     * stack does not identify one. Groovy numbers the generated class, which starts with
+     * {@code GVY_IMPORTS}, so the prepended import lines are subtracted here — otherwise
+     * every failure would be reported four lines below the text the caller wrote.
+     */
     static int scriptLine(Throwable e) {
+        int generated = generatedScriptLine(e);
+        if (generated <= 0) {
+            return 0;
+        }
+        int line = generated - GVY_IMPORT_LINES;
+        return line > 0 ? line : 1;
+    }
+
+    /** The raw line in the generated script class, imports included, or 0 when absent. */
+    static int generatedScriptLine(Throwable e) {
         for (Throwable t = e; t != null; t = t.getCause()) {
             for (StackTraceElement frame : t.getStackTrace()) {
                 if (frame.getClassName().startsWith("Script")) {
@@ -178,5 +223,20 @@ public final class GvyScriptRunner {
             }
         }
         return 0;
+    }
+
+    /** Physical lines in {@code text} — what a Groovy prefix of that text shifts by. */
+    private static int countLines(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        int lines = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (text.charAt(i) == '\n') {
+                lines++;
+            }
+        }
+        // A prefix that does not end in a newline would run into the script's first line.
+        return text.charAt(text.length() - 1) == '\n' ? lines : lines + 1;
     }
 }

@@ -239,6 +239,47 @@ function parseCaSummary(text) {
 const GVY_SCRIPT_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\/scripts\/[A-Za-z0-9_.\/-]+\.gvy$/
 const GVY_MAX_LISTED = 20
 const GVY_STDOUT_LIMIT = 8000
+// The `script` argument carries the adapter's two entry points (see
+// docs/groovy-script-adapter-architecture.md): a .gvy file selector, or the Groovy
+// source itself. A value is a selector when it can name a file — it ends in .gvy,
+// carries a path separator, or is a bare name (the form that already failed as an
+// "unrecognized script selector"). Whitespace or statement punctuation means source.
+const GVY_CODE_PUNCT_RE = /[\s;{}()'"=,+\*%<>&|!?[\]:@]/
+const GVY_BARE_NAME_RE = /^[A-Za-z0-9_-]+$/
+// Mirrors GvyScriptRunner.MAX_SCRIPT_BYTES; the JVM enforces the byte limit itself.
+const GVY_SOURCE_MAX_CHARS = 256 * 1024
+
+// Decide whether `script` names a file or is inline Groovy source.
+function classifyGvyArgument(raw) {
+  const value = typeof raw === 'string' ? raw.trim() : ''
+  if (value === '') return { kind: 'none' }
+  if (GVY_CODE_PUNCT_RE.test(value)) return { kind: 'source', value }
+  if (/\.gvy$/i.test(value)) return { kind: 'file', value }
+  if (GVY_BARE_NAME_RE.test(value)) return { kind: 'file', value }
+  if (value.includes('/')) return { kind: 'file', value }
+  return { kind: 'source', value }
+}
+
+// The label an inline script carries in the result and on the card; no file name exists.
+function gvySourceLabel(source) {
+  const lines = String(source).split('\n').length
+  return 'inline Groovy (' + lines + (lines === 1 ? ' line)' : ' lines)')
+}
+
+// Inline source needs the same guard rails as a file: non-empty and bounded.
+function validateGvySource(value) {
+  const source = typeof value === 'string' ? value : ''
+  if (source.trim() === '') {
+    return { ok: false, error: 'the `script` argument is empty' }
+  }
+  if (source.length > GVY_SOURCE_MAX_CHARS) {
+    return {
+      ok: false,
+      error: 'the inline script is too large (' + source.length + ' characters; limit ' + GVY_SOURCE_MAX_CHARS + ')',
+    }
+  }
+  return { ok: true, source: source }
+}
 
 // Resolve the `script` argument to a workspace-relative .gvy path under the case's
 // scripts/ folder, then confirm it exists. Returns { ok, input, abs } or { ok:false, error }.
@@ -764,6 +805,32 @@ function captureStdio() {
     }
   }
   return { out: () => '', err: () => '', stop: () => {} }
+}
+
+// Run one Groovy evaluation through the bridge: capture the script's println output,
+// then mirror the held case and its counts. Shared by `runGvy` (a .gvy file) and
+// `runGvySource` (inline source), so the two entry points cannot drift.
+async function gvyThrough(run, absCase) {
+  const cap = captureStdio()
+  let raw
+  try {
+    raw = await run()
+  } finally {
+    cap.stop()
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.ok === true) {
+        lastLoadedAbs = absCase
+        rememberLoadedCounts(parsed.buses, parsed.branches)
+      }
+      parsed.stdout = cap.out()
+      parsed.stderr = cap.err()
+      raw = JSON.stringify(parsed)
+    }
+  } catch (e) {}
+  return raw
 }
 
 // Sort CSV data rows by one header column. Numeric when every non-empty value in that
@@ -2259,22 +2326,29 @@ function caseSummaryTool(ctx) {
 }
 
 // --- Chat tool: interpss_run_gvy ---------------------------------------------
-// Applies a Groovy (.gvy) scenario script to the case held in the embedded bridge.
-// The script mutates that network in place (binding `aclfnet`, Complex pre-imported),
-// which is what makes the tool useful and also what makes it dangerous: edits are not
-// rolled back, so `reload: true` re-parses the case and the docs say the scripts are
-// trusted code. Solving stays a separate step (interpss_run_aclf).
+// Applies Groovy to the case held in the embedded bridge — a .gvy file, or the source
+// itself. The script mutates that network in place and may query it (bindings `aclfnet`
+// and `senAlgo`, the DC sensitivity analyser; Complex and the sensitivity types are
+// pre-imported), which is what makes the tool useful and also what makes it dangerous:
+// edits are not rolled back, so `reload: true` re-parses the case and the docs say the
+// scripts are trusted code. Solving stays a separate step (interpss_run_aclf).
 function runGvyTool(ctx) {
   return {
     name: 'interpss_run_gvy',
     description:
       LOAD_FIRST_HINT +
-      'Apply a Groovy (.gvy) scenario script to the power-system case held in the embedded InterPSS ' +
-      'bridge, then report what the script changed. The script file comes from its case folder\'s ' +
-      'scripts/ directory: pass just the file name (for example "ieee14_adjBus14.gvy") or a ' +
-      'data/.../scripts/x.gvy path. Inside the script the network is bound as `aclfnet` (for example ' +
-      '`aclfnet.getBus("Bus14").getContributeLoad("Bus14-L1").loadCP = new Complex(0.18, 0.07)`), and ' +
-      'Complex is already imported. The script edits the model in place and edits are NOT rolled back, ' +
+      'Apply a Groovy scenario script to the power-system case held in the embedded InterPSS ' +
+      'bridge, then report what the script changed. The script comes from its case folder\'s ' +
+      'scripts/ directory — pass the file name (for example "ieee14_adjBus14.gvy") or a ' +
+      'data/.../scripts/x.gvy path — or pass the Groovy source itself, which is evaluated the same ' +
+      'way without writing a file (for example "aclfnet.getBus(\'Bus14\').getContributeLoad(\'Bus14-L1\')' +
+      '.loadCP = new Complex(0.50, 0.30)"). A single bare word is read as a file name, so anything ' +
+      'containing whitespace or statement punctuation is taken as source. Inside the script the ' +
+      'network is bound as `aclfnet` and a DC sensitivity analyser on that same network as `senAlgo` ' +
+      '(for example `aclfnet.getBus("Bus14").getContributeLoad("Bus14-L1").loadCP = new Complex(0.18, 0.07)`, ' +
+      'or `senAlgo.calGenShiftFactor("Bus14", aclfnet.getBranch("Bus1","Bus5","1"))`); `Complex` and the ' +
+      'sensitivity types (`SenAnalysisType`, `ContingencyBranchOutageType`, `DclfAlgoObjectFactory`) are ' +
+      'already imported. The script edits the model in place and edits are NOT rolled back, ' +
       'so pass `reload: true` to re-parse the case before applying it; a failing script keeps whatever ' +
       'it already changed. Script output from println is returned as `stdout`. This tool only edits the ' +
       'model — call interpss_run_aclf afterwards to solve the edited case. See ' +
@@ -2286,10 +2360,13 @@ function runGvyTool(ctx) {
         script: {
           type: 'string',
           description:
-            'The .gvy script to apply: a file name in the case folder\'s scripts/ directory ' +
-            '(e.g. "ieee14_adjBus14.gvy"), or a workspace-relative path such as ' +
-            '"data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy" — the "wspace/data/..." spelling of ' +
-            'the same path is accepted too.',
+            'The Groovy to apply: a .gvy file name in the case folder\'s scripts/ directory ' +
+            '(e.g. "ieee14_adjBus14.gvy"), a workspace-relative path such as ' +
+            '"data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy" (the "wspace/data/..." spelling is ' +
+            'accepted too), or the Groovy source itself — for example ' +
+            '"aclfnet.getBus(\'Bus14\').getContributeLoad(\'Bus14-L1\').loadCP = new Complex(0.50, 0.30)" ' +
+            'or a multi-line script. Whitespace or statement punctuation marks source; a single bare ' +
+            'word is read as a file name.',
         },
         case: {
           type: 'string',
@@ -2394,15 +2471,48 @@ function runGvyTool(ctx) {
       }
       const target = resolvedCase.target
       const source = resolvedCase.source
-      const script = await resolveGvyScript(ctx, root, target.input, args && args.script)
-      if (script.ok !== true) return fail(script.error, 'argument')
+
+      // `script` is either a .gvy selector or the Groovy source itself (the adapter's
+      // two entry points); `label` is what the result and the card name it.
+      const argument = classifyGvyArgument(args && args.script)
+      if (argument.kind === 'none') {
+        return fail(
+          'the `script` argument is required: a .gvy file name in <case folder>/scripts/ ' +
+          '(for example "ieee14_adjBus14.gvy"), a data/.../scripts/x.gvy path, or the Groovy source itself',
+          'argument',
+        )
+      }
+      let scriptAbs = ''
+      let inline = ''
+      let label = ''
+      if (argument.kind === 'file') {
+        const script = await resolveGvyScript(ctx, root, target.input, argument.value)
+        if (script.ok !== true) return fail(script.error, 'argument')
+        scriptAbs = script.abs
+        label = script.input
+      } else {
+        const checked = validateGvySource(argument.value)
+        if (checked.ok !== true) return fail(checked.error, 'argument')
+        inline = checked.source
+        label = gvySourceLabel(inline)
+      }
+
       const bridge = ctx.get('javaBridge')
       if (bridge === undefined || typeof bridge.runGvy !== 'function') {
         return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
       }
+      if (inline !== '' && typeof bridge.runGvySource !== 'function') {
+        return fail(
+          'this bridge cannot evaluate inline Groovy yet (it predates the adapter\'s source entry point); ' +
+          'rebuild the uber JAR (see scripts/setup-java-bridge.sh), or pass a .gvy file in `script`',
+          source,
+        )
+      }
       const reload = args && args.reload === true
       try {
-        const raw = await bridge.runGvy(target.format, root + '/wspace/' + target.input, script.abs, reload)
+        const raw = inline === ''
+          ? await bridge.runGvy(target.format, root + '/wspace/' + target.input, scriptAbs, reload)
+          : await bridge.runGvySource(target.format, root + '/wspace/' + target.input, inline, reload)
         const parsed = JSON.parse(raw)
         if (!parsed || parsed.ok !== true) {
           // A script can fail *after* editing, so the case and script stay in the
@@ -2412,7 +2522,7 @@ function runGvyTool(ctx) {
             error: String((parsed && parsed.error) || 'bridge runGvy failed'),
             case: target.input,
             source: source,
-            script: script.input,
+            script: label,
           }
           if (parsed && typeof parsed.line === 'number') value.line = parsed.line
           if (parsed && typeof parsed.stdout === 'string' && parsed.stdout !== '') {
@@ -2426,7 +2536,7 @@ function runGvyTool(ctx) {
           case: target.input,
           source: source,
           format: target.format,
-          script: script.input,
+          script: label,
           reload: reload,
         }
         for (const key of ['elapsedMs', 'buses', 'branches', 'loadMw', 'generationMw', 'loadMwBefore',
@@ -2753,26 +2863,13 @@ export default {
       // println output reaches the caller instead of the dsh terminal.
       async runGvy(format, absCase, absScript, reload) {
         const bridge = await ensureBridge(rootFor(absCase))
-        const cap = captureStdio()
-        let raw
-        try {
-          raw = await bridge.runGvy(format, absCase, absScript, reload === true)
-        } finally {
-          cap.stop()
-        }
-        try {
-          const parsed = JSON.parse(raw)
-          if (parsed && typeof parsed === 'object') {
-            if (parsed.ok === true) {
-              lastLoadedAbs = absCase
-              rememberLoadedCounts(parsed.buses, parsed.branches)
-            }
-            parsed.stdout = cap.out()
-            parsed.stderr = cap.err()
-            raw = JSON.stringify(parsed)
-          }
-        } catch (e) {}
-        return raw
+        return gvyThrough(() => bridge.runGvy(format, absCase, absScript, reload === true), absCase)
+      },
+      // The adapter's inline entry point: the same evaluation without a .gvy file.
+      // Kept beside runGvy so both share the stdio capture and held-case bookkeeping.
+      async runGvySource(format, absCase, source, reload) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        return gvyThrough(() => bridge.runGvySource(format, absCase, source, reload === true), absCase)
       },
       async networkInfo() {
         const bridge = await ensureBridge(rootFor(''))

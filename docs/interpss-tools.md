@@ -17,7 +17,7 @@ Reference implementation: `interpss-persistent/lib/index.js` (Host) and
 | `interpss_run_aclf` | Run an AC load flow (ACLF) and report convergence | Writes `<stem>_DF_{bus,branch,gen,load}.csv` and `<stem>_network_info.txt` under `wspace/<case dir>/result/` |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals, or a top-N ranking by scope | None — reads the in-memory model |
 | `interpss_run_ca` | DC contingency analysis (N-1 screening) with the CA dialog bypassed, and report the overload summary | Writes `<stem>_DF_contingency.csv` under `wspace/<case dir>/result/` |
-| `interpss_run_gvy` | Apply a Groovy (`.gvy`) scenario script from the case folder's `scripts/` directory to the bridge-held case | Mutates the held model in place (no rollback); `reload: true` re-parses the case first |
+| `interpss_run_gvy` | Apply Groovy to the bridge-held case — a `.gvy` file from the case folder's `scripts/` directory, or the source itself (0.4.9+) | Mutates the held model in place (no rollback); `reload: true` re-parses the case first |
 
 All six are registered once at the end of `apply()` and are **global to the host process**;
 every call is gated on the iPSS Agent workspace check, so a non-`iPSS Agent` workspace gets an
@@ -291,29 +291,48 @@ that. `sortRule` is only read by the `bus` scope, and only as a substring test o
 
 | | |
 | --- | --- |
-| Input | `{ script: string, case?: string, reload?: boolean }` — `script` is required |
+| Input | `{ script: string, case?: string, reload?: boolean }` — `script` is required, and is either a `.gvy` selector or inline Groovy source (0.4.9+) |
 | Output | `{ ok, case, source, format, script, reload?, elapsedMs?, returnValue?, returnType?, stdout?, line?, buses?, branches?, loadMw?, generationMw?, loadMwBefore?, generationMwBefore?, lfConverged?, error? }` |
 | `presentationMeta` | `{ ok, case, source, script }` |
 | Card key | `interpss_run_gvy` (0.3.17+) |
 
 Applies a Groovy script to the **live** `AclfNetwork` held in the bridge, using
-`org.interpss.script.gvy.AclfNetGvyScriptProcessor` (see
+the agent's own adapter `org.interpss.agent.script.gvy.AclfNetDshGvyScriptProcessor` (see
 [groovy-script-adapter-architecture.md](groovy-script-adapter-architecture.md)): the network is bound
-as `aclfnet`, `Complex` is pre-imported, and property assignment maps to JavaBean setters
-(`bus.loadP = 0.18`, `branch.status = false`, `load.loadCP = new Complex(p, q)`).
+as `aclfnet` and a DC sensitivity analyser as `senAlgo`, `Complex` and the sensitivity types are
+pre-imported, and property assignment maps to JavaBean setters (`bus.loadP = 0.18`,
+`branch.status = false`, `load.loadCP = new Complex(p, q)`). The `Dsh` infix (0.4.10+) marks the
+agent's processors apart from the older `org.interpss.script.gvy.*` classes that still ship inside
+`ipss-runnable`.
 
-**Where the script comes from.** A bare file name resolves into the resolved case's own folder:
+**Where the script comes from.** `script` carries the adapter's **two entry points** — a file
+selector, or the source itself:
 
 | `script` form | Resolves to |
 | --- | --- |
 | `ieee14_adjBus14.gvy` | `wspace/<case dir>/scripts/ieee14_adjBus14.gvy` |
 | `data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy` | that path, verbatim |
 | an absolute path containing `/wspace/data/` | the same file, converted to the `data/…` form |
+| `aclfnet.getBus('Bus14').getContributeLoad('Bus14-L1').loadCP = new Complex(0.50, 0.30)` | evaluated as inline Groovy — no file written (0.4.9+) |
 
-Anything else — a path outside a `scripts/` directory, a non-`.gvy` file, a `..` segment — is
-rejected before the bridge is called, and a missing file fails with the names of the `.gvy` files
-that *are* there. The Java side re-checks the same rule (`.gvy`, regular file, under
-`<case folder>/scripts/`, ≤ 256 KB) so a direct bridge caller cannot bypass it.
+The rule between them is the value's shape: a single bare word is a **file selector**, so
+`ieee14_adjBus14.gvy` and a `data/…/scripts/x.gvy` path stay file names; anything carrying
+**whitespace or statement punctuation** (`=`, `(`, `;`, braces, quotes, commas…) is **source** — which
+covers both one-liners and multi-line scripts. A single token that names something else (`scripts/x.txt`)
+stays a selector, so it keeps the actionable `unrecognized script selector` error rather than being
+evaluated as Groovy.
+
+A file selector that leaves the case's `scripts/` directory, is not a `.gvy` file or contains a `..`
+segment is rejected before the bridge is called, and a missing file fails with the names of the `.gvy`
+files that *are* there; the Java side re-checks the same rule (`.gvy`, regular file, under
+`<case folder>/scripts/`, ≤ 256 KB) so a direct bridge caller cannot bypass it. Inline source is
+evaluated as given (`inline Groovy (N lines)` is what the result and the card call it) and is bounded
+by the same 256 KB limit.
+
+Both paths land in the same JVM call and the same digest: `IpssAgentBridge.runGvy` (a file, through
+`GvyScriptRunner.runOnNet`) and `IpssAgentBridge.runGvySource` (source, through
+`GvyScriptRunner.runSourceOnNet`) share the model load, the scalar-only result rendering and the
+`{ ok, error, line }` failure shape.
 
 **What it returns.** The digest is measured around the evaluation, so a mutation-only script still
 shows its effect: `loadMw` / `generationMw` after the run, `loadMwBefore` / `generationMwBefore`
@@ -325,7 +344,8 @@ a model object is never serialized — its simple class name comes back as `retu
 **Mutating semantics** (the whole point, and the main caveat):
 
 - Edits happen **in place** on the held model and are **never rolled back**; a script that fails
-  halfway keeps what it already changed, and the failure carries `line` (the script line) so the
+  halfway keeps what it already changed, and the failure carries `line` — the line **in the script you
+  passed**, since the adapter subtracts the `GVY_IMPORTS` block it prepends in front of it — so the
   caller can fix it.
 - Running the same script twice applies it twice, unless it assigns absolute values. `reload: true`
   re-parses the case from disk before evaluating, which is the only reset.
@@ -338,6 +358,11 @@ Worked example — the shipped IEEE 14 fixtures:
 ```
 interpss_run_gvy({ script: 'ieee14_adjBus14.gvy', case: 'IEEE 14-bus' })
   Model: 14 buses · 20 branches · load 259.00 → 262.10 MW (+3.10) · gen 272.35 → 272.35 MW · not solved
+
+interpss_run_gvy({ script: "aclfnet.getBus('Bus14').getContributeLoad('Bus14-L1').loadCP = new Complex(0.50, 0.30)",
+                   case: 'IEEE 14-bus', reload: true })
+  Model: 14 buses · 20 branches · load 259.00 → 294.10 MW (+35.10) · gen 272.35 → 272.35 MW · not solved
+
 interpss_run_aclf()          # solves the edited case and rewrites the result CSVs
 ```
 
@@ -438,7 +463,7 @@ The one Host RPC signature that grew is `runReport`, which now accepts an option
 `reportType` (`aclf` | `nerc`) that takes precedence over the contingency-based auto rule.
 
 The bridge's `lastLoadedAbs` mirrors `IpssAgentBridge.loadedInput` and is updated by
-`loadCase`, `runAclf`, `runGvy` and `runContingency` — every JVM load goes through this module's
+`loadCase`, `runAclf`, `runGvy` / `runGvySource` and `runContingency` — every JVM load goes through this module's
 `javaBridge` provider, so the mirror cannot drift in practice. It backs the `bridge` source in
 case resolution, `reused` in `caseInfo`, and (0.3.19) the `case` that `getBridgeCase` hands the
 tab's picker.
@@ -450,7 +475,7 @@ tab's picker.
 | `ipss-case-load` | Load a case into the bridge and report its counts (wraps `interpss_case_load`) |
 | `ipss-case-info` | Report the current case's network info (wraps `interpss_network_info`) |
 | `ipss-case-aclf` | Run ACLF for the current case (wraps `interpss_run_aclf`) |
-| `ipss-case-script` | Apply a `.gvy` scenario script to the current case (wraps `interpss_run_gvy`) |
+| `ipss-case-script` | Apply a scenario edit to the current case — a `.gvy` script or inline Groovy (wraps `interpss_run_gvy`) |
 | `ipss-case-ca` | DC contingency analysis for the current case, dialog-free (wraps `interpss_run_ca`) |
 | `ipss-sim` | Full simulation and reporting workflow through the Java CLI (`IpssCmd`) |
 | `nerc-report-html`, `nerc-report-slides` | Follow-on artifacts from a NERC report |
@@ -506,6 +531,8 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.4.6 | A configurable **over loading threshold** replaces the fixed 90 % threshold: the CA dialog renders a numeric field (seeded from `getCaOptions`, validated before OK), `interpss_run_ca` accepts `overloadThreshold`, `config/ca_run.json` gains the key, and the value reaches the runner through `runContingency`/`resolveInputs`/`setOverloadThreshold` instead of a constant |
 | 0.4.7 | Two CA-round-trip fixes: `saveCaOptions` persists `overloadThreshold` with the other four keys (0.4.6 dropped it, so a dialog run at 80 % reopened at 90 % and a later CLI/tool run used 90), and the tool merges its arguments **per key** over the resolved case config instead of replacing it — `interpss_run_ca(overloadThreshold: 80)` no longer discards the case's contingency/monitored-branch selection |
 | 0.4.8 | The dialog field is labelled **Over Loading Threshold(%)** (it read *Violation Check Loading (%)* in 0.4.6/0.4.7), and its validation message follows: `over loading threshold must be a percentage between 0 and 1000` |
+| 0.4.9 | `interpss_run_gvy`: `script` accepts the Groovy **source itself** as well as a `.gvy` selector (the adapter's inline entry point) — `GvyScriptRunner.runSourceOnNet`, `IpssAgentBridge.runGvySource`, and one `gvyThrough` shared with the file path; the rule is shape-based (a single bare word is a file name, whitespace or statement punctuation means source) |
+| 0.4.10 | The Groovy adapter is the agent's own `org.interpss.agent.script.gvy` pair — `BaseDshGvyScriptProcessor` / `AclfNetDshGvyScriptProcessor` (the `Dsh` infix separates them from the older `org.interpss.script.gvy.*` classes still inside `ipss-runnable`) — and it also binds `senAlgo`, a `SenAnalysisAlgorithm` on the same live network, with `Complex`, `SenAnalysisType`, `ContingencyBranchOutageType` and `DclfAlgoObjectFactory` pre-imported, so a script can query dV/dQ, GSF and transfer factors without leaving Groovy; a failure now reports the line in the caller's own script (the prepended `GVY_IMPORTS` block is subtracted) |
 | 0.4.1 | `interpss_run_ca`: DC contingency analysis from chat with the CA dialog bypassed (explicit inputs → `ca_run.json` → case-folder discovery → N-1 defaults), plus its card and the `ipss-case-ca` skill |
 | 0.4.0 | Version-only release: the first 0.4.x, carrying 0.3.17–0.3.23 unchanged (the `interpss_run_gvy` tool and its skill, the `ipss-case-load` skill, `wspace/…` selector spellings, the Simu Case picker + `✓ Loaded:` sync, `-Xmx8g`, and the load card's confirmation line) |
 
@@ -523,6 +550,8 @@ objects) so a card can render without re-deriving paths from the result text.
 | A summary card shows no case/scope/converged header | By design since 0.3.10 (ranked cards since 0.3.9) — the tool row names the tool and its arguments; the tool result still carries `case` and `converged` for the report |
 | Branch ranking looks wrong for loadability | `interpss_case_summary` ranks by flow magnitude; the `Loading%` column in the result CSV is the rating-based measure |
 | `script not found: …` | The tool lists the `.gvy` files that exist in that `scripts/` folder; a bare name resolves against the **resolved case's** folder, so pass `case` when the selected case is not the one holding the script |
+| Inline Groovy was expected but a file error came back | A value with no whitespace or statement punctuation is read as a file name: add the punctuation (e.g. `x=1`, not `x` alone) or write the script to `<case folder>/scripts/*.gvy` |
+| `this bridge cannot evaluate inline Groovy yet` | The uber JAR predates 0.4.9: rebuild it (or pass a `.gvy` file, which the older JAR evaluates) |
 | `unrecognized script selector` / `must live in …/scripts/` | Scripts are confined to `<case folder>/scripts/` and must end in `.gvy`; `..` is rejected |
 | A script edit vanished | Mutations live on the held model until the case is re-parsed: pass `reload: true`, or load another case and come back |
 | A script change had no effect on the totals | Contribute-model networks (`isContributeGenLoadModel()`) carry load on the contribute objects: edit `bus.getContributeLoad(id).loadCP`, not the aggregate `bus.loadP` |

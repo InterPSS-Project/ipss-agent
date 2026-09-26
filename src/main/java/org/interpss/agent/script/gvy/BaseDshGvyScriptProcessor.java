@@ -3,10 +3,13 @@ package org.interpss.agent.script.gvy;
 import groovy.lang.GroovyShell;
 
 /**
- * Base Groovy script processor implementation.
+ * Base Groovy script processor implementation for the agent's own scripts.
  *
+ * <p>The {@code Dsh} infix keeps these classes apart from the older
+ * {@code org.interpss.script.gvy.BaseGvyScriptProcessor} that still ships inside
+ * {@code ipss-runnable} / ipss-plugin.
  */
-public abstract class BaseGvyScriptProcessor {
+public abstract class BaseDshGvyScriptProcessor {
 	public static final String GVY_IMPORTS = """
 			import org.apache.commons.math3.complex.Complex;
 			import com.interpss.core.DclfAlgoObjectFactory;
@@ -19,7 +22,7 @@ public abstract class BaseGvyScriptProcessor {
 	/**
 	 * Constructor
 	 */
-	public BaseGvyScriptProcessor() {
+	public BaseDshGvyScriptProcessor() {
 	}
 	
 	/**

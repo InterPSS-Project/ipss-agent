@@ -21,7 +21,7 @@ public class GvyScriptEvalTest {
 		
  		assertTrue(net.isContributeGenLoadModel());
  		
-	  	AclfNetGvyScriptProcessor gvyProcessor = new AclfNetGvyScriptProcessor(net);
+	  	AclfNetDshGvyScriptProcessor gvyProcessor = new AclfNetDshGvyScriptProcessor(net);
     	String groovyCode = "aclfnet.id = 'Modified';";
     	Object result = gvyProcessor.evaluate(groovyCode);
     	assertTrue(net.getId().equals("Modified"), "Net name should be 'Modified'");
@@ -55,7 +55,7 @@ public class GvyScriptEvalTest {
 		
  		assertTrue(net.isContributeGenLoadModel());
  		
-	  	AclfNetGvyScriptProcessor gvyProcessor = new AclfNetGvyScriptProcessor(net);
+	  	AclfNetDshGvyScriptProcessor gvyProcessor = new AclfNetDshGvyScriptProcessor(net);
 
 	  	String scriptFile = AgentTestSupport.projectRootPath("wspace/script/ieee14_adjBus14.gvy").toString();
 	  	String groovyCode = FileUtil.readFileAsString(scriptFile);

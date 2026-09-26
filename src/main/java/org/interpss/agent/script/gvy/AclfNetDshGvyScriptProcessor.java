@@ -10,8 +10,11 @@ import groovy.lang.GroovyShell;
 /**
  * AclfNetwork Groovy script processor implementation.
  *
+ * <p>Binds the network as {@code aclfnet} and a DC sensitivity analyser as
+ * {@code senAlgo}; {@code Dsh} keeps it apart from the older
+ * {@code org.interpss.script.gvy.AclfNetGvyScriptProcessor}.
  */
-public class AclfNetGvyScriptProcessor extends BaseGvyScriptProcessor {
+public class AclfNetDshGvyScriptProcessor extends BaseDshGvyScriptProcessor {
 	private AclfNetwork aclfNet;
 	
 	/**
@@ -19,7 +22,7 @@ public class AclfNetGvyScriptProcessor extends BaseGvyScriptProcessor {
 	 * 
 	 * @param aclfNet
 	 */
-	public AclfNetGvyScriptProcessor(AclfNetwork aclfNet) {
+	public AclfNetDshGvyScriptProcessor(AclfNetwork aclfNet) {
 		this.aclfNet = aclfNet;
 		
 	  	// 创建Binding对象，用于传递变量

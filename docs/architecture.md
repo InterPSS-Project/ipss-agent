@@ -160,7 +160,7 @@ AclfRunner.runOnNet(net, configPath, resultsDir, stem)
 Optional scenario edits (before or between solves):
 
 GvyScriptRunner.runOnNet(net, <case dir>/scripts/<name>.gvy)
-  1. AclfNetGvyScriptProcessor(net).evaluate(<file>)   // binding: aclfnet
+  1. AclfNetDshGvyScriptProcessor(net).evaluate(<file>)  // bindings: aclfnet, senAlgo
   2. digest before/after: buses, branches, load, generation, lfConverged
 ```
 

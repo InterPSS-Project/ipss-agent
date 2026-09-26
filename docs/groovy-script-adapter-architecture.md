@@ -19,8 +19,8 @@ Typical uses:
 
 ```
 org.interpss.agent.script.gvy
-├── BaseGvyScriptProcessor       # Abstract base: shared imports + evaluate()
-└── AclfNetGvyScriptProcessor    # ACLF binding: aclfnet, senAlgo
+├── BaseDshGvyScriptProcessor       # Abstract base: shared imports + evaluate()
+└── AclfNetDshGvyScriptProcessor    # ACLF binding: aclfnet, senAlgo
 
 Related (outside package)
 ├── org.interpss.agent.runner.GvyScriptRunner          # File I/O + before/after digest for bridge/CLI
@@ -28,7 +28,7 @@ Related (outside package)
 └── wspace/script/*.gvy                               # Script fixtures
 ```
 
-This package lives in **ipss-agent** (`src/main/java/org/interpss/agent/script/gvy/`). Prefer it over any older `org.interpss.script.gvy` copy that may ship inside `ipss-runnable` / ipss-plugin.
+This package lives in **ipss-agent** (`src/main/java/org/interpss/agent/script/gvy/`). The `Dsh` infix distinguishes these classes from the older `org.interpss.script.gvy.AclfNetGvyScriptProcessor` / `BaseGvyScriptProcessor` that may still ship inside `ipss-runnable` / ipss-plugin — prefer the agent `*Dsh*` types here.
 
 ## Dependency
 
@@ -41,18 +41,18 @@ This package lives in **ipss-agent** (`src/main/java/org/interpss/agent/script/g
 ## Class Hierarchy
 
 ```
-BaseGvyScriptProcessor (abstract)
-  └── AclfNetGvyScriptProcessor   # binds AclfNetwork as "aclfnet",
+BaseDshGvyScriptProcessor (abstract)
+  └── AclfNetDshGvyScriptProcessor   # binds AclfNetwork as "aclfnet",
                                   # SenAnalysisAlgorithm as "senAlgo"
 ```
 
 Extension point for future processors (same pattern):
 
 ```
-BaseGvyScriptProcessor
-  ├── AclfNetGvyScriptProcessor      # aclfnet + senAlgo
-  ├── AcscNetGvyScriptProcessor      # (future) acscnet
-  └── DStabNetGvyScriptProcessor     # (future) dstabnet
+BaseDshGvyScriptProcessor
+  ├── AclfNetDshGvyScriptProcessor      # aclfnet + senAlgo
+  ├── AcscNetDshGvyScriptProcessor      # (future) acscnet
+  └── DStabNetDshGvyScriptProcessor     # (future) dstabnet
 ```
 
 ## Architecture Overview
@@ -64,11 +64,11 @@ BaseGvyScriptProcessor
   │  bridge / CLI                        │
   └───────────────┬──────────────────────┘
                   │ 1. load AclfNetwork (IeeeFileAdapter, etc.)
-                  │ 2. new AclfNetGvyScriptProcessor(net)
+                  │ 2. new AclfNetDshGvyScriptProcessor(net)
                   │ 3. evaluate(groovyCode)  or  FileUtil.read → evaluate
                   ▼
   ┌──────────────────────────────────────┐
-  │  AclfNetGvyScriptProcessor           │
+  │  AclfNetDshGvyScriptProcessor           │
   │  ┌────────────────────────────────┐  │
   │  │ Binding                        │  │
   │  │   "aclfnet" → AclfNetwork      │  │
@@ -95,7 +95,7 @@ BaseGvyScriptProcessor
 
 ## Core Components
 
-### `BaseGvyScriptProcessor`
+### `BaseDshGvyScriptProcessor`
 
 Owns the shared evaluation contract:
 
@@ -114,7 +114,7 @@ import com.interpss.core.contingency.ContingencyBranchOutageType;
 
 Scripts can therefore write `new Complex(r, x)`, `SenAnalysisType.QVOLTAGE` / `PANGLE`, and related factory / outage types without local import statements.
 
-### `AclfNetGvyScriptProcessor`
+### `AclfNetDshGvyScriptProcessor`
 
 AC load-flow specialization:
 
@@ -131,7 +131,7 @@ Scripts address the network through `aclfnet` and sensitivity through `senAlgo` 
 
 ### `GvyScriptRunner` (related)
 
-Production entry for bridge/CLI: reads a `.gvy` file, evaluates it with `AclfNetGvyScriptProcessor`, and returns a before/after digest (load/gen MW, bus/branch counts, return value). File I/O stays in the runner; the processor only evaluates strings.
+Production entry for bridge/CLI: reads a `.gvy` file, evaluates it with `AclfNetDshGvyScriptProcessor`, and returns a before/after digest (load/gen MW, bus/branch counts, return value). File I/O stays in the runner; the processor only evaluates strings.
 
 ## Data Flow
 
@@ -141,7 +141,7 @@ Production entry for bridge/CLI: reads a `.gvy` file, evaluates it with `AclfNet
 AclfNetwork net
        │
        ▼
-AclfNetGvyScriptProcessor(net)     // Binding: aclfnet = net, senAlgo = SenAnalysis(...)
+AclfNetDshGvyScriptProcessor(net)     // Binding: aclfnet = net, senAlgo = SenAnalysis(...)
        │
        ▼
 evaluate("aclfnet.getBus('Bus14').loadP = 0.18;")
@@ -251,7 +251,7 @@ Method calls (`getBus`, `getBranch`, `getContributeLoad`, `calBusSensitivity`, `
 AclfNetwork net = IeeeFileAdapter.createAclfNet(
     AgentTestSupport.absoluteResourcePath(AgentTestSupport.IEEE14_CASE).toString());
 
-AclfNetGvyScriptProcessor gvyProcessor = new AclfNetGvyScriptProcessor(net);
+AclfNetDshGvyScriptProcessor gvyProcessor = new AclfNetDshGvyScriptProcessor(net);
 
 Object result = gvyProcessor.evaluate("aclfnet.id = 'Modified';");
 // net.getId() == "Modified"
@@ -335,7 +335,17 @@ branch.status = false;
 branch.z = new Complex(r, x);
 ```
 
-`Complex` and `SenAnalysisType` are available because `BaseGvyScriptProcessor` prepends `GVY_IMPORTS`.
+`Complex` and `SenAnalysisType` are available because `BaseDshGvyScriptProcessor` prepends `GVY_IMPORTS`.
+
+### 4. Consumers in this repository
+
+`interpss_run_gvy` (DeepSeek Harness chat tool) exposes **both** entry points through one `script`
+argument: a `.gvy` selector resolves to a file under the case folder's `scripts/`, anything carrying
+whitespace or statement punctuation is evaluated as inline source. The Host routes them to
+`GvyScriptRunner.runOnNet` (file) and `GvyScriptRunner.runSourceOnNet` (source), which share the same
+`AclfNetDshGvyScriptProcessor` evaluation and before/after digest; `IpssAgentBridge.runGvy` /
+`runGvySource` wrap the two JVM calls. `IpssCmd` still has no `gvy` subcommand, so the CLI/Codex path
+runs a file through `GvyScriptRunner` directly (see the `ipss-case-script` skill's fallbacks).
 
 ## Evaluation Semantics
 
@@ -367,7 +377,7 @@ Fixtures live under `wspace/script/`. Sample case data: `src/test/resources/case
 
 To add a processor for another network type:
 
-1. Subclass `BaseGvyScriptProcessor`
+1. Subclass `BaseDshGvyScriptProcessor`
 2. Accept the target network in the constructor
 3. `binding.setVariable("<name>", network)` — document the binding name as part of the public contract
 4. Optionally bind related algorithms (as `senAlgo` is for ACLF)
@@ -412,8 +422,8 @@ File adapters **create** the model; Groovy adapters **edit** and **query** it af
 
 | Path                                                                  | Role                                                        |
 | --------------------------------------------------------------------- | ----------------------------------------------------------- |
-| `src/main/java/.../agent/script/gvy/BaseGvyScriptProcessor.java`      | Shared evaluate + imports (`Complex`, `SenAnalysisType`, …) |
-| `src/main/java/.../agent/script/gvy/AclfNetGvyScriptProcessor.java`   | ACLF binding (`aclfnet`, `senAlgo`)                         |
+| `src/main/java/.../agent/script/gvy/BaseDshGvyScriptProcessor.java`      | Shared evaluate + imports (`Complex`, `SenAnalysisType`, …) |
+| `src/main/java/.../agent/script/gvy/AclfNetDshGvyScriptProcessor.java`   | ACLF binding (`aclfnet`, `senAlgo`)                         |
 | `src/main/java/.../agent/runner/GvyScriptRunner.java`                 | File eval + digest for bridge/CLI                           |
 | `src/test/java/.../agent/script/gvy/GvyScriptEvalTest.java`           | Unit coverage (inline + `wspace/script` fixtures)           |
 | `src/test/java/.../agent/runner/GvyScriptRunnerTest.java`             | Runner / digest coverage                                    |

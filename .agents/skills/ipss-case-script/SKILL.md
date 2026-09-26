@@ -1,6 +1,6 @@
 ---
 name: ipss-case-script
-description: Use when asked to run a Groovy (.gvy) scenario script against the current InterPSS simulation case — a what-if edit to loads, branch impedance or status, or network metadata, applied before an AC load flow — including running one of the scripts in the case folder's scripts/ directory.
+description: Use when asked to run a Groovy scenario script against the current InterPSS simulation case — a what-if edit to loads, branch impedance or status, or network metadata, applied before an AC load flow — including running one of the scripts in the case folder's scripts/ directory.
 metadata:
   short-description: Run a case script
 ---
@@ -34,11 +34,20 @@ reports the bus/branch counts.
 interpss_run_gvy({ script: 'ieee14_adjBus14.gvy' })
 ```
 
+The same argument also takes the **Groovy source itself** (plugin 0.4.9+), so a one-off edit needs no
+file:
+
+```
+interpss_run_gvy({ script: "aclfnet.getBus('Bus14').getContributeLoad('Bus14-L1').loadCP = new Complex(0.50, 0.30)" })
+```
+
 Do not ask which case to use: with no `case` argument the tool resolves the case selected in the
-InterPSS tab. Pass `case` only to target a different case — **the script is always resolved inside
+InterPSS tab. Pass `case` only to target a different case — **a file script is always resolved inside
 that case's own `scripts/` folder**, so a script that lives with another case needs that case named.
 
 ### Where the script comes from
+
+`script` carries the adapter's two entry points — a `.gvy` file, or the source:
 
 | `script` form | Resolves to |
 |---|---|
@@ -46,10 +55,19 @@ that case's own `scripts/` folder**, so a script that lives with another case ne
 | `data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy` | that path, verbatim |
 | `wspace/data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy` | the same, with the `wspace/` prefix stripped (plugin 0.3.18) |
 | an absolute path containing `/wspace/data/…/scripts/…` | the same file, converted to the `data/…` form |
+| `aclfnet.id = 'Modified'` (or any multi-line code) | evaluated as **inline source** — nothing is written to disk (0.4.9+) |
 
-The same three spellings work for the `case` argument. Anything else is refused before the bridge is
-called: a path outside a `scripts/` directory, a non-`.gvy` file, a `..` segment. A missing file fails with the names of the `.gvy` files that *are*
+The rule is the value's shape: a single bare word is a file name (so `ieee14_adjBus14.gvy` and a
+`data/…/scripts/x.gvy` path stay files), while **whitespace or statement punctuation** (`=`, `(`, `;`,
+braces, quotes, commas…) means source. A single token that names something else (`scripts/x.txt`) stays
+a selector and keeps the actionable selector error. The same three path spellings work for the `case`
+argument. Anything else is refused before the bridge is called: a path outside a `scripts/` directory, a
+non-`.gvy` file, a `..` segment (inline source is instead bounded at 256 KB). A missing file fails with the names of the `.gvy` files that *are*
 in that folder — use them rather than guessing.
+
+Prefer a file when the edit should be reproducible or is worth re-reading later; prefer inline source
+for a one-off what-if, keeping the same binding and digest either way. The card names the inline run
+`inline Groovy (N lines)`.
 
 ### What the script sees
 
@@ -77,6 +95,31 @@ Common lookups: `aclfnet.getBus(id)`, `aclfnet.getBranch(fromBusId, toBusId, cir
 the PSS/E cases are) the aggregate `bus.loadP` setter does not move the case totals: edit
 `getContributeLoad(...).loadCP` instead.
 
+Since 0.4.10 the adapter (`org.interpss.agent.script.gvy.AclfNetDshGvyScriptProcessor`) also binds
+**`senAlgo`**, a `SenAnalysisAlgorithm` over that same live network, and pre-imports the types that go
+with it — so a script can **query** sensitivities as well as edit:
+
+```groovy
+// dV/dQ between two buses — (type, fromBusId, toBusId), or (type, fromBusId, circuitIndex)
+// when several branches connect the pair; other types: PANGLE, QANGLE, PVOLTAGE, ...
+dvdq = senAlgo.calBusSensitivity(SenAnalysisType.QVOLTAGE, 'Bus9', 'Bus14')
+
+// generation shift factor: injection at a bus, monitoring one branch
+gsf = senAlgo.calGenShiftFactor('Bus2', aclfnet.getBranch('Bus1', 'Bus5', '1'))
+
+// weighted transfer: add the inject/withdraw buses first, then ask per branch
+senAlgo.addInjectBus(aclfnet.getBus('Bus2'), 1.0)
+senAlgo.addWithdrawBus(aclfnet.getBus('Bus3'), 1.0)
+factor = senAlgo.genTransferDistFactor(aclfnet.getBranch('Bus1', 'Bus5', '1'))
+```
+
+Verified against IEEE 14 (freshly loaded — the DC base case is built on demand, no ACLF needed):
+`0.07473` dV/dQ Bus9→Bus14, `-0.16197` GSF from Bus2 onto Bus1–Bus5, `0.09149` transfer factor.
+`senAlgo` shares the network instance, so call it **after** structural edits when the sensitivities must
+reflect them; inject/withdraw buses persist across evaluations of one script call (clear them when
+changing scenario). Pre-imported types: `Complex`, `DclfAlgoObjectFactory`, `SenAnalysisType`,
+`ContingencyBranchOutageType`.
+
 ### Reading the result
 
 The digest is measured around the evaluation, so a mutation-only script still shows its effect:
@@ -89,7 +132,7 @@ The digest is measured around the evaluation, so a mutation-only script still sh
 | `returnValue` | The script's last expression, **only when it is a scalar** (`String`, `Number`, `Boolean`, `Complex`) |
 | `returnType` | Simple class name when the script returned a model object (never serialized) |
 | `stdout` | Anything the script printed, truncated at 8000 characters (only shown when non-empty) |
-| `error` + `line` | Failure message and the failing script line |
+| `error` + `line` | Failure message and the failing line **in your own script** — the adapter subtracts the import block it prepends, so the number matches the text you sent |
 
 ### Step 2 — solve when solved values are needed
 
@@ -130,8 +173,8 @@ Add prose only when the caller needs something the card cannot carry:
 - Running the same script twice applies it twice, unless it assigns absolute values. `reload: true`
   re-parses the case from disk **before** evaluating, which is the only reset available from chat
   (the Java `reload` flag; the tab's **Load** button does the same for the tab).
-- `.gvy` files are executable code with full access to the bound model, and there is no sandbox:
-  only run scripts you trust.
+- Scripts — `.gvy` files and inline source alike — are executable code with full access to the
+  bound model, and there is no sandbox: only run what you trust.
 - The script runs against whatever `AclfNetwork` the bridge holds — base case or already solved.
 
 ## Fallbacks
@@ -164,6 +207,8 @@ the chat tools keep reporting the model the bridge holds, not the edited one.
 | Symptom | Fix |
 |---|---|
 | `script not found: …` | The message lists the `.gvy` files in that `scripts/` folder; a bare name resolves against the **resolved case's** folder, so pass `case` when the selected case is not the one holding the script |
+| Inline code ran as a file selector | A value with no whitespace or statement punctuation is a file name: add the punctuation (`x=1`, not `x`), or save it as `<case folder>/scripts/*.gvy` |
+| `this bridge cannot evaluate inline Groovy yet` | The uber JAR predates 0.4.9 — rebuild it, or pass a `.gvy` file that the older JAR can evaluate |
 | `unrecognized script selector` / `the script must live in …/scripts/` | Scripts are confined to `<case folder>/scripts/` and must end in `.gvy`; `..` is rejected |
 | `MissingPropertyException` / `noSuchProperty` | The failure names the property and the line: check the JavaBean names above (`loadCP`, `z`, `status`) |
 | A script edit had no effect on the totals | Contribute-model network: edit `bus.getContributeLoad(id).loadCP`, not the aggregate `bus.loadP` |

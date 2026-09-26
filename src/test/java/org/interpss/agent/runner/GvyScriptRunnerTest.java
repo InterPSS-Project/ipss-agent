@@ -7,7 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import org.interpss.agent.input.IeeeFileAdapter;
+import org.interpss.agent.script.gvy.AclfNetDshGvyScriptProcessor;
 import org.interpss.agent.support.AgentTestSupport;
+import org.interpss.numeric.datatype.Unit.UnitType;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -136,5 +138,96 @@ class GvyScriptRunnerTest {
         GvyScriptRunner.runOnNet(net, fixture);
 
         assertThat(net.getBus("Bus14").getLoadP()).isEqualTo(0.18);
+    }
+
+    // --- the adapter's inline entry point: no file, same binding and digest ---------
+
+    @Test
+    void runSourceOnNet_evaluatesInlineCodeWithTheSameContract() throws Exception {
+        double loadBefore = 2.59;
+        String code = """
+                bus = aclfnet.getBus("Bus14");
+                load = bus.getContributeLoad("Bus14-L1");
+                load.loadCP = new Complex(0.50, 0.30);
+                """;
+
+        GvyScriptRunner.Result result = GvyScriptRunner.runSourceOnNet(net, code, "inline Groovy (3 lines)");
+
+        assertThat(net.getBus("Bus14").getContributeLoad("Bus14-L1").getLoadCP().getReal()).isEqualTo(0.50);
+        assertThat(net.getBus("Bus14").getContributeLoad("Bus14-L1").getLoadCP().getImaginary()).isEqualTo(0.30);
+        assertThat(result.script).isEqualTo("inline Groovy (3 lines)");
+        assertThat(result.returnValue).isEqualTo("(0.5, 0.3)");
+        assertThat(result.busCount).isEqualTo(14);
+        assertThat(result.loadMwBefore).isCloseTo(loadBefore * 100.0, org.assertj.core.data.Offset.offset(0.5));
+        // 0.149 -> 0.50 pu on Bus14 is +35.1 MW on the 100 MVA base.
+        assertThat(result.loadMw - result.loadMwBefore).isCloseTo(35.1, org.assertj.core.data.Offset.offset(0.05));
+    }
+
+    @Test
+    void runSourceOnNet_defaultsTheLabelWhenNoneIsGiven() throws Exception {
+        GvyScriptRunner.Result result = GvyScriptRunner.runSourceOnNet(net, "1 + 1\n", null);
+
+        assertThat(result.returnValue).isEqualTo("2");
+        assertThat(result.script).isEqualTo("inline Groovy");
+    }
+
+    @Test
+    void runSourceOnNet_wrapsAGroovyFailureWithItsScriptLine() {
+        assertThatThrownBy(() -> GvyScriptRunner.runSourceOnNet(net, "aclfnet.noSuchProperty = 1\n", "inline Groovy (1 line)"))
+                .isInstanceOf(GvyScriptRunner.ScriptError.class)
+                .hasMessageContaining("noSuchProperty")
+                .satisfies((e) -> assertThat(((GvyScriptRunner.ScriptError) e).line()).isEqualTo(1));
+    }
+
+    @Test
+    void runSourceOnNet_rejectsEmptySource() {
+        assertThatThrownBy(() -> GvyScriptRunner.runSourceOnNet(net, "   \n", "inline Groovy"))
+                .isInstanceOf(GvyScriptRunner.ScriptError.class)
+                .hasMessageContaining("empty");
+    }
+
+    // The generated Groovy class starts with GVY_IMPORTS, so a raw stack line would point
+    // four lines below the text the caller wrote. `line` must be the caller's own line.
+    @Test
+    void runSourceOnNet_reportsTheLineInTheCallersScriptNotThePrependedImports() {
+        String code = "a = 1\nb = 2\naclfnet.noSuchThing = 3\n";
+
+        assertThatThrownBy(() -> GvyScriptRunner.runSourceOnNet(net, code, "inline Groovy (3 lines)"))
+                .isInstanceOf(GvyScriptRunner.ScriptError.class)
+                .hasMessageContaining("noSuchThing")
+                .satisfies((e) -> assertThat(((GvyScriptRunner.ScriptError) e).line()).isEqualTo(3));
+    }
+
+    @Test
+    void runOnNet_reportsTheLineInTheCallersFile() throws Exception {
+        Path file = script("broken-on-line-3.gvy", "a = 1\nb = 2\naclfnet.noSuchThing = 3\n");
+
+        assertThatThrownBy(() -> GvyScriptRunner.runOnNet(net, file))
+                .isInstanceOf(GvyScriptRunner.ScriptError.class)
+                .satisfies((e) -> assertThat(((GvyScriptRunner.ScriptError) e).line()).isEqualTo(3));
+    }
+
+    /** The offset the generated class shifts by is exactly the import block's line count. */
+    @Test
+    void gvyImportLines_isTheImportBlockHeight() {
+        String imports = AclfNetDshGvyScriptProcessor.GVY_IMPORTS;
+
+        assertThat(imports).endsWith("\n");
+        assertThat(imports.lines().count()).isEqualTo(imports.chars().filter((c) -> c == '\n').count());
+    }
+
+    @Test
+    void runSourceOnNet_matchesTheFileEntryPointForTheSameCode() throws Exception {
+        String code = "aclfnet.getBus('Bus14').getContributeLoad('Bus14-L1').loadCP = new Complex(0.50, 0.30);\n";
+
+        GvyScriptRunner.runOnNet(net, script("same.gvy", code));
+
+        AclfNetwork fresh = IeeeFileAdapter.createAclfNet(
+                AgentTestSupport.absoluteResourcePath(AgentTestSupport.IEEE14_CASE).toString());
+        GvyScriptRunner.runSourceOnNet(fresh, code, "inline Groovy (1 line)");
+
+        UnitType mva = UnitType.mVA;
+        assertThat(fresh.totalLoad(mva).getReal()).isEqualTo(net.totalLoad(mva).getReal());
+        assertThat(fresh.getNoActiveBranch()).isEqualTo(net.getNoActiveBranch());
     }
 }
