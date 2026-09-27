@@ -79,5 +79,29 @@ public class GvyScriptEvalTest {
 		assertTrue(result instanceof Number, "dV/dQ script should return a Number");
 		assertTrue(NumericUtil.equals(((Number) result).doubleValue(), 0.0608355, 1.0E-4),
 					"Bus14→Bus13 dV/dQ should be non-zero");
+
+		scriptFile = AgentTestSupport.projectRootPath("wspace/script/ieee14_calGSF.gvy").toString();
+		groovyCode = FileUtil.readFileAsString(scriptFile);
+		result = gvyProcessor.evaluate(groovyCode);
+		System.out.println("Result: " + result);
+		assertTrue(result instanceof Number, "GSF script should return a Number");
+		assertTrue(NumericUtil.equals(((Number) result).doubleValue(), -0.2181389, 1.0E-4),
+					"Bus8 - Bus5->Bus6(1) GSF should match IEEE14 reference");
+
+		scriptFile = AgentTestSupport.projectRootPath("wspace/script/ieee14_calWGenTFacotr.gvy").toString();
+		groovyCode = FileUtil.readFileAsString(scriptFile);
+		result = gvyProcessor.evaluate(groovyCode);
+		System.out.println("Result: " + result);
+		assertTrue(result instanceof Number, "WGenT script should return a Number");
+		assertTrue(NumericUtil.equals(((Number) result).doubleValue(), 0.57121, 1.0E-4),
+					"Bus2 inject / Bus14(0.9)+Bus13(0.1) withdraw on Distrbution factor on Brancgh: Bus9->Bus14(1): should match IEEE14 reference");
+
+		scriptFile = AgentTestSupport.projectRootPath("wspace/script/ieee14_calLODF.gvy").toString();
+		groovyCode = FileUtil.readFileAsString(scriptFile);
+		result = gvyProcessor.evaluate(groovyCode);
+		System.out.println("Result: " + result);
+		assertTrue(result instanceof Number, "LODF script should return a Number");
+		assertTrue(NumericUtil.equals(((Number) result).doubleValue(), 1.0, 1.0E-4),
+					"Bus13->Bus14(1) - Bus9->Bus14(1) LODF should match IEEE14 reference");
 	}
 }
