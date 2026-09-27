@@ -172,9 +172,18 @@ bridge is unavailable, it falls back to shelling out with a classpath of
 
 ## Install
 
-See `InstallDSHPlugin.md` in the repository root. Two methods:
+See `InstallDSHPlugin.md` in the repository root. Three methods:
 
-1. **Automatic (`dsh plugin`)** — from the unzipped directory or the npm
+1. **DSH Desktop (plugin manager)** — the app owns the `desktop` profile and the
+   `dsh` CLI refuses it (`profile "desktop" is managed exclusively by the
+   Electron application`), so install the bundle through the app's plugin
+   manager and reopen the app:
+
+   ```text
+   install the bundle at /path/to/deepseek-ai-dsh-interpss-<version>.tgz
+   ```
+
+2. **Automatic (`dsh plugin`, web profile)** — from the unzipped directory or the npm
    tarball:
 
    ```sh
@@ -187,7 +196,7 @@ See `InstallDSHPlugin.md` in the repository root. Two methods:
    `dsh.profile.bundles`; the bundle's `cordis.patch.yml` inserts the
    `interpss` row automatically. No manual patch editing needed.
 
-2. **Manual copy** — copy the package under the profile and add the row by
+3. **Manual copy** — copy the package under the profile and add the row by
    hand:
 
    ```sh
@@ -203,7 +212,8 @@ See `InstallDSHPlugin.md` in the repository root. Two methods:
          name: '@deepseek-ai/dsh-interpss'
    ```
 
-In both cases, restart the web server (`dsh web`), then hard-reload the page.
+For the web profile, restart the web server (`dsh web`), then hard-reload the page; for
+DSH Desktop, quit and reopen the app.
 
 ## Activation gate
 
