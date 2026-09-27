@@ -1,6 +1,6 @@
 # iPSS Agent
 
-**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and report generation, including NERC TPL-001-5 style. This repository ships agent-facing skills for **OpenAI Codex Desktop**, **Claude Code CLI**, and **DeepSeek Harness** (build and CLI details in [Setup.md](Setup.md); DSH plugin in [InstallDSHPlugin.md](InstallDSHPlugin.md)). The batch run canonical skill is `[.agents/skills/ipss-sim/SKILL.md](.agents/skills/ipss-sim/SKILL.md)`. (see [batch chat user guide](docs/user_guide/batch_chat_user_guide.md) for details):
+**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and report generation, including NERC TPL-001-5 style. This repository ships agent-facing skills for **OpenAI Codex Desktop** and **DeepSeek Harness** (build and CLI details in [Setup.md](Setup.md); DSH plugin in [InstallDSHPlugin.md](InstallDSHPlugin.md)). The batch run canonical skill is `[.agents/skills/ipss-sim/SKILL.md](.agents/skills/ipss-sim/SKILL.md)`. (see [batch chat user guide](docs/user_guide/batch_chat_user_guide.md) for details):
 
 ![ipss-agent-chat](./docs/image/ipss-agent-chat.png)
 
