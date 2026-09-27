@@ -376,7 +376,7 @@ interpss_run_gvy({ script: "senAlgo.calBusSensitivity(SenAnalysisType.QVOLTAGE, 
 ```
 
 The answer describes **the state the bridge holds**, so solve first when it must describe the solved
-operating point: on `data/ieee/Ieee14BusLargeLoadQ/ieee14.ieee`, Bus14's self dV/dQ is `0.2558` pu/pu on
+operating point: on `data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee`, Bus14's self dV/dQ is `0.2558` pu/pu on
 the freshly parsed case and `0.4437` pu/pu after `interpss_run_aclf` (V(Bus14) = 0.8714).
 
 That case is the worked load-Q workflow — size from dV/dQ, solve, trim the reactive load with a fresh

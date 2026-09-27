@@ -9,5 +9,5 @@ Read and follow `.agents/skills/ipss-case-load/SKILL.md` (canonical). That skill
 /ipss-case-load IEEE 118-bus
 /ipss-case-load wspace/data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW
 /ipss-case-load reload
-/ipss-case-load reload wspace/data/ieee/Ieee14BusLargeLoadQ2/scripts/ieee14_adjBus1314Q_0p89to0p90.gvy
+/ipss-case-load reload wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/ieee14_adjBus1314Q_0p89to0p90.gvy
 ```

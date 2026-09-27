@@ -1,6 +1,6 @@
 /**
  * ieee14_dvdq_matrix.gvy -- dV/dQ sensitivity matrix at Bus13 / Bus14
- * Case: data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee   (100 MVA base)
+ * Case: data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee   (100 MVA base)
  *
  * Two matrices are reported, because they answer different questions.
  *
@@ -78,10 +78,10 @@ if (aclfnet.isLfConverged()) {
 	// same two-tier config rule as the interpss_run_aclf tool: case folder, else project default
 	def codeLoc = org.interpss.agent.bridge.IpssAgentBridge.class.protectionDomain.codeSource.location
 	def root = new java.io.File(codeLoc.toURI())
-	while (root != null && !new java.io.File(root, 'wspace/data/ieee/Ieee14BusLargeLoadQ2').isDirectory()) {
+	while (root != null && !new java.io.File(root, 'wspace/data/ieee/Ieee14Bus_LargeLoadQ2').isDirectory()) {
 		root = root.parentFile
 	}
-	def cfgFile = new java.io.File(root, 'wspace/data/ieee/Ieee14BusLargeLoadQ2/config/aclf_run.json')
+	def cfgFile = new java.io.File(root, 'wspace/data/ieee/Ieee14Bus_LargeLoadQ2/config/aclf_run.json')
 	if (!cfgFile.isFile()) {
 		cfgFile = new java.io.File(root, 'config/aclf_run.json')
 	}

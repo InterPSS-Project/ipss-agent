@@ -144,7 +144,7 @@ Verified against IEEE 14 (freshly loaded — the DC base case is built on demand
 `0.07473` dV/dQ Bus9→Bus14, `-0.16197` GSF from Bus2 onto Bus1–Bus5, `0.09149` transfer factor.
 `senAlgo` shares the network instance, so its answer describes the state the bridge holds: call it
 **after** a solve (`interpss_run_aclf`) when it must describe the solved operating point — on
-`Ieee14BusLargeLoadQ` Bus14's self dV/dQ is 0.2558 pu/pu freshly parsed but 0.4437 pu/pu once solved —
+`Ieee14Bus_LargeLoadQ` Bus14's self dV/dQ is 0.2558 pu/pu freshly parsed but 0.4437 pu/pu once solved —
 and after structural edits when the topology must be reflected. Inject/withdraw buses persist across
 evaluations of one script call (clear them when changing scenario). Pre-imported types: `Complex`, `DclfAlgoObjectFactory`, `SenAnalysisType`,
 `ContingencyBranchOutageType`.

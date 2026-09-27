@@ -3,7 +3,7 @@
  * land inside [0.89, 0.90] pu.  Target corner: V(Bus13) -> 0.900, V(Bus14) -> 0.890
  * (the largest load Q that keeps both buses inside the band).
  *
- * Case: data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee   (100 MVA base)
+ * Case: data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee   (100 MVA base)
  *
  * Method
  *   1. `senAlgo` (SenAnalysisType.QVOLTAGE) gives the network-parameter dV/dQ matrix
@@ -50,13 +50,13 @@ def MAX_BACKTRACK = 8
 // --------------------------------------------------- locate the case config
 def codeLoc = org.interpss.agent.bridge.IpssAgentBridge.class.protectionDomain.codeSource.location
 def root = new java.io.File(codeLoc.toURI())
-while (root != null && !new java.io.File(root, 'wspace/data/ieee/Ieee14BusLargeLoadQ2').isDirectory()) {
+while (root != null && !new java.io.File(root, 'wspace/data/ieee/Ieee14Bus_LargeLoadQ2').isDirectory()) {
 	root = root.parentFile
 }
 if (root == null) {
 	throw new IllegalStateException('cannot locate the ipss-agent project root from ' + codeLoc)
 }
-def cfgFile = new java.io.File(root, 'wspace/data/ieee/Ieee14BusLargeLoadQ2/config/aclf_run.json')
+def cfgFile = new java.io.File(root, 'wspace/data/ieee/Ieee14Bus_LargeLoadQ2/config/aclf_run.json')
 if (!cfgFile.isFile()) {
 	cfgFile = new java.io.File(root, 'config/aclf_run.json')
 }
@@ -108,7 +108,7 @@ def errNorm = { v -> Math.max(Math.abs(v[0] - TARGET[0]), Math.abs(v[1] - TARGET
 def M = BUSES.collect { f -> BUSES.collect { t -> senAlgo.calBusSensitivity(SenAnalysisType.QVOLTAGE, f, t) as double } }
 
 def log = []
-log << 'case      : data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee'
+log << 'case      : data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee'
 log << 'config    : ' + cfgFile.absolutePath
 log << 'target    : V(Bus13)=' + TARGET[0] + '  V(Bus14)=' + TARGET[1] + '   band [0.89, 0.90]'
 log << 'senAlgo   : dV/dQinjection at V~1.0 pu ' + jac(M) + '   [pu/pu, rows=Bus13,Bus14]'

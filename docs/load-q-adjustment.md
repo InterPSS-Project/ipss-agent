@@ -97,7 +97,7 @@ Raise V(Bus14) into **[0.89, 0.90]** pu by reducing Bus14 load Q only.
 
 |         |                                                                               |
 | ------- | ----------------------------------------------------------------------------- |
-| Case    | `wspace/data/ieee/Ieee14BusLargeLoadQ/ieee14.ieee`                            |
+| Case    | `wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee`                            |
 | Problem | Bus14 carries 14.9 MW + j50.0 MVAr; solved V = 0.871 pu (only bus below 0.90) |
 | Result  | Q 50.0 → **46.0 MVAr**, **V(Bus14) = 0.895243 pu**                            |
 
@@ -109,8 +109,8 @@ Raise V(Bus14) into **[0.89, 0.90]** pu by reducing Bus14 load Q only.
 
 | File                                                            | Role                                                              |
 | --------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `…/Ieee14BusLargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`           | Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
-| `…/Ieee14BusLargeLoadQ/scripts/ieee14_adjBus14Q_0p89to0p90.gvy` | Mutating. Sets Bus14 load to 14.9 MW + j46.0 MVAr                 |
+| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`           | Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
+| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_adjBus14Q_0p89to0p90.gvy` | Mutating. Sets Bus14 load to 14.9 MW + j46.0 MVAr                 |
 
 
 Bare script names resolve to the case folder's `scripts/` directory under `interpss_run_gvy`.
@@ -169,7 +169,7 @@ Converged; lowest voltages: Bus14 **0.895243**, Bus13 0.979, Bus10 0.988. No bus
 ### Reproduce
 
 ```text
-interpss_case_load({ case: 'wspace/data/ieee/Ieee14BusLargeLoadQ/ieee14.ieee' })
+interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee' })
 interpss_run_aclf({ case: '…' })
 interpss_run_gvy({ case: '…', script: 'ieee14_dvdq_Bus14.gvy' })
 interpss_run_gvy({ case: '…', script: 'ieee14_adjBus14Q_0p89to0p90.gvy', reload: true })
@@ -195,7 +195,7 @@ terms, so each bus's Q moves the other's voltage almost as much as its own.
 
 |         |                                                                                                   |
 | ------- | ------------------------------------------------------------------------------------------------- |
-| Case    | `wspace/data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee`                                               |
+| Case    | `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee`                                               |
 | Problem | Bus13 and Bus14 both carry j50.0 MVAr — past the nose point; ACLF does not converge               |
 | Result  | Q13 50.0 → **45.505**, Q14 50.0 → **21.320** MVAr; **V13 = 0.899**, **V14 = 0.891** pu (7 passes) |
 
@@ -207,9 +207,9 @@ terms, so each bus's Q moves the other's voltage almost as much as its own.
 
 | File                                                              | Role                                                                                                                                        |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `…/Ieee14BusLargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`           | Prints the 2×2 B″ reference matrix and, when solved, the finite-difference operating-point matrix; restores Q and voltages before returning |
-| `…/Ieee14BusLargeLoadQ2/scripts/ieee14_qv_adjust.gvy`             | Walks Q13/Q14 from a solvable anchor to the largest load Q that keeps both buses inside the band                                            |
-| `…/Ieee14BusLargeLoadQ2/scripts/ieee14_adjBus1314Q_0p89to0p90.gvy` | Mutating. Sets Bus13 to 13.5 MW + j45.5053 MVAr and Bus14 to 14.9 MW + j21.3202 MVAr — the values the adjuster found, applied in one shot    |
+| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`           | Prints the 2×2 B″ reference matrix and, when solved, the finite-difference operating-point matrix; restores Q and voltages before returning |
+| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_qv_adjust.gvy`             | Walks Q13/Q14 from a solvable anchor to the largest load Q that keeps both buses inside the band                                            |
+| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_adjBus1314Q_0p89to0p90.gvy` | Mutating. Sets Bus13 to 13.5 MW + j45.5053 MVAr and Bus14 to 14.9 MW + j21.3202 MVAr — the values the adjuster found, applied in one shot    |
 
 Bare script names resolve to the case folder's `scripts/` directory under `interpss_run_gvy`. The
 adjuster is the **derivation** of the two Q values; the setter is the **fixture** that applies them.
@@ -291,7 +291,7 @@ alone, which is why the reference matrix and the AC Jacobian diverge so far.
 ### Reproduce
 
 ```text
-interpss_case_load({ case: 'wspace/data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee' })
+interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee' })
 interpss_run_gvy({ script: 'ieee14_qv_adjust.gvy', reload: true })                 # derives Q13/Q14 (7 passes)
 interpss_run_gvy({ script: 'ieee14_adjBus1314Q_0p89to0p90.gvy', reload: true })    # applies the values
 interpss_run_aclf()                                                               # confirm V13 / V14
@@ -319,11 +319,11 @@ setter on a fresh parse (`reload: true`), which is also what makes the result re
 
 ## Related
 
-- `docs/user_guide/Loadflow-adjustment-user-guide.md` — practical how-to for DSH Chat
+- `docs/user_guide/loadflow-adjustment-user-guide.md` — practical how-to for DSH Chat
 - `docs/groovy-script-adapter-architecture.md` — `aclfnet` / `senAlgo` binding and sensitivity semantics
 - `docs/interpss-tools.md` — `interpss_run_gvy` / `interpss_run_aclf` contracts
-- Example A: `Ieee14BusLargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`, `ieee14_adjBus14Q_0p89to0p90.gvy`
-- Example B: `Ieee14BusLargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`, `ieee14_qv_adjust.gvy`,
+- Example A: `Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`, `ieee14_adjBus14Q_0p89to0p90.gvy`
+- Example B: `Ieee14Bus_LargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`, `ieee14_qv_adjust.gvy`,
   `ieee14_adjBus1314Q_0p89to0p90.gvy`
 - Skills: `ipss-case-script`, `ipss-case-aclf`
 

@@ -1,4 +1,4 @@
-// Ieee14BusLargeLoadQ — trim the Bus14 reactive load so V(Bus14) lands inside
+// Ieee14Bus_LargeLoadQ — trim the Bus14 reactive load so V(Bus14) lands inside
 // the [0.89, 0.90] pu window.
 //
 // Result: Bus14 load 14.9 MW + j50.0 MVAr  ->  14.9 MW + j46.0 MVAr.

@@ -385,7 +385,7 @@ Important:
 - Loading a **different** case replaces the held model — any prior ACLF solution or script edits on the old case are gone.
 - Only run scripts you trust.
 
-To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bus14 / Bus13 examples), see [Loadflow-adjustment-user-guide.md](Loadflow-adjustment-user-guide.md).
+To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bus14 / Bus13 examples), see [loadflow-adjustment-user-guide.md](loadflow-adjustment-user-guide.md).
 
 
 

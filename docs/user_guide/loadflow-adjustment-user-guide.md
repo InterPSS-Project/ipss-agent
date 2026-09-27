@@ -94,7 +94,7 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 
 |                |                                                                  |
 | -------------- | ---------------------------------------------------------------- |
-| Case           | `wspace/data/ieee/Ieee14BusLargeLoadQ/ieee14.ieee`               |
+| Case           | `wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee`               |
 | Starting point | Bus14 = 14.9 MW + j50.0 MVAr, V ≈ 0.871 pu (only bus below 0.90) |
 | Applied result | Q 50.0 → **46.0 MVAr**, V(Bus14) = **0.895** pu                  |
 
@@ -115,7 +115,7 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 ### Steps in Chat
 
 ```text
-Load wspace/data/ieee/Ieee14BusLargeLoadQ/ieee14.ieee
+Load wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee
 Run ACLF
 Run ieee14_dvdq_Bus14.gvy
 Reload and run ieee14_adjBus14Q_0p89to0p90.gvy, then run ACLF
@@ -125,7 +125,7 @@ Show the lowest bus voltages
 Equivalent tool sequence:
 
 ```text
-interpss_case_load({ case: 'wspace/data/ieee/Ieee14BusLargeLoadQ/ieee14.ieee' })
+interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee' })
 interpss_run_aclf()
 interpss_run_gvy({ script: 'ieee14_dvdq_Bus14.gvy' })
 interpss_run_gvy({ script: 'ieee14_adjBus14Q_0p89to0p90.gvy', reload: true })
@@ -169,7 +169,7 @@ values together.
 
 |                |                                                                                      |
 | -------------- | ------------------------------------------------------------------------------------ |
-| Case           | `wspace/data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee`                                  |
+| Case           | `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee`                                  |
 | Starting point | Both buses at j50.0 MVAr — past the nose point; ACLF does **not** converge as stored |
 | Applied result | Q13 → **45.505**, Q14 → **21.320** MVAr; V13 = **0.899**, V14 = **0.891** pu         |
 
@@ -196,7 +196,7 @@ values are known, the setter alone reproduces the state.
 ### Steps in Chat
 
 ```text
-Load wspace/data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee
+Load wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee
 Reload and run ieee14_qv_adjust.gvy to derive Q13 / Q14
 Reload and run ieee14_adjBus1314Q_0p89to0p90.gvy to apply them
 Run ACLF
@@ -206,7 +206,7 @@ Run ieee14_dvdq_matrix.gvy again to see the operating-point matrix at the target
 Equivalent tool sequence:
 
 ```text
-interpss_case_load({ case: 'wspace/data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee' })
+interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee' })
 interpss_run_gvy({ script: 'ieee14_qv_adjust.gvy', reload: true })                 # derives Q13/Q14 (~7 passes)
 interpss_run_gvy({ script: 'ieee14_adjBus1314Q_0p89to0p90.gvy', reload: true })    # applies those values
 interpss_run_aclf()
@@ -285,6 +285,6 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 - [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Chat tools, what-if scripts
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
 - Skills: `$ipss-case-load`, `$ipss-case-aclf`, `$ipss-case-script`, `$ipss-case-summary`
-- Example A scripts: `wspace/data/ieee/Ieee14BusLargeLoadQ/scripts/`
-- Example B scripts: `wspace/data/ieee/Ieee14BusLargeLoadQ2/scripts/`
+- Example A scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ/scripts/`
+- Example B scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/`
 

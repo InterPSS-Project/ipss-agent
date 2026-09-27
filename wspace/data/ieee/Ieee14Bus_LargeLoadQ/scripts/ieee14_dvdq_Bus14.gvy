@@ -1,4 +1,4 @@
-// Ieee14BusLargeLoadQ — dV/dQ sensitivity at Bus14 and the load-Q band that
+// Ieee14Bus_LargeLoadQ — dV/dQ sensitivity at Bus14 and the load-Q band that
 // puts V(Bus14) inside the [0.89, 0.90] pu target window.
 //
 // WHY: this case schedules Bus14 with an unusually large reactive load
