@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.4.11**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.5.0**.
 
 ## Tool surface
 
@@ -536,8 +536,10 @@ tab's picker.
 | `ipss-sim` | Full simulation and reporting workflow through the Java CLI (`IpssCmd`) |
 | `nerc-report-html`, `nerc-report-slides` | Follow-on artifacts from a NERC report |
 
-Canonical skill sources live in `.agents/skills/<name>/SKILL.md`; `.claude/commands/<name>.md`
-carries the Claude Code slash command for each.
+Canonical skill sources live in `.agents/skills/<name>/SKILL.md`. DSH discovers them as `/<name>`
+when the session workspace is this repository, and `~/.dsh/skills/<name>/SKILL.md` (installed by
+`SYNC_DSH_SKILLS=1 scripts/sync_ipss_skills.sh`) makes them available in every session; the same
+script installs the Codex prompts under `~/.codex/prompts/`.
 
 ## Adding another tool
 
@@ -591,6 +593,9 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.4.10 | The Groovy adapter is the agent's own `org.interpss.agent.script.gvy` pair — `BaseDshGvyScriptProcessor` / `AclfNetDshGvyScriptProcessor` (the `Dsh` infix separates them from the older `org.interpss.script.gvy.*` classes still inside `ipss-runnable`) — and it also binds `senAlgo`, a `SenAnalysisAlgorithm` on the same live network, with `Complex`, `SenAnalysisType`, `ContingencyBranchOutageType` and `DclfAlgoObjectFactory` pre-imported, so a script can query dV/dQ, GSF and transfer factors without leaving Groovy; a failure now reports the line in the caller's own script (the prepended `GVY_IMPORTS` block is subtracted) |
 | 0.4.11 | `interpss_run_gvy`: `script` also takes an **array**, applying several scripts (files and/or inline source, up to 20) in order on the held model — all entries resolve before the first runs, `reload` still re-parses once, the run stops at the first failure, and `steps`/`applied`/`failedScript` report what each script did; the single-script result and card are unchanged |
 | 0.4.12 | `interpss_run_gvy` also accepts the workspace fixtures folder — `wspace/script/x.gvy` or `script/x.gvy` — read by the Host and evaluated as source (so the JVM still opens only case-folder files), and labels the step with that path; the batch card's per-step elapsed time shows its `ms` unit |
+| 0.4.13 | Config writes from the ACLF / CA dialogs survive an app-hosted profile: `writeConfigText` keeps the fenced DSH `fs` service when it allows the write and, on `FS_SANDBOX_DENIED` for a path inside the resolved workspace, persists through the plugin's own `node:fs` |
+| 0.4.14 | That fallback writes through the caller's absolute path string (the opaque `fs.resolve()` handle is not a `node:fs` path), so both dialogs save in the app-hosted profile |
+| 0.5.0 | Version-only minor release rolling up 0.4.1–0.4.14: the dialog-free CA tool, the configurable **Over Loading Threshold(%)** with its `config/ca_run.json` round trip, the agent `*Dsh*` Groovy adapter with the `senAlgo` binding, and inline / array / workspace-`script/` Groovy runs — no behaviour change beyond 0.4.14 |
 | 0.4.1 | `interpss_run_ca`: DC contingency analysis from chat with the CA dialog bypassed (explicit inputs → `ca_run.json` → case-folder discovery → N-1 defaults), plus its card and the `ipss-case-ca` skill |
 | 0.4.0 | Version-only release: the first 0.4.x, carrying 0.3.17–0.3.23 unchanged (the `interpss_run_gvy` tool and its skill, the `ipss-case-load` skill, `wspace/…` selector spellings, the Simu Case picker + `✓ Loaded:` sync, `-Xmx8g`, and the load card's confirmation line) |
 

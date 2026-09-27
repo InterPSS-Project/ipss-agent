@@ -183,6 +183,7 @@ CLI invocation re-parses the case.
 | `no simulation case is selected` | Nothing is in the tab and the bridge is empty — pass `case` explicitly |
 | `alreadyLoaded: true` when a re-parse was wanted | The tool reuses the held model by design — it cannot re-parse. Use the tab's **Load** button, or `interpss_run_gvy({ script: '…', reload: true })`, which is also how a load is combined with a script |
 | A `.gvy` path passed as `case` | A script is not a case: `interpss_case_load` answers `unrecognized case selector`. Name the case (the `.ieee` / `.RAW` above `scripts/`) and pass the script to `interpss_run_gvy` separately |
+| `script not found: … (no .gvy files there)` | The **case folder** in that path does not exist — it was renamed or moved, so its `scripts/` folder is missing too. Check `wspace/data/…` for the current folder name and pass that case; on a folder that exists the message instead lists the `.gvy` files it holds |
 | The loaded case is not the one expected | Trust `source`: `selection` is the tab, `argument` is what you passed; pass `case` to be explicit |
 | A solved state or a script edit vanished | Another case was loaded (by this tool or the tab), which replaced the held model; re-apply the edit and re-solve |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |

@@ -77,8 +77,7 @@ ipss-agent/
 ├── lib/                                 # ipss_runnable.jar, deps/, m2-repo/
 ├── wspace/                              # Working directory (cases + results)
 ├── target/                              # ipss-agent-cmd-1.0.0-uber.jar
-├── .agents/skills/                      # Canonical agent skills (Codex)
-├── .claude/commands/ + .claude/skills/  # Claude Code integration
+├── .agents/skills/                      # Canonical agent skills (DSH, Codex)
 ├── interpss-persistent/                 # DSH persistent Cordis plugin
 ├── interpss-dynamic/                    # Legacy dynamic DSH injection (superseded)
 ├── scripts/                             # sync_ipss_skills.sh, bridge setup
@@ -273,8 +272,7 @@ Skills are thin orchestration documents. They instruct LLM agents which CLI comm
 
 ### Canonical skill: `ipss-sim`
 
-Location: `.agents/skills/ipss-sim/SKILL.md`  
-Claude copy: `.claude/skills/ipss-sim/SKILL.md` (synced via `scripts/sync_ipss_skills.sh`)
+Location: `.agents/skills/ipss-sim/SKILL.md` (canonical; DSH sessions opened in this repo discover it directly)
 
 Four-step workflow:
 
@@ -296,7 +294,18 @@ Invocation modes:
 | `nerc-report-html` | Bundled Python script: `.agents/skills/nerc-report-html/scripts/generate_nerc_html.py` |
 | `nerc-report-slides` | Presentations skill workflow; converts Markdown to PPTX |
 
-Claude Code registers slash commands in `.claude/commands/` that point back to the canonical `.agents/skills/` files.
+### Installing the skills
+
+`scripts/sync_ipss_skills.sh` installs the canonical tree into the roots each agent scans:
+
+| Target | Command | Effect |
+|--------|---------|--------|
+| `~/.dsh/skills/<name>/SKILL.md` | `SYNC_DSH_SKILLS=1` | `/<name>` in the DSH composer of **every** session, whatever the workspace |
+| `~/.codex/prompts/<name>.md` | `SYNC_CODEX_PROMPTS=1` | Codex custom prompt (slash command) carrying the full skill text |
+| `~/.codex/skills/ipss-sim/SKILL.md` | `SYNC_CODEX=1` | Verbatim copy kept for Codex skill discovery |
+
+A bare run does nothing and prints that usage. Installed copies are snapshots outside the
+repository, so re-run the relevant flag after editing a canonical skill.
 
 ---
 
