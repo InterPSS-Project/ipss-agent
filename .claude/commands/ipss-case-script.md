@@ -9,4 +9,5 @@ Read and follow `.agents/skills/ipss-case-script/SKILL.md` (canonical). That ski
 /ipss-case-script data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy
 /ipss-case-script ieee14_adjBus14.gvy on IEEE 14-bus, reload first
 /ipss-case-script set Bus14-L1 to 0.50 + j0.30 pu on IEEE 14-bus
+/ipss-case-script run mask_branch.gvy then the Bus14 inline edit on IEEE 14-bus
 ```

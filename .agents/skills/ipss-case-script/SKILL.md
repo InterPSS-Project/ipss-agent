@@ -41,6 +41,13 @@ file:
 interpss_run_gvy({ script: "aclfnet.getBus('Bus14').getContributeLoad('Bus14-L1').loadCP = new Complex(0.50, 0.30)" })
 ```
 
+Pass an **array** to run several scripts in one call (0.4.11+), applied in order to the same held
+model — a scenario sequence that mixes files and inline source:
+
+```
+interpss_run_gvy({ script: ['mask_branch.gvy', "aclfnet.getBus('Bus14').loadP = 0.5", 'export.gvy'] })
+```
+
 Do not ask which case to use: with no `case` argument the tool resolves the case selected in the
 InterPSS tab. Pass `case` only to target a different case — **a file script is always resolved inside
 that case's own `scripts/` folder**, so a script that lives with another case needs that case named.
@@ -54,16 +61,36 @@ that case's own `scripts/` folder**, so a script that lives with another case ne
 | `ieee14_adjBus14.gvy` | `wspace/<case dir>/scripts/ieee14_adjBus14.gvy` |
 | `data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy` | that path, verbatim |
 | `wspace/data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy` | the same, with the `wspace/` prefix stripped (plugin 0.3.18) |
+| `wspace/script/ieee14_calGSF.gvy` | `wspace/script/…` — the **workspace fixtures folder**, valid from any case (0.4.12+; the Host reads it and evaluates it as source) |
 | an absolute path containing `/wspace/data/…/scripts/…` | the same file, converted to the `data/…` form |
 | `aclfnet.id = 'Modified'` (or any multi-line code) | evaluated as **inline source** — nothing is written to disk (0.4.9+) |
 
-The rule is the value's shape: a single bare word is a file name (so `ieee14_adjBus14.gvy` and a
-`data/…/scripts/x.gvy` path stay files), while **whitespace or statement punctuation** (`=`, `(`, `;`,
-braces, quotes, commas…) means source. A single token that names something else (`scripts/x.txt`) stays
+A **case script** (`<case folder>/scripts/x.gvy`) is passed to the JVM as a path and must stay inside
+that folder; a **workspace script** (`wspace/script/x.gvy`) is read by the Host and evaluated as source,
+so one fixtures folder serves every case. The rule between file and source is the value's shape: a single
+bare word is a file name (so `ieee14_adjBus14.gvy` and a `data/…/scripts/x.gvy` path stay files), while
+**whitespace or statement punctuation** (`=`, `(`, `;`, braces, quotes, commas…) means source. A single token that names something else (`scripts/x.txt`) stays
 a selector and keeps the actionable selector error. The same three path spellings work for the `case`
 argument. Anything else is refused before the bridge is called: a path outside a `scripts/` directory, a
 non-`.gvy` file, a `..` segment (inline source is instead bounded at 256 KB). A missing file fails with the names of the `.gvy` files that *are*
 in that folder — use them rather than guessing.
+
+### Several scripts in one call
+
+The array form is a **sequence**, not a batch of independent runs:
+
+- every entry is resolved first, so a bad selector fails the call before the model changes;
+- `reload: true` re-parses the case **once**, before the first script — later scripts see the earlier
+  edits;
+- the run **stops at the first failure**: what already ran stays applied (`applied`, `failedScript`,
+  `error`, `line` come back), and nothing is rolled back;
+- `steps` gives one entry per script (label, `elapsedMs`, its own load/gen delta, `returnValue`,
+  `stdout`), while the top-level digest spans the whole run;
+- up to 20 scripts per call.
+
+```
+interpss_run_gvy({ script: ['relieve_bus14.gvy', "senAlgo.calGenShiftFactor('Bus2', aclfnet.getBranch('Bus1','Bus5','1'))"] })
+```
 
 Prefer a file when the edit should be reproducible or is worth re-reading later; prefer inline source
 for a one-off what-if, keeping the same binding and digest either way. The card names the inline run
@@ -115,9 +142,11 @@ factor = senAlgo.genTransferDistFactor(aclfnet.getBranch('Bus1', 'Bus5', '1'))
 
 Verified against IEEE 14 (freshly loaded — the DC base case is built on demand, no ACLF needed):
 `0.07473` dV/dQ Bus9→Bus14, `-0.16197` GSF from Bus2 onto Bus1–Bus5, `0.09149` transfer factor.
-`senAlgo` shares the network instance, so call it **after** structural edits when the sensitivities must
-reflect them; inject/withdraw buses persist across evaluations of one script call (clear them when
-changing scenario). Pre-imported types: `Complex`, `DclfAlgoObjectFactory`, `SenAnalysisType`,
+`senAlgo` shares the network instance, so its answer describes the state the bridge holds: call it
+**after** a solve (`interpss_run_aclf`) when it must describe the solved operating point — on
+`Ieee14BusLargeLoadQ` Bus14's self dV/dQ is 0.2558 pu/pu freshly parsed but 0.4437 pu/pu once solved —
+and after structural edits when the topology must be reflected. Inject/withdraw buses persist across
+evaluations of one script call (clear them when changing scenario). Pre-imported types: `Complex`, `DclfAlgoObjectFactory`, `SenAnalysisType`,
 `ContingencyBranchOutageType`.
 
 ### Reading the result
@@ -133,6 +162,7 @@ The digest is measured around the evaluation, so a mutation-only script still sh
 | `returnType` | Simple class name when the script returned a model object (never serialized) |
 | `stdout` | Anything the script printed, truncated at 8000 characters (only shown when non-empty) |
 | `error` + `line` | Failure message and the failing line **in your own script** — the adapter subtracts the import block it prepends, so the number matches the text you sent |
+| `steps` / `applied` / `failedScript` | Array form only (0.4.11+): per-script digests, how many scripts ran before a failure, and which one failed |
 
 ### Step 2 — solve when solved values are needed
 
@@ -179,8 +209,8 @@ Add prose only when the caller needs something the card cannot carry:
 
 ## Fallbacks
 
-The Groovy adapter is reachable only through the DeepSeek Harness bridge today: `IpssCmd` has no
-`gvy` subcommand, so Codex and the Claude Code CLI cannot run a script through the DSH tool. Apply
+The Groovy adapter is reachable only through the DeepSeek Harness bridge today — and only the tool
+chains several scripts (`IpssCmd` has no `gvy` subcommand), so Codex and the Claude Code CLI cannot run a script through the DSH tool. Apply
 the same edit in one JVM with the project's uber JAR, then solve it there (the CLI's `aclf` command
 would re-parse the case and lose the edit):
 
@@ -207,9 +237,10 @@ the chat tools keep reporting the model the bridge holds, not the edited one.
 | Symptom | Fix |
 |---|---|
 | `script not found: …` | The message lists the `.gvy` files in that `scripts/` folder; a bare name resolves against the **resolved case's** folder, so pass `case` when the selected case is not the one holding the script |
+| Only the first scripts of an array ran | The sequence stops at the first failure — read `applied` and `failedScript`, fix that script and re-run; earlier edits are still on the held model (`reload: true` re-parses first) |
 | Inline code ran as a file selector | A value with no whitespace or statement punctuation is a file name: add the punctuation (`x=1`, not `x`), or save it as `<case folder>/scripts/*.gvy` |
 | `this bridge cannot evaluate inline Groovy yet` | The uber JAR predates 0.4.9 — rebuild it, or pass a `.gvy` file that the older JAR can evaluate |
-| `unrecognized script selector` / `the script must live in …/scripts/` | Scripts are confined to `<case folder>/scripts/` and must end in `.gvy`; `..` is rejected |
+| `unrecognized script selector` / `the script must live in …/scripts/` | Case scripts are confined to `<case folder>/scripts/` and must end in `.gvy`; `..` is rejected. A script that must serve every case belongs in `wspace/script/` (0.4.12+) |
 | `MissingPropertyException` / `noSuchProperty` | The failure names the property and the line: check the JavaBean names above (`loadCP`, `z`, `status`) |
 | A script edit had no effect on the totals | Contribute-model network: edit `bus.getContributeLoad(id).loadCP`, not the aggregate `bus.loadP` |
 | A branch edit had no effect | Check the script really contains the status line: `branch.status = false` drops the digest's `branches` count immediately (20 → 19 on IEEE 14), so that count is the check — a status line that was edited out of the file changes nothing |

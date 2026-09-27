@@ -239,6 +239,8 @@ function parseCaSummary(text) {
 const GVY_SCRIPT_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\/scripts\/[A-Za-z0-9_.\/-]+\.gvy$/
 const GVY_MAX_LISTED = 20
 const GVY_STDOUT_LIMIT = 8000
+// A batch is a scenario sequence, not a script library: cap it so one call cannot run away.
+const GVY_MAX_SCRIPTS = 20
 // The `script` argument carries the adapter's two entry points (see
 // docs/groovy-script-adapter-architecture.md): a .gvy file selector, or the Groovy
 // source itself. A value is a selector when it can name a file — it ends in .gvy,
@@ -246,6 +248,12 @@ const GVY_STDOUT_LIMIT = 8000
 // "unrecognized script selector"). Whitespace or statement punctuation means source.
 const GVY_CODE_PUNCT_RE = /[\s;{}()'"=,+\*%<>&|!?[\]:@]/
 const GVY_BARE_NAME_RE = /^[A-Za-z0-9_-]+$/
+// A workspace-level fixtures folder, beside the case folders: wspace/script/*.gvy. The
+// Host reads these itself and hands the JVM the source (the Java rule confines *file*
+// scripts to the case folder), so a shared what-if script no longer needs a copy per case.
+const GVY_WORKSPACE_SCRIPT_RE = /^script\/[A-Za-z0-9_.\/-]+\.gvy$/i
+const GVY_WORKSPACE_MARKER = '/wspace/script/'
+
 // Mirrors GvyScriptRunner.MAX_SCRIPT_BYTES; the JVM enforces the byte limit itself.
 const GVY_SOURCE_MAX_CHARS = 256 * 1024
 
@@ -281,6 +289,60 @@ function validateGvySource(value) {
   return { ok: true, source: source }
 }
 
+// `script` is one .gvy selector, one inline source, or an **array** of those applied in
+// order (0.4.11+). Every entry is resolved up front, so a bad second selector fails the
+// call before the first script has touched the model. Returns { ok, kind, steps } with
+// one step per script: { kind: 'file'|'source', input?, abs?, source?, label }.
+async function resolveGvyArguments(ctx, root, caseInput, raw) {
+  const list = Array.isArray(raw) ? raw : [raw]
+  const batch = Array.isArray(raw)
+  if (list.length === 0) {
+    return { ok: false, error: 'the `script` argument is empty: pass a .gvy file name, Groovy source, or an array of those' }
+  }
+  if (list.length > GVY_MAX_SCRIPTS) {
+    return { ok: false, error: 'too many scripts in one call: ' + list.length + ' (limit ' + GVY_MAX_SCRIPTS + ')' }
+  }
+  const steps = []
+  for (let i = 0; i < list.length; i++) {
+    const where = batch ? ' (script ' + (i + 1) + ' of ' + list.length + ')' : ''
+    const argument = classifyGvyArgument(list[i])
+    if (argument.kind === 'none') {
+      return {
+        ok: false,
+        error: batch
+          ? 'script ' + (i + 1) + ' of ' + list.length + ' is empty: pass a .gvy file name, Groovy source, or null to skip'
+          : 'the `script` argument is required: a .gvy file name in <case folder>/scripts/ ' +
+            '(for example "ieee14_adjBus14.gvy"), a data/.../scripts/x.gvy path, or the Groovy source itself',
+      }
+    }
+    if (argument.kind === 'file') {
+      const script = await resolveGvyScript(ctx, root, caseInput, argument.value)
+      if (script.ok !== true) return { ok: false, error: script.error + where }
+      if (script.workspace === true) {
+        // Evaluated as source: the file lives outside the case folder, and only the
+        // Host opens it. The label stays the path the caller asked for.
+        const fs = ctx.get('fs')
+        let text = null
+        try {
+          text = await fs.readText(await fs.resolve(script.abs))
+        } catch (e) {
+          return { ok: false, error: 'could not read ' + script.input + ': ' + (e && e.message ? e.message : String(e)) + where }
+        }
+        const checked = validateGvySource(text)
+        if (checked.ok !== true) return { ok: false, error: checked.error + where }
+        steps.push({ kind: 'source', source: checked.source, label: script.input })
+      } else {
+        steps.push({ kind: 'file', input: script.input, abs: script.abs, label: script.input })
+      }
+    } else {
+      const checked = validateGvySource(argument.value)
+      if (checked.ok !== true) return { ok: false, error: checked.error + where }
+      steps.push({ kind: 'source', source: checked.source, label: gvySourceLabel(checked.source) })
+    }
+  }
+  return { ok: true, kind: batch ? 'batch' : 'single', steps: steps }
+}
+
 // Resolve the `script` argument to a workspace-relative .gvy path under the case's
 // scripts/ folder, then confirm it exists. Returns { ok, input, abs } or { ok:false, error }.
 async function resolveGvyScript(ctx, root, caseInput, raw) {
@@ -293,6 +355,34 @@ async function resolveGvyScript(ctx, root, caseInput, raw) {
     }
   }
   if (value.indexOf('..') >= 0) return { ok: false, error: 'the script path must not contain "..": ' + value }
+  // Workspace fixtures: `script/x.gvy`, `wspace/script/x.gvy` (the prefix is stripped
+  // above) or an absolute path containing `/wspace/script/`. The caller reads the text
+  // and evaluates it as source — the JVM never opens a path outside the case folder.
+  let workspace = ''
+  const marker = value.indexOf(GVY_WORKSPACE_MARKER)
+  if (marker >= 0) {
+    const candidate = 'script/' + value.slice(marker + GVY_WORKSPACE_MARKER.length)
+    if (GVY_WORKSPACE_SCRIPT_RE.test(candidate)) workspace = candidate
+  } else if (GVY_WORKSPACE_SCRIPT_RE.test(value)) {
+    workspace = value
+  }
+  if (workspace !== '') {
+    const workspaceAbs = root + '/wspace/' + workspace
+    const wsFs = ctx.get('fs')
+    let wsFound = false
+    if (wsFs !== undefined) {
+      try {
+        const info = await wsFs.stat(await wsFs.resolve(workspaceAbs))
+        wsFound = info !== undefined
+      } catch (e) {
+        wsFound = false
+      }
+    }
+    if (!wsFound) {
+      return { ok: false, error: 'script not found: ' + workspace + ' (the workspace script/ folder)' }
+    }
+    return { ok: true, workspace: true, input: workspace, abs: workspaceAbs }
+  }
   let input = ''
   if (GVY_SCRIPT_PATH_RE.test(value)) {
     input = value
@@ -2325,6 +2415,18 @@ function caseSummaryTool(ctx) {
   }
 }
 
+// `load 259.00 \u2192 262.10 MW (+3.10)` for one step of a batch, or '' when it moved nothing
+// (a pure query script has no delta worth a line).
+function gvyStepDelta(step) {
+  const before = finiteOrNull(step && step.loadMwBefore)
+  const after = finiteOrNull(step && step.loadMw)
+  if (before === null || after === null) return ''
+  const delta = after - before
+  if (Math.abs(delta) < 0.005) return 'load unchanged (' + formatAmount(after, 'MW') + ' MW)'
+  return 'load ' + formatAmount(before, 'MW') + ' \u2192 ' + formatAmount(after, 'MW') + ' MW (' +
+    signed(formatAmount(after, 'MW'), formatAmount(before, 'MW')) + ')'
+}
+
 // --- Chat tool: interpss_run_gvy ---------------------------------------------
 // Applies Groovy to the case held in the embedded bridge — a .gvy file, or the source
 // itself. The script mutates that network in place and may query it (bindings `aclfnet`
@@ -2337,13 +2439,16 @@ function runGvyTool(ctx) {
     name: 'interpss_run_gvy',
     description:
       LOAD_FIRST_HINT +
-      'Apply a Groovy scenario script to the power-system case held in the embedded InterPSS ' +
-      'bridge, then report what the script changed. The script comes from its case folder\'s ' +
+      'Apply one or more Groovy scenario scripts to the power-system case held in the embedded ' +
+      'InterPSS bridge, then report what they changed. A script comes from its case folder\'s ' +
       'scripts/ directory — pass the file name (for example "ieee14_adjBus14.gvy") or a ' +
       'data/.../scripts/x.gvy path — or pass the Groovy source itself, which is evaluated the same ' +
       'way without writing a file (for example "aclfnet.getBus(\'Bus14\').getContributeLoad(\'Bus14-L1\')' +
       '.loadCP = new Complex(0.50, 0.30)"). A single bare word is read as a file name, so anything ' +
-      'containing whitespace or statement punctuation is taken as source. Inside the script the ' +
+      'containing whitespace or statement punctuation is taken as source. Pass an ARRAY to apply ' +
+      'several in order on the same held model (for example ["mask_branch.gvy", ' +
+      '"aclfnet.getBus(\'Bus14\').loadP = 0.5"]): they accumulate, the run stops at the first failure, ' +
+      'and `steps` reports each one. Inside the script the ' +
       'network is bound as `aclfnet` and a DC sensitivity analyser on that same network as `senAlgo` ' +
       '(for example `aclfnet.getBus("Bus14").getContributeLoad("Bus14-L1").loadCP = new Complex(0.18, 0.07)`, ' +
       'or `senAlgo.calGenShiftFactor("Bus14", aclfnet.getBranch("Bus1","Bus5","1"))`); `Complex` and the ' +
@@ -2358,7 +2463,8 @@ function runGvyTool(ctx) {
       additionalProperties: false,
       properties: {
         script: {
-          type: 'string',
+          type: ['string', 'array'],
+          items: { type: 'string' },
           description:
             'The Groovy to apply: a .gvy file name in the case folder\'s scripts/ directory ' +
             '(e.g. "ieee14_adjBus14.gvy"), a workspace-relative path such as ' +
@@ -2366,7 +2472,9 @@ function runGvyTool(ctx) {
             'accepted too), or the Groovy source itself — for example ' +
             '"aclfnet.getBus(\'Bus14\').getContributeLoad(\'Bus14-L1\').loadCP = new Complex(0.50, 0.30)" ' +
             'or a multi-line script. Whitespace or statement punctuation marks source; a single bare ' +
-            'word is read as a file name.',
+            'word is read as a file name. An **array** applies several scripts in order (0.4.11+, up ' +
+            'to 20) on the same held model — e.g. ["base_case.gvy", "mask_branch.gvy", "export.gvy"] — ' +
+            'stopping at the first failure, with `steps` reporting what each one did.',
         },
         case: {
           type: 'string',
@@ -2396,6 +2504,31 @@ function runGvyTool(ctx) {
           source: { type: 'string' },
           format: { type: 'string' },
           script: { type: 'string' },
+          scripts: { type: 'array', items: { type: 'string' } },
+          scriptCount: { type: 'number' },
+          applied: { type: 'number' },
+          failedScript: { type: 'string' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                script: { type: 'string' },
+                elapsedMs: { type: 'number' },
+                returnValue: { type: 'string' },
+                returnType: { type: 'string' },
+                stdout: { type: 'string' },
+                buses: { type: 'number' },
+                branches: { type: 'number' },
+                loadMw: { type: 'number' },
+                generationMw: { type: 'number' },
+                loadMwBefore: { type: 'number' },
+                generationMwBefore: { type: 'number' },
+                lfConverged: { type: 'boolean' },
+              },
+            },
+          },
           reload: { type: 'boolean' },
           elapsedMs: { type: 'number' },
           returnValue: { type: 'string' },
@@ -2413,6 +2546,9 @@ function runGvyTool(ctx) {
         },
       },
       render(args, value) {
+        // A batch names itself by count and then lists what each script did; a single
+        // script keeps the original one-line-per-fact card.
+        const batch = value && value.ok === true && Array.isArray(value.steps)
         if (value && value.ok === true) {
           const lines = [
             'InterPSS run script \u2014 ' + String(value.script || '') + ' on ' + String(value.case || '') +
@@ -2424,6 +2560,28 @@ function runGvyTool(ctx) {
               formatAmount(value.generationMwBefore, 'MW') + ' \u2192 ' + formatAmount(value.generationMw, 'MW') +
               ' MW \u00b7 ' + (value.lfConverged === true ? 'solved' : 'not solved'),
           ]
+          if (batch) {
+            // Each step on its own line: the label, its own delta and what it returned.
+            const width = String(value.steps.length).length
+            value.steps.forEach((step, i) => {
+              const parts = [
+                String(i + 1).padStart(width) + '. ' + String(step.script || '?'),
+                formatAmount(step.elapsedMs, 'ms') + ' ms',
+              ]
+              const delta = gvyStepDelta(step)
+              if (delta !== '') parts.push(delta)
+              if (typeof step.returnValue === 'string' && step.returnValue !== '') {
+                parts.push('returned ' + step.returnValue)
+              } else if (typeof step.returnType === 'string' && step.returnType !== '') {
+                parts.push('returned a ' + step.returnType)
+              }
+              lines.push(parts.join(' \u00b7 '))
+              if (typeof step.stdout === 'string' && step.stdout.trim() !== '') {
+                lines.push('   output: ' + step.stdout.trimEnd().split('\n').join('\n   '))
+              }
+            })
+            return [{ type: 'text', text: lines.join('\n') }]
+          }
           if (typeof value.returnValue === 'string' && value.returnValue !== '') {
             lines.push('Returned: ' + value.returnValue)
           } else if (typeof value.returnType === 'string' && value.returnType !== '') {
@@ -2437,9 +2595,15 @@ function runGvyTool(ctx) {
         const where = value && typeof value.line === 'number' && value.line > 0
           ? ' (script line ' + value.line + ')'
           : ''
+        // A batch that failed part-way: say how far it got, because those edits stay.
+        const partial = value && typeof value.applied === 'number' && value.scriptCount > 1
+          ? '\n' + value.applied + ' of ' + value.scriptCount + ' scripts applied before the failure' +
+            (value.failedScript ? ' (failed: ' + value.failedScript + ')' : '') +
+            '; the model keeps those edits \u2014 pass reload: true to reset'
+          : ''
         return [{
           type: 'text',
-          text: 'InterPSS run script failed' + where + ': ' + String((value && value.error) || 'unknown error'),
+          text: 'InterPSS run script failed' + where + ': ' + String((value && value.error) || 'unknown error') + partial,
         }]
       },
       // Persisted to the card's block.meta so the script card renders directly.
@@ -2472,87 +2636,156 @@ function runGvyTool(ctx) {
       const target = resolvedCase.target
       const source = resolvedCase.source
 
-      // `script` is either a .gvy selector or the Groovy source itself (the adapter's
-      // two entry points); `label` is what the result and the card name it.
-      const argument = classifyGvyArgument(args && args.script)
-      if (argument.kind === 'none') {
-        return fail(
-          'the `script` argument is required: a .gvy file name in <case folder>/scripts/ ' +
-          '(for example "ieee14_adjBus14.gvy"), a data/.../scripts/x.gvy path, or the Groovy source itself',
-          'argument',
-        )
-      }
-      let scriptAbs = ''
-      let inline = ''
-      let label = ''
-      if (argument.kind === 'file') {
-        const script = await resolveGvyScript(ctx, root, target.input, argument.value)
-        if (script.ok !== true) return fail(script.error, 'argument')
-        scriptAbs = script.abs
-        label = script.input
-      } else {
-        const checked = validateGvySource(argument.value)
-        if (checked.ok !== true) return fail(checked.error, 'argument')
-        inline = checked.source
-        label = gvySourceLabel(inline)
-      }
+      // `script` is a .gvy selector, inline Groovy source, or an array of those applied in
+      // order. Every entry is resolved before the first one runs, so a bad selector cannot
+      // leave the model half-edited by an argument mistake.
+      const resolved = await resolveGvyArguments(ctx, root, target.input, args && args.script)
+      if (resolved.ok !== true) return fail(resolved.error, 'argument')
+      const steps = resolved.steps
+      const batch = resolved.kind === 'batch'
 
       const bridge = ctx.get('javaBridge')
       if (bridge === undefined || typeof bridge.runGvy !== 'function') {
         return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
       }
-      if (inline !== '' && typeof bridge.runGvySource !== 'function') {
+      if (steps.some((step) => step.kind === 'source') && typeof bridge.runGvySource !== 'function') {
         return fail(
           'this bridge cannot evaluate inline Groovy yet (it predates the adapter\'s source entry point); ' +
-          'rebuild the uber JAR (see scripts/setup-java-bridge.sh), or pass a .gvy file in `script`',
+          'rebuild the uber JAR (see scripts/setup-java-bridge.sh), or pass .gvy files in `script`',
           source,
         )
       }
+      // `reload` re-parses the case *once*, before the first script: every later script
+      // must see the edits the earlier ones made.
       const reload = args && args.reload === true
-      try {
-        const raw = inline === ''
-          ? await bridge.runGvy(target.format, root + '/wspace/' + target.input, scriptAbs, reload)
-          : await bridge.runGvySource(target.format, root + '/wspace/' + target.input, inline, reload)
-        const parsed = JSON.parse(raw)
-        if (!parsed || parsed.ok !== true) {
-          // A script can fail *after* editing, so the case and script stay in the
-          // result: the line number is what the caller needs to fix it.
-          const value = {
-            ok: false,
-            error: String((parsed && parsed.error) || 'bridge runGvy failed'),
-            case: target.input,
-            source: source,
-            script: label,
-          }
-          if (parsed && typeof parsed.line === 'number') value.line = parsed.line
-          if (parsed && typeof parsed.stdout === 'string' && parsed.stdout !== '') {
-            value.stdout = truncateStdout(parsed.stdout)
-          }
-          return value
+      const absCase = root + '/wspace/' + target.input
+      const runStep = (step, first) => (step.kind === 'file'
+        ? bridge.runGvy(target.format, absCase, step.abs, first && reload)
+        : bridge.runGvySource(target.format, absCase, step.source, first && reload))
+
+      // One digest per step, plus the failure that stopped the run. A script can fail
+      // *after* editing, so everything that already ran stays in the result.
+      const done = []
+      let failure = null
+      for (let i = 0; i < steps.length; i++) {
+        let parsed = null
+        try {
+          parsed = JSON.parse(await runStep(steps[i], i === 0))
+        } catch (e) {
+          failure = { step: steps[i], error: 'InterPSS run script failed: ' + (e && e.message ? e.message : String(e)) }
+          break
         }
-        adoptLoadedCase(sessionId, target)
+        if (!parsed || parsed.ok !== true) {
+          failure = {
+            step: steps[i],
+            error: String((parsed && parsed.error) || 'bridge runGvy failed'),
+            line: parsed && typeof parsed.line === 'number' ? parsed.line : undefined,
+            stdout: parsed && typeof parsed.stdout === 'string' ? parsed.stdout : undefined,
+          }
+          break
+        }
+        done.push({ step: steps[i], parsed: parsed })
+      }
+      if (done.length > 0) adoptLoadedCase(sessionId, target)
+
+      const stepValue = (entry) => {
+        const value = { script: entry.step.label }
+        for (const key of ['elapsedMs', 'buses', 'branches', 'loadMw', 'generationMw', 'loadMwBefore',
+          'generationMwBefore']) {
+          const n = finiteOrNull(entry.parsed[key])
+          if (n !== null) value[key] = n
+        }
+        for (const key of ['returnValue', 'returnType']) {
+          if (typeof entry.parsed[key] === 'string' && entry.parsed[key] !== '') value[key] = entry.parsed[key]
+        }
+        if (entry.parsed.lfConverged === true) value.lfConverged = true
+        if (typeof entry.parsed.stdout === 'string' && entry.parsed.stdout !== '') {
+          value.stdout = truncateStdout(entry.parsed.stdout)
+        }
+        return value
+      }
+      const labels = steps.map((step) => step.label)
+
+      if (failure !== null) {
+        const value = {
+          ok: false,
+          error: failure.error,
+          case: target.input,
+          source: source,
+          script: failure.step.label,
+          applied: done.length,
+        }
+        if (batch) {
+          value.scripts = labels
+          value.scriptCount = steps.length
+          value.failedScript = failure.step.label
+          value.steps = done.map(stepValue)
+        }
+        if (typeof failure.line === 'number') value.line = failure.line
+        if (typeof failure.stdout === 'string' && failure.stdout !== '') value.stdout = truncateStdout(failure.stdout)
+        return value
+      }
+
+      const first = done[0].parsed
+      const last = done[done.length - 1].parsed
+
+      // A single script (the pre-0.4.11 form) keeps its flat result exactly as before.
+      if (!batch) {
         const value = {
           ok: true,
           case: target.input,
           source: source,
           format: target.format,
-          script: label,
+          script: labels[0],
           reload: reload,
         }
         for (const key of ['elapsedMs', 'buses', 'branches', 'loadMw', 'generationMw', 'loadMwBefore',
           'generationMwBefore', 'line']) {
-          const n = finiteOrNull(parsed[key])
+          const n = finiteOrNull(last[key])
           if (n !== null) value[key] = n
         }
         for (const key of ['returnValue', 'returnType']) {
-          if (typeof parsed[key] === 'string' && parsed[key] !== '') value[key] = parsed[key]
+          if (typeof last[key] === 'string' && last[key] !== '') value[key] = last[key]
         }
-        value.lfConverged = parsed.lfConverged === true
-        if (typeof parsed.stdout === 'string' && parsed.stdout !== '') value.stdout = truncateStdout(parsed.stdout)
+        value.lfConverged = last.lfConverged === true
+        if (typeof last.stdout === 'string' && last.stdout !== '') value.stdout = truncateStdout(last.stdout)
         return value
-      } catch (e) {
-        return fail('InterPSS run script failed: ' + (e && e.message ? e.message : String(e)), source)
       }
+
+      const value = {
+        ok: true,
+        case: target.input,
+        source: source,
+        format: target.format,
+        script: steps.length + (steps.length === 1 ? ' script' : ' scripts'),
+        scripts: labels,
+        scriptCount: steps.length,
+        applied: steps.length,
+        steps: done.map(stepValue),
+        reload: reload,
+      }
+      // The batch digest spans the whole run: before the first script, after the last.
+      for (const key of ['buses', 'branches']) {
+        const n = finiteOrNull(last[key])
+        if (n !== null) value[key] = n
+      }
+      const before = finiteOrNull(first.loadMwBefore)
+      const after = finiteOrNull(last.loadMw)
+      if (before !== null) value.loadMwBefore = before
+      if (after !== null) value.loadMw = after
+      const genBefore = finiteOrNull(first.generationMwBefore)
+      const genAfter = finiteOrNull(last.generationMw)
+      if (genBefore !== null) value.generationMwBefore = genBefore
+      if (genAfter !== null) value.generationMw = genAfter
+      let elapsed = 0
+      let seen = false
+      for (const entry of done) {
+        const n = finiteOrNull(entry.parsed.elapsedMs)
+        if (n !== null) { elapsed += n; seen = true }
+      }
+      if (seen) value.elapsedMs = elapsed
+      value.lfConverged = last.lfConverged === true
+      return value
     },
   }
 }

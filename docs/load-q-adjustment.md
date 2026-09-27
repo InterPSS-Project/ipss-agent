@@ -205,10 +205,14 @@ terms, so each bus's Q moves the other's voltage almost as much as its own.
 ### Scripts
 
 
-| File                                                    | Role                                                                                                                                        |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `…/Ieee14BusLargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy` | Prints the 2×2 B″ reference matrix and, when solved, the finite-difference operating-point matrix; restores Q and voltages before returning |
-| `…/Ieee14BusLargeLoadQ2/scripts/ieee14_qv_adjust.gvy`   | Walks Q13/Q14 from a solvable anchor to the largest load Q that keeps both buses inside the band                                            |
+| File                                                              | Role                                                                                                                                        |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `…/Ieee14BusLargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`           | Prints the 2×2 B″ reference matrix and, when solved, the finite-difference operating-point matrix; restores Q and voltages before returning |
+| `…/Ieee14BusLargeLoadQ2/scripts/ieee14_qv_adjust.gvy`             | Walks Q13/Q14 from a solvable anchor to the largest load Q that keeps both buses inside the band                                            |
+| `…/Ieee14BusLargeLoadQ2/scripts/ieee14_adjBus1314Q_0p89to0p90.gvy` | Mutating. Sets Bus13 to 13.5 MW + j45.5053 MVAr and Bus14 to 14.9 MW + j21.3202 MVAr — the values the adjuster found, applied in one shot    |
+
+Bare script names resolve to the case folder's `scripts/` directory under `interpss_run_gvy`. The
+adjuster is the **derivation** of the two Q values; the setter is the **fixture** that applies them.
 
 
 
@@ -288,14 +292,26 @@ alone, which is why the reference matrix and the AC Jacobian diverge so far.
 
 ```text
 interpss_case_load({ case: 'wspace/data/ieee/Ieee14BusLargeLoadQ2/ieee14.ieee' })
-interpss_run_gvy({ script: 'ieee14_dvdq_matrix.gvy', reload: true })
-interpss_run_gvy({ script: 'ieee14_qv_adjust.gvy', reload: true })
-interpss_run_aclf()
-interpss_run_gvy({ script: 'ieee14_dvdq_matrix.gvy' })
+interpss_run_gvy({ script: 'ieee14_qv_adjust.gvy', reload: true })                 # derives Q13/Q14 (7 passes)
+interpss_run_gvy({ script: 'ieee14_adjBus1314Q_0p89to0p90.gvy', reload: true })    # applies the values
+interpss_run_aclf()                                                               # confirm V13 / V14
+interpss_run_gvy({ script: 'ieee14_dvdq_matrix.gvy' })                            # matrices at the target
 ```
+
+No ACLF is needed before the first step: the stored case does not converge, and the adjuster anchors
+itself. Once the two Q values are known, the setter reproduces the state on its own — run it with
+`reload: true` so it starts from the stored case.
 
 **Lessons from this example:** solve the pair together; re-measure every pass; start from a
 solvable anchor; mind the injection vs load convention (`J = −M`).
+
+### Caveat — apply the values on a fresh parse
+
+A diverged ACLF leaves the held model degraded: the generators stay switched to `GenPQ` at constant
+Q, and a script that only edits loads cannot put them back to PV. The same Q values applied on such a
+model do **not** reproduce these voltages — that state is roughly 4× stiffer (anchor `J` self term
+−0.340 against −0.086 pu/pu) and reached the band with only Q13 = 33.9 / Q14 = 16.6 MVAr. Apply the
+setter on a fresh parse (`reload: true`), which is also what makes the result reproducible.
 
 ---
 
@@ -307,6 +323,7 @@ solvable anchor; mind the injection vs load convention (`J = −M`).
 - `docs/groovy-script-adapter-architecture.md` — `aclfnet` / `senAlgo` binding and sensitivity semantics
 - `docs/interpss-tools.md` — `interpss_run_gvy` / `interpss_run_aclf` contracts
 - Example A: `Ieee14BusLargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`, `ieee14_adjBus14Q_0p89to0p90.gvy`
-- Example B: `Ieee14BusLargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`, `ieee14_qv_adjust.gvy`
+- Example B: `Ieee14BusLargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`, `ieee14_qv_adjust.gvy`,
+  `ieee14_adjBus1314Q_0p89to0p90.gvy`
 - Skills: `ipss-case-script`, `ipss-case-aclf`
 

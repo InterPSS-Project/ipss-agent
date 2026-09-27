@@ -359,7 +359,7 @@ branch.z = new Complex(r, x);
 ### 8. Consumers in this repository
 
 `interpss_run_gvy` (DeepSeek Harness chat tool) exposes **both** entry points through one `script`
-argument: a `.gvy` selector resolves to a file under the case folder's `scripts/`, anything carrying
+argument — or an **array** of them, applied in order on the same processor-held network (0.4.11+): a `.gvy` selector resolves to a file under the case folder's `scripts/`, anything carrying
 whitespace or statement punctuation is evaluated as inline source. The Host routes them to
 `GvyScriptRunner.runOnNet` (file) and `GvyScriptRunner.runSourceOnNet` (source), which share the same
 `AclfNetDshGvyScriptProcessor` evaluation and before/after digest; `IpssAgentBridge.runGvy` /
