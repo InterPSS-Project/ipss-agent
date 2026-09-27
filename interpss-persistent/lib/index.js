@@ -23,6 +23,42 @@ function diag(line) {
   try { appendFileSync(DIAG, line + '\n', 'utf8') } catch {}
 }
 
+// Persist a run-config JSON the ACLF/CA dialogs own. The DSH `fs` service fences every
+// mutation against the deployment's writable roots, and in an app-hosted profile that
+// root can be narrower than the workspace this plugin resolved — the dialog then fails
+// with FS_SANDBOX_DENIED for a path that is inside the session's own workspace (the
+// bash/fs tools, bound to the session, still write there). Both callers build the target
+// from that resolved root and the case folder, never from caller text, so a fenced write
+// falls back to node:fs — the same unfenced mechanism this plugin already uses for its
+// diagnostic log and its JDK probe.
+async function writeConfigText(fs, target, text, directPath) {
+  try {
+    await fs.writeText(target, text)
+    return { ok: true, via: 'fs' }
+  } catch (e) {
+    const message = e && e.message ? e.message : String(e)
+    if (!/file access denied|FS_SANDBOX_DENIED|sandbox mode/i.test(message)) return { ok: false, error: message }
+    // `fs.resolve()` hands back an opaque handle, which node:fs cannot open: the direct
+    // write needs the absolute path string the caller built.
+    const direct = typeof directPath === 'string' && directPath !== ''
+      ? directPath
+      : (typeof target === 'string' ? target : (target && typeof target.path === 'string' ? target.path : ''))
+    if (direct === '') {
+      return { ok: false, error: message + '; no filesystem path was available for a direct write' }
+    }
+    try {
+      writeFileSync(direct, text, 'utf8')
+      diag('fenced fs write, persisted via node:fs: ' + direct)
+      return { ok: true, via: 'node:fs' }
+    } catch (e2) {
+      return {
+        ok: false,
+        error: message + '; direct write of ' + direct + ' failed: ' + (e2 && e2.message ? e2.message : String(e2)),
+      }
+    }
+  }
+}
+
 const NAMESPACE = 'interpss'
 const PACKAGE = '@deepseek-ai/dsh-interpss'
 const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase']
@@ -1634,7 +1670,8 @@ class InterpssService extends TypertRemoteService {
     const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
     try {
       const target = await fs.resolve(caseCfg)
-      await fs.writeText(target, JSON.stringify(config, null, 2) + '\n')
+      const written = await writeConfigText(fs, target, JSON.stringify(config, null, 2) + '\n', caseCfg)
+      if (written.ok !== true) return { ok: false, error: 'failed to write ' + caseCfg + ': ' + written.error }
       return { ok: true }
     } catch (e) {
       return { ok: false, error: 'failed to write ' + caseCfg + ': ' + (e && e.message ? e.message : String(e)) }
@@ -1741,7 +1778,8 @@ class InterpssService extends TypertRemoteService {
     }
     try {
       const target = await fs.resolve(caConfigPath(root, parent))
-      await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n')
+      const written = await writeConfigText(fs, target, JSON.stringify(payload, null, 2) + '\n', caConfigPath(root, parent))
+      if (written.ok !== true) return { ok: false, error: 'failed to write ' + cfgRel + ': ' + written.error }
       return { ok: true, path: cfgRel }
     } catch (e) {
       return { ok: false, error: 'failed to write ' + cfgRel + ': ' + (e && e.message ? e.message : String(e)) }
