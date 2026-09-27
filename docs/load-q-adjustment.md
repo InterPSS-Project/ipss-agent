@@ -303,6 +303,7 @@ solvable anchor; mind the injection vs load convention (`J = −M`).
 
 ## Related
 
+- `docs/user_guide/Loadflow-adjustment-user-guide.md` — practical how-to for DSH Chat
 - `docs/groovy-script-adapter-architecture.md` — `aclfnet` / `senAlgo` binding and sensitivity semantics
 - `docs/interpss-tools.md` — `interpss_run_gvy` / `interpss_run_aclf` contracts
 - Example A: `Ieee14BusLargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`, `ieee14_adjBus14Q_0p89to0p90.gvy`
