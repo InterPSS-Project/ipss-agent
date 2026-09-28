@@ -175,19 +175,19 @@ disk.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.4.14 → 0.5.0
+# bump version first, e.g. 0.5.0 → 0.5.1
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.5.0.tgz
+rm -f deepseek-ai-dsh-interpss-0.5.1.tgz
 npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
 
 # tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.5.0.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.5.1.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # reinstall — a NEW version only needs `add`; do not `pnpm remove` first
 cd /Users/mzhou/.dsh/profiles/web
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.5.0.tgz
+dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.5.1.tgz
 diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
 

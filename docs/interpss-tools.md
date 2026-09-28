@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.5.0**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.5.1**.
 
 ## Tool surface
 
@@ -599,6 +599,7 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.5.0 | Version-only minor release rolling up 0.4.1–0.4.14: the dialog-free CA tool, the configurable **Over Loading Threshold(%)** with its `config/ca_run.json` round trip, the agent `*Dsh*` Groovy adapter with the `senAlgo` binding, and inline / array / workspace-`script/` Groovy runs — no behaviour change beyond 0.4.14 |
 | 0.4.1 | `interpss_run_ca`: DC contingency analysis from chat with the CA dialog bypassed (explicit inputs → `ca_run.json` → case-folder discovery → N-1 defaults), plus its card and the `ipss-case-ca` skill |
 | 0.4.0 | Version-only release: the first 0.4.x, carrying 0.3.17–0.3.23 unchanged (the `interpss_run_gvy` tool and its skill, the `ipss-case-load` skill, `wspace/…` selector spellings, the Simu Case picker + `✓ Loaded:` sync, `-Xmx8g`, and the load card's confirmation line) |
+| 0.5.1 | The connection modal renders three full-precision columns to four decimals — `PFrom2To` and `QFrom2To` on the Branch tab (source columns 19/20) and `QGen` on the Gen tab (column 12): `renderConnTable` takes a per-source-column `decimals` map and routes those cells through the existing `formatValue`, so an already-short column stays exactly as the Host sent it |
 
 ## Troubleshooting
 

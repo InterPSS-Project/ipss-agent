@@ -300,8 +300,14 @@ return {
       )
     }
 
-    function renderConnTable(header, rows, idx) {
+    // `decimals` maps a SOURCE column index (not a position in `idx`) to the decimal
+    // places its cell shows — for the columns the CSV carries as full-precision floats
+    // (PFrom2To / QFrom2To / QGen), so they read like the bus table instead of 17
+    // digits. `formatValue` shortens only a value carrying more decimals than asked,
+    // so an already-short column is left exactly as the Host sent it.
+    function renderConnTable(header, rows, idx, decimals) {
       const cols = idx || [4, 6, 7, 9, 11, 12, 13, 14, 19, 20, 24]
+      const places = decimals || {}
       const hdr = cols.map((i) => (header && header[i] != null ? header[i] : ''))
       return React.createElement('table', { style: tableStyle },
         React.createElement('thead', null,
@@ -309,7 +315,11 @@ return {
         ),
         React.createElement('tbody', null,
           (rows || []).map((r, ri) => React.createElement('tr', { key: ri },
-            cols.map((i) => React.createElement('td', { key: i, style: tdStyle }, r[i] != null ? r[i] : '')),
+            cols.map((i) => {
+              const raw = r[i] != null ? r[i] : ''
+              const d = places[i]
+              return React.createElement('td', { key: i, style: tdStyle }, d != null ? formatValue(raw, d) : raw)
+            }),
           )),
         ),
       )
@@ -1423,7 +1433,8 @@ return {
         }
         if (connView === 'gen') {
           if (connResult.genRows && connResult.genRows.length > 0) {
-            return renderConnTable(connResult.genHeader, connResult.genRows, [3, 4, 6, 9, 10, 11, 12, 13, 14, 15])
+            // 12 = QGen, the only gen column the model returns as a full-precision float
+            return renderConnTable(connResult.genHeader, connResult.genRows, [3, 4, 6, 9, 10, 11, 12, 13, 14, 15], { 12: 4 })
           }
           return React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No generators connected to this bus.')
         }
@@ -1433,7 +1444,8 @@ return {
           }
           return React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No loads connected to this bus.')
         }
-        return renderConnTable(connResult.header, connResult.rows)
+        // 19/20 = PFrom2To / QFrom2To; `idx` keeps its default column list
+        return renderConnTable(connResult.header, connResult.rows, null, { 19: 4, 20: 4 })
       }
 
       function connCountLabel() {
