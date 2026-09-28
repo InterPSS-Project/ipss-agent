@@ -254,5 +254,6 @@ the chat tools keep reporting the model the bridge holds, not the edited one.
 - `$ipss-case-aclf` — solve the edited case and write the result files
 - `$ipss-case-info` — show the loaded case's network info
 - `$ipss-case-summary` — summarize the case, edited or not
+- `$ipss-case-aclf-adjust` — the packaged load-Q / voltage-band workflow built on this tool: measure `dV/dQ`, script the edit, confirm with ACLF
 - [docs/groovy-script-adapter-architecture.md](../../../docs/groovy-script-adapter-architecture.md) — the adapter, binding and evaluation semantics
 - [docs/interpss-tools.md](../../../docs/interpss-tools.md) — the `interpss_run_gvy` tool contract

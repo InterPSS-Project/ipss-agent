@@ -5,7 +5,9 @@ sensitivity to size the step and AC load flow to confirm it.
 
 This guide is the practical how-to for InterPSS DSH Chat. For the engineering detail
 behind the method (B″ vs AC sensitivity, Jacobian convention, Newton loop), see
-[load-q-adjustment.md](../load-q-adjustment.md).
+[load-q-adjustment.md](../load-q-adjustment.md). The whole sequence below is packaged as the
+**`$ipss-case-aclf-adjust`** skill, so "adjust load Q to bring Bus N into [0.89, 0.90] pu" can be
+handed to the agent as one request.
 
 ---
 
@@ -78,6 +80,7 @@ Natural-language prompts the agent can map to tools:
 | Load the large-load-Q IEEE14 case | `$ipss-case-load` / `interpss_case_load`           |
 | Run ACLF                          | `$ipss-case-aclf` / `interpss_run_aclf`            |
 | Run the dV/dQ script              | `$ipss-case-script` / `interpss_run_gvy`           |
+| Adjust load Q to a target band    | `$ipss-case-aclf-adjust` (this whole workflow)      |
 | Summarize lowest voltages         | `$ipss-case-summary` / `interpss_summarize_result` |
 
 
@@ -284,7 +287,7 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 - [load-q-adjustment.md](../load-q-adjustment.md) — method, conventions, and full IEEE14 walkthroughs
 - [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Chat tools, what-if scripts
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
-- Skills: `$ipss-case-load`, `$ipss-case-aclf`, `$ipss-case-script`, `$ipss-case-summary`
+- Skills: `$ipss-case-aclf-adjust` (this workflow, packaged), `$ipss-case-load`, `$ipss-case-aclf`, `$ipss-case-script`, `$ipss-case-summary`
 - Example A scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ/scripts/`
 - Example B scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/`
 

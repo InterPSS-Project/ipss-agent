@@ -8,6 +8,10 @@ solves.
 This note states the method in general form, then illustrates it with the IEEE 14-bus system:
 **Bus14** alone (single load), and **Bus13 + Bus14** together (coupled loads).
 
+The packaged workflow for agents is the **`$ipss-case-aclf-adjust`** skill
+(`.agents/skills/ipss-case-aclf-adjust/SKILL.md`), which walks the same measure → size → apply →
+confirm sequence with the tool calls; this note is the engineering behind it.
+
 
 |                | **Single load**                                                        | **Multiple loads**                                                                      |
 | -------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
@@ -325,5 +329,5 @@ setter on a fresh parse (`reload: true`), which is also what makes the result re
 - Example A: `Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`, `ieee14_adjBus14Q_0p89to0p90.gvy`
 - Example B: `Ieee14Bus_LargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`, `ieee14_qv_adjust.gvy`,
   `ieee14_adjBus1314Q_0p89to0p90.gvy`
-- Skills: `ipss-case-script`, `ipss-case-aclf`
+- Skills: `ipss-case-aclf-adjust` (the packaged workflow), `ipss-case-script`, `ipss-case-aclf`
 

@@ -1,9 +1,10 @@
 // Ieee14Bus_LargeLoadQ — dV/dQ sensitivity at Bus14 and the load-Q band that
 // puts V(Bus14) inside the [0.89, 0.90] pu target window.
+// See docs/load-q-adjustment.md, Example A, and the $ipss-case-aclf-adjust skill.
 //
 // WHY: this case schedules Bus14 with an unusually large reactive load
 // (14.9 MW + j50.0 MVAr). The solved voltage at Bus14 is ~0.871 pu, the only
-// bus below 0.9. To size a corrective Q reduction we need the local
+// bus below 0.90. To size a corrective Q reduction we need the local
 // voltage/reactive stiffness dV(Bus14)/dQ(Bus14).
 //
 // HOW: SenAnalysisType.QVOLTAGE is the linearised dV/dQ taken from the B''
@@ -11,7 +12,7 @@
 // INJECTION (so dVdQ > 0 here: injecting Q raises the bus voltage). The self
 // term dV(Bus14)/dQ(Bus14) is the diagonal entry, so reaching a target V needs
 //     dQinject = (targetV - V0) / dVdQ          [pu injection, positive]
-//     Qload    = Qload0 - dQinject              [load moves the other way]
+//     Qload    = Qload0 - dQinject              [the load moves the other way]
 //
 // ACCURACY: B'' is a linearisation and ignores reactive losses, so it
 // understates the stiffness of a deeply depressed bus. Here it returns
@@ -22,6 +23,10 @@
 // window printed below as a first cut / ranking aid, then confirm the applied
 // value with a real AC load flow — that is what
 // ieee14_adjBus14Q_0p89to0p90.gvy and its iteration table do.
+//
+// The sensitivity is topology/admittance based (reproducible); the base voltage
+// printed is the operating point of the held model, so run this on a solved
+// case (after interpss_run_aclf) for a meaningful window.
 
 busId = "Bus14";
 loadId = "Bus14-L1";

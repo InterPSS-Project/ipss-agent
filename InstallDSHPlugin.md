@@ -135,9 +135,10 @@ with no matching `dsh.profile.bundles` entry is not composed into the app.
 
 The plugin registers **no** slash command. Every `/ipss-case-*` entry in the composer's `/` menu is a
 **skill** this repository ships under `.agents/skills/`: `/ipss-case-load`, `/ipss-case-aclf`,
-`/ipss-case-info`, `/ipss-case-ca`, `/ipss-case-script`, `/ipss-case-summary`, `/ipss-sim`,
-`/nerc-report-html`, `/nerc-report-slides`. DSH discovers them; `@deepseek-ai/dsh-interpss` has no
-part in it, so a working InterPSS tab does not imply working commands (or the other way round).
+`/ipss-case-aclf-adjust`, `/ipss-case-info`, `/ipss-case-ca`, `/ipss-case-script`,
+`/ipss-case-summary`, `/ipss-sim`, `/nerc-report-html`, `/nerc-report-slides`. DSH discovers them;
+`@deepseek-ai/dsh-interpss` has no part in it, so a working InterPSS tab does not imply working
+commands (or the other way round).
 
 DSH reads skills from these roots:
 

@@ -1,8 +1,10 @@
 // Ieee14Bus_LargeLoadQ — trim the Bus14 reactive load so V(Bus14) lands inside
 // the [0.89, 0.90] pu window.
+// See docs/load-q-adjustment.md, Example A, and the $ipss-case-aclf-adjust skill.
 //
 // Result: Bus14 load 14.9 MW + j50.0 MVAr  ->  14.9 MW + j46.0 MVAr.
 // Only the reactive part changes; P is untouched.
+// Verified: V(Bus14) = 0.895243 pu at 14.9 MW + j46.0 MVAr.
 //
 // Sizing. The B''-based dV/dQ from ieee14_dvdq_Bus14.gvy is 0.4437 pu/pu, which
 // linearly implies a load-Q window of 43.5 .. 45.8 MVAr for [0.90 .. 0.89] pu.

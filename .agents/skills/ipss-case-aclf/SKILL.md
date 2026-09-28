@@ -156,3 +156,11 @@ The run **overwrites** that case's `*_DF_*.csv` and `*_network_info.txt`. Any pr
 | `Converged: false` | Tune `maxIterations` / `tolerance` / limit-control flags in the case-folder `config/aclf_run.json`; report the mismatch bus rather than retrying unchanged |
 | Wrong case solved | Trust `source`: `selection` is the tab, `bridge` is the last case the JVM held — pass `case` to be explicit |
 | Very large case is slow or runs out of memory | The bridge JVM runs with `-Xmx8g` (4g before plugin 0.3.20); see `Setup.md` for heap guidance |
+
+## Related
+
+- `$ipss-case-aclf-adjust` — when the solve leaves a bus outside its voltage band and load Q is the
+  control: measure `dV/dQ`, size the change, apply it, then solve again
+- `$ipss-case-load` — load (or switch) the case, and the reload + apply form of that step
+- `$ipss-case-script` — apply a scenario edit before solving
+- `$ipss-case-summary` — summarize the solved case

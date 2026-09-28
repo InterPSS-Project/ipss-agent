@@ -530,6 +530,7 @@ tab's picker.
 | `ipss-case-load` | Load a case into the bridge and report its counts (wraps `interpss_case_load`) |
 | `ipss-case-info` | Report the current case's network info (wraps `interpss_network_info`) |
 | `ipss-case-aclf` | Run ACLF for the current case (wraps `interpss_run_aclf`) |
+| `ipss-case-aclf-adjust` | Adjust bus load Q to bring a bus voltage into a target band — dV/dQ sizing, scripted edit, ACLF confirmation (guides `interpss_run_gvy` + `interpss_run_aclf`) |
 | `ipss-case-summary` | Summarize the current case — totals or a top-N ranking (wraps `interpss_case_summary`) |
 | `ipss-case-script` | Apply a scenario edit to the current case — `.gvy` scripts and/or inline Groovy, one call or a sequence (wraps `interpss_run_gvy`) |
 | `ipss-case-ca` | DC contingency analysis for the current case, dialog-free (wraps `interpss_run_ca`) |

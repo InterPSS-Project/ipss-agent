@@ -1,42 +1,39 @@
 /**
- * ieee14_qv_adjust.gvy -- move the Bus13 / Bus14 load Q so both voltage magnitudes
- * land inside [0.89, 0.90] pu.  Target corner: V(Bus13) -> 0.900, V(Bus14) -> 0.890
- * (the largest load Q that keeps both buses inside the band).
+ * ieee14_qv_adjust.gvy -- move the Bus13 / Bus14 load Q so both voltage magnitudes land inside
+ * [0.89, 0.90] pu (target: the band corner inset by 1e-3 pu -- V13 -> 0.899, V14 -> 0.891 -- the
+ * largest load Q that keeps both buses strictly inside the band).
  *
  * Case: data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee   (100 MVA base)
  *
  * Method
- *   1. `senAlgo` (SenAnalysisType.QVOLTAGE) gives the network-parameter dV/dQ matrix
- *      at its V ~ 1.0 pu linearization point -- printed for reference, and used as the
- *      fallback column whenever a finite-difference probe cannot be solved.
- *   2. because that matrix is a poor model once the case is stressed, the adjuster
- *      re-measures the dV/dQ matrix AT THE CURRENT OPERATING POINT by finite
- *      differences: perturb one load Q by EPS, solve the AC load flow, divide the
- *      voltage response by EPS, restore, repeat for the other bus. That 2x2 matrix
- *        J[r][c] = dV(bus_r) / dQload(bus_c)      [pu / pu]
+ *   1. `senAlgo` (SenAnalysisType.QVOLTAGE) gives the network-parameter dV/dQ matrix at its
+ *      V ~ 1.0 pu linearization point -- printed for reference and used as the fallback column
+ *      whenever a finite-difference probe cannot be solved.
+ *   2. because that matrix is a poor model once the case is stressed, the adjuster re-measures the
+ *      dV/dQ matrix AT THE CURRENT OPERATING POINT by finite differences: perturb one load Q by
+ *      EPS, solve the AC load flow, divide the voltage response by EPS, restore, repeat for the
+ *      other bus. That 2x2 matrix
+ *        J[r][c] = dV(bus_r) / dQload(bus_c)      [pu / pu]   (negative)
  *      is the one the Newton step uses.
- *   3. step:  dQload = inv(J) @ (V_measured - V_target), applied with a line search that
- *      only accepts a step that lowers max|V - target|, and capped so the predicted
- *      voltage move stays inside the band width.
- *   4. each pass logs the measured response, i.e. the empirical dV/dQ actually realized
- *      (compare with the J printed on the same line).
+ *   3. step:  dQload = -inv(J) @ (V_measured - V_target), capped so the predicted voltage move
+ *      stays inside the band width, applied through a line search that only accepts a step which
+ *      lowers max|V - target|; a step that will not solve is rolled back and halved.
+ *   4. each pass logs the measured response, i.e. the empirical dV/dQ actually realized.
  *
- * Solves use the case config (config/aclf_run.json, else the project default) through
- * the same LoadflowAlgorithm the interpss_run_aclf tool uses, so the state left behind
- * is the one a following `interpss_run_aclf` writes to the result CSVs.
+ * Solves use the case config (config/aclf_run.json) through the same LoadflowAlgorithm the
+ * interpss_run_aclf tool uses, so the state left behind is the one a following `interpss_run_aclf`
+ * writes to the result CSVs. The model is left solved at the target; the bridge-held case is edited
+ * in place and the .ieee file on disk is not touched.
  *
- * The model is left solved at the target; the bridge-held case is edited in place and
- * the .ieee file on disk is not touched.
+ * Written for the DSH bridge tokens (`aclfnet`, `senAlgo`, `Complex` pre-imported).
  */
 
 // ------------------------------------------------------------------ inputs
 def BUSES    = ['Bus13', 'Bus14']
 def LOAD_IDS = ['Bus13': 'Bus13-L1', 'Bus14': 'Bus14-L1']
-def TARGET   = [0.899d, 0.891d]        // pu, in BUSES order: 1e-3 pu inside the stressed
-                                       // corner (0.900, 0.890) of the [0.89, 0.90] band, so both
-                                       // buses sit strictly inside it at the largest load Q
-def BAND     = [0.890d, 0.900d]
-def ANCHOR_Q = [0.058d, 0.050d]        // pu -- base IEEE-14 load Q, a known solvable point
+def TARGET   = [0.899d, 0.891d]        // pu, in BUSES order -- 1e-3 pu inside the stressed corner
+def BAND     = [0.890d, 0.900d]        // the window both buses must end up inside
+def ANCHOR_Q = [0.058d, 0.050d]        // pu -- base IEEE-14 load Q, a known solvable start
 def EPS_FAR  = 0.020d                  // pu Q perturbation for the Jacobian probe, far from target
 def EPS_NEAR = 0.010d                  // pu Q perturbation for the Jacobian probe, near target
 def FAR      = 0.020d                  // pu, "far from the target" threshold
@@ -44,7 +41,7 @@ def V_CAP_FAR  = 0.020d                // pu, cap on the predicted voltage move 
 def V_CAP_NEAR = 0.006d                // pu, cap once the Newton step is local
 def V_TOL    = 0.0025d                 // pu, accepted |V - target|
 def ALPHA    = 1.0d                    // Newton step scaling before the line search
-def MAX_ITER = 25
+def MAX_ITER = 30
 def MAX_BACKTRACK = 8
 
 // --------------------------------------------------- locate the case config
@@ -75,8 +72,8 @@ def solveLf = {
 	if (!ok || !aclfnet.isLfConverged()) {
 		return false
 	}
-	// same settle pass as AclfRunner: a converged NR loop can still violate the bus
-	// balance after a PV->PQ limit conversion or a control step
+	// same settle pass as AclfRunner: a converged NR loop can still violate the bus balance
+	// after a PV->PQ limit conversion or a control step
 	for (int i = 0; i < 3; i++) {
 		def mm = aclfnet.maxMismatch(com.interpss.core.algo.AclfMethodType.NR)
 		if (mm == null || mm.maxMis == null) break
@@ -94,8 +91,8 @@ def activeBuses = aclfnet.getBusList().findAll { it.isActive() }
 def snapV  = { -> def m = [:]; activeBuses.each { b -> m[b.id] = [b.voltageMag, b.voltageAng] }; m }
 def restoreV = { m -> m.each { id, va -> def b = aclfnet.getBus(id); b.voltageMag = va[0]; b.voltageAng = va[1] } }
 def f5 = { d -> String.format('%9.5f', d) }
-def f3 = { d -> String.format('%7.3f', d) }
-def jac = { J -> '[' + f3(J[0][0]) + ' ' + f3(J[0][1]) + '; ' + f3(J[1][0]) + ' ' + f3(J[1][1]) + ']' }
+def f2 = { d -> String.format('%8.2f', d) }
+def jac = { J -> '[' + f2(J[0][0]) + ' ' + f2(J[0][1]) + '; ' + f2(J[1][0]) + ' ' + f2(J[1][1]) + ']' }
 def inv2 = { J ->
 	double d = J[0][0] * J[1][1] - J[0][1] * J[1][0]
 	[[J[1][1] / d, -J[0][1] / d], [-J[1][0] / d, J[0][0] / d]]
@@ -119,7 +116,7 @@ if (!aclfnet.isLfConverged()) {
 	BUSES.eachWithIndex { id, i -> setQ(id, ANCHOR_Q[i]) }
 	aclfnet.initBusVoltage()
 	def ok = solveLf()
-	log << 'restart   : load Q -> base anchor (' + f3(ANCHOR_Q[0] * 100) + ',' + f3(ANCHOR_Q[1] * 100) +
+	log << 'restart   : load Q -> base anchor (' + f2(ANCHOR_Q[0] * 100) + ',' + f2(ANCHOR_Q[1] * 100) +
 			') MVAr, flat start, solved=' + ok
 	if (!ok) {
 		log << 'STOP      : the anchor did not solve -- nothing to adjust from'
@@ -207,19 +204,19 @@ while (iter < MAX_ITER) {
 	}
 	if (!accepted) {
 		log << String.format('iter %2d  : stalled -- no step size improved max|V-target| (J %s, step %s,%s MVAr)',
-				iter + 1, jac(J), f3(step[0] * 100), f3(step[1] * 100))
+				iter + 1, jac(J), f2(step[0] * 100), f2(step[1] * 100))
 		break
 	}
 
 	def pred = [(J[0][0] * step[0] + J[0][1] * step[1]) * scale,
 	            (J[1][0] * step[0] + J[1][1] * step[1]) * scale]
-	log << String.format('iter %2d  : Qload %s,%s -> %s,%s MVAr | V %s,%s | J %s (%s) | dQ %s,%s MVAr | dV pred %s,%s actual %s,%s',
+	log << String.format('iter %2d  : Qload(13,14) %s,%s -> %s,%s MVAr | V(13,14) %s,%s | J %s (%s) | dQ %s,%s MVAr | dV pred %s,%s actual %s,%s',
 			iter + 1,
-			f3(q0[0] * 100), f3(q0[1] * 100),
-			f3(qOf('Bus13') * 100), f3(qOf('Bus14') * 100),
+			f2(q0[0] * 100), f2(q0[1] * 100),
+			f2(qOf('Bus13') * 100), f2(qOf('Bus14') * 100),
 			f5(v0[0]), f5(v0[1]),
 			jac(J), probe.join('+'),
-			f3(step[0] * scale * 100), f3(step[1] * scale * 100),
+			f2(step[0] * scale * 100), f2(step[1] * scale * 100),
 			f5(pred[0]), f5(pred[1]),
 			f5(v1[0] - v0[0]), f5(v1[1] - v0[1]))
 	iter++
