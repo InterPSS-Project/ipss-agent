@@ -12,7 +12,13 @@ This workspace is used from two DSH deployments, and **the install path differs*
 | **DSH web / CLI** (`dsh web`) | `web` | `dsh plugin --profile web …`, or a manual copy |
 
 Both profiles reference the plugin by an **absolute path into this repository**, so moving or
-renaming the repository requires reinstalling (see Troubleshooting).
+renaming the repository requires reinstalling (see Troubleshooting). Both deployments share
+`$DSH_HOME` (default `~/.dsh`), so one profile's plugin copy and the user-level skills below are
+visible to the other.
+
+> The plugin registers **no** slash command. The `/ipss-case-*` entries in the composer's `/` menu
+> are **skills** this repository ships under `.agents/skills/`, installed separately — see
+> [Slash commands](#slash-commands-skills).
 
 ## Distribution artifacts
 
@@ -26,6 +32,12 @@ The package declares `dsh.bundle.patch`, so installing it adds the package as a 
 its `cordis.patch.yml` inserts the `interpss` row automatically — no manual patch editing. It also
 declares `java-bridge` and `@deepseek-ai/dsh-typert-protocol` as dependencies, which come in with
 it.
+
+Verified in this repository on **DSH Desktop 0.1.7-rc.2** (nightly, macOS arm64; the harness is
+bundled at `…/DeepSeek Harness.app/Contents/Resources/app.asar/dsh`) with `@deepseek-ai/dsh-interpss`
+**0.5.0**. The `dsh web` side runs its harness from `$DSH_HOME/profiles/node_modules` (0.1.5-rc.3
+here), so the two surfaces can differ in client features — check both before calling a UI
+difference a plugin bug.
 
 ## Prerequisites
 
@@ -119,6 +131,65 @@ Then add one row to `$DSH_HOME/profiles/$PROFILE/cordis.patch.yml`:
 For `desktop`, prefer Method 1: the app keeps its own profile metadata, and a hand-copied package
 with no matching `dsh.profile.bundles` entry is not composed into the app.
 
+## Slash commands (skills)
+
+The plugin registers **no** slash command. Every `/ipss-case-*` entry in the composer's `/` menu is a
+**skill** this repository ships under `.agents/skills/`: `/ipss-case-load`, `/ipss-case-aclf`,
+`/ipss-case-info`, `/ipss-case-ca`, `/ipss-case-script`, `/ipss-case-summary`, `/ipss-sim`,
+`/nerc-report-html`, `/nerc-report-slides`. DSH discovers them; `@deepseek-ai/dsh-interpss` has no
+part in it, so a working InterPSS tab does not imply working commands (or the other way round).
+
+DSH reads skills from these roots:
+
+| Root | Rank | Seen by |
+| --- | --- | --- |
+| `<projectRoot>/.agents/skills/<name>/SKILL.md` | project (200) | sessions whose workspace is this repo |
+| `$DSH_HOME/skills/<name>/SKILL.md` (default `~/.dsh/skills`) | user (400) | every session, every workspace |
+| `~/.agents/skills/<name>/SKILL.md` | user | every session, every workspace |
+
+`<projectRoot>` is the nearest ancestor of the session workspace that holds `.git`. Both deployments
+read the same `$DSH_HOME`, so one user-level sync covers DSH Desktop and `dsh web`:
+
+```sh
+SYNC_DSH_SKILLS=1 scripts/sync_ipss_skills.sh     # .agents/skills -> $DSH_HOME/skills
+```
+
+Verify: type `/` in the composer and look for `ipss-case-load`, or ask the agent to load one (the
+`skill` tool with `ipss-case-load`). A skill appears only when its `SKILL.md` parses (`name` and
+`description` frontmatter) and stays user-invocable: `user-invocable: false` hides it from `/`, and
+`disable-model-invocation: true` keeps it out of the model's catalog while leaving the command.
+
+### DSH Desktop: the `cordis` preset can lose every skill
+
+Verified on **DSH Desktop 0.1.7-rc.2**: the `cordis` Agent preset mounts `skill-filesystem` with
+`customSkillDirs` pointing at `@deepseek-ai/dsh-agent-preset/skills`, which in a packaged Desktop
+resolves **inside `app.asar`**. The Host fs service cannot stat asar paths — its `bigint` stat mixes
+with Electron's asar stats and throws `Cannot mix BigInt and other types, use explicit conversions` —
+so the provider's `list()` aborts and the registry drops that provider **whole**: no skill from any
+root reaches the catalog, and `/ipss-case-*` never appears in the menu.
+
+Nothing falls back to it either: the `dsh-web-app` bundle disables the host-plane `skill-filesystem`
+row ("presets own local discovery"), leaving each preset's row as the only provider. Re-enable the
+host-plane row in the profile patch — the registry's global layer is read by every preset's scope
+chain, and this config names no asar path:
+
+`$DSH_HOME/profiles/desktop/cordis.patch.yml`
+
+```yaml
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  disabled: false
+  config:
+    dshHome: !!js dshHomePath()
+    includeDefaultRoots: true
+    customSkillDirs: []
+```
+
+The profile patch is picked up live (the row goes from `inactive` to a mounted schema with no
+restart); refresh the window (⌘R) afterwards, because the client caches the catalog it fetched for
+the session. Never point `customSkillDirs` or `bundledSkillDir` at an `app.asar` path — that
+reintroduces the failure.
+
 ## Finish
 
 | Deployment | Restart |
@@ -127,10 +198,21 @@ with no matching `dsh.profile.bundles` entry is not composed into the app.
 | `dsh web` | restart the server (`dsh web`), then hard-reload the browser page |
 
 Either way, open an **iPSS Agent** workspace; the **InterPSS** tab appears next to Chat (the tab
-shows "InterPSS is not available in this workspace" otherwise).
+shows "InterPSS is not available in this workspace" otherwise). Then confirm the commands — `/` in
+the composer lists the `ipss-case-*` skills ([Slash commands](#slash-commands-skills)); on Desktop,
+refresh the window first.
 
 ## Troubleshooting
 
+- **`/ipss-case-*` missing from the composer's `/` menu** — the commands are skills, not plugin
+  commands ([Slash commands](#slash-commands-skills)). On Desktop, apply the `skill-filesystem`
+  profile patch there first, then refresh the window; otherwise sync the user root
+  (`SYNC_DSH_SKILLS=1 scripts/sync_ipss_skills.sh`) when the workspace is not this repo. A `SKILL.md`
+  that fails to parse is skipped silently, and `user-invocable: false` hides one by design.
+- **InterPSS tool cards not visible in Chat** — the chat folds a completed turn's tool steps into a
+  collapsible **Process / Steps** line; the cards are inside it. Keep them inline with
+  **Settings → General → Work details → Verbose** (`ui-chat.transcriptView: verbose` in the profile
+  patch — only `verbose` sets `foldCompletedTurns: false`).
 - **`profile "desktop" is managed exclusively by the Electron application`** — expected for *any*
   `dsh` CLI command aimed at the app's profile, including `dsh plugin`. Use Method 1.
 - **The plugin stops loading after the repository moves or is renamed** — each profile pins an
@@ -161,3 +243,4 @@ shows "InterPSS is not available in this workspace" otherwise).
 | DSH Desktop | ask the agent to remove the bundle (plugin manager `remove_bundle`), then reopen the app |
 | `dsh web` (Method 2) | `dsh plugin --profile web remove @deepseek-ai/dsh-interpss`, then restart `dsh web` |
 | Manual copy (Method 3) | `rm -rf "$DSH_HOME/profiles/<profile>/node_modules/@deepseek-ai/dsh-interpss"`, delete the `interpss` row from that profile's `cordis.patch.yml`, then restart that deployment |
+| Skills (either deployment) | `rm -rf "$DSH_HOME/skills/<name>"` per skill, and delete the `skill-filesystem` entry this doc adds to the Desktop profile patch |
