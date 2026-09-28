@@ -39,7 +39,7 @@ init  # for the first time installation
 
 #### DSH Plugin setup
 
-Prompt DeepSeek Harness to install InterPSS DSH plugin:
+Install DeepSeek Harness (Desktop version is recommended). Prompt DeepSeek Harness to install InterPSS DSH plugin:
 
 ```text
 Install(update) InterPSS DSH plugin
