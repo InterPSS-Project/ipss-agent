@@ -1,0 +1,6 @@
+interface:
+  display_name: "InterPSS Load-Q Voltage Adjustment"
+  short_description: "Adjust load Q to hit a voltage band"
+  default_prompt: "Use $ipss-case-aclf-adjust to size and apply a bus load-Q change that brings the bus voltage into the target band."
+policy:
+  allow_implicit_invocation: true

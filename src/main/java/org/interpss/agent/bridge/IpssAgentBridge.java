@@ -12,6 +12,7 @@ import org.interpss.agent.report.ReportType;
 import org.interpss.agent.runner.AclfRunner;
 import org.interpss.agent.runner.ContingencyRunner;
 import org.interpss.agent.runner.GvyScriptRunner;
+import org.interpss.agent.util.CaRunConfig;
 import org.interpss.agent.util.IpssNetworkInfo;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.result.AclfResultAdapter;
@@ -90,6 +91,17 @@ public final class IpssAgentBridge {
     public synchronized String runContingency(String format, String absoluteCasePath,
             String absoluteContPath, String absoluteMonitorPath,
             String absoluteResultsDir, String stem) {
+        return runContingency(format, absoluteCasePath, absoluteContPath, absoluteMonitorPath,
+                absoluteResultsDir, stem, CaRunConfig.DEFAULT_OVERLOAD_THRESHOLD);
+    }
+
+    /**
+     * As above, with the violation-check loading (%) the caller asked for — the CA
+     * dialog's field, the tool's `overloadThreshold`, or `config/ca_run.json`.
+     */
+    public synchronized String runContingency(String format, String absoluteCasePath,
+            String absoluteContPath, String absoluteMonitorPath,
+            String absoluteResultsDir, String stem, double overloadThreshold) {
         try {
             AclfNetwork net = repo.getAclfNetBase();
             if (net == null || loadedInput == null || !loadedInput.equals(absoluteCasePath)) {
@@ -100,7 +112,7 @@ public final class IpssAgentBridge {
             Path resultsDir = Paths.get(absoluteResultsDir);
             Files.createDirectories(resultsDir);
             ContingencyRunner.ContAnalysisSummary summary = ContingencyRunner.runOnNet(net, resultsDir, stem,
-                    optionalPath(absoluteContPath), optionalPath(absoluteMonitorPath));
+                    optionalPath(absoluteContPath), optionalPath(absoluteMonitorPath), overloadThreshold);
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("format", format);
@@ -201,43 +213,100 @@ public final class IpssAgentBridge {
             String absoluteScriptPath, boolean reload) {
         try {
             Path script = requireScriptInCaseScriptsDir(absoluteCasePath, absoluteScriptPath);
-            AclfNetwork net = repo.getAclfNetBase();
-            if (reload || net == null || loadedInput == null || !loadedInput.equals(absoluteCasePath)) {
-                net = NetworkLoader.loadNetwork(format, absoluteCasePath);
-                repo.setAclfNetBase(net);
-                loadedInput = absoluteCasePath;
-            }
-            GvyScriptRunner.Result result = GvyScriptRunner.runOnNet(net, script);
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", true);
-            o.addProperty("case", absoluteCasePath);
-            o.addProperty("script", result.script);
-            if (result.returnValue != null) {
-                o.addProperty("returnValue", result.returnValue);
-            }
-            if (result.returnType != null) {
-                o.addProperty("returnType", result.returnType);
-            }
-            o.addProperty("elapsedMs", result.elapsedMs);
-            o.addProperty("buses", result.busCount);
-            o.addProperty("branches", result.branchCount);
-            o.addProperty("loadMw", result.loadMw);
-            o.addProperty("generationMw", result.generationMw);
-            o.addProperty("loadMwBefore", result.loadMwBefore);
-            o.addProperty("generationMwBefore", result.generationMwBefore);
-            o.addProperty("lfConverged", result.lfConverged);
-            return GSON.toJson(o);
+            AclfNetwork net = gvyTargetNet(format, absoluteCasePath, reload);
+            return gvyJson(absoluteCasePath, GvyScriptRunner.runOnNet(net, script));
         } catch (GvyScriptRunner.ScriptError e) {
-            JsonObject o = new JsonObject();
-            o.addProperty("ok", false);
-            o.addProperty("error", e.getMessage());
-            if (e.line() > 0) {
-                o.addProperty("line", e.line());
-            }
-            return GSON.toJson(o);
+            return gvyError(e);
         } catch (Exception e) {
             return error(e);
         }
+    }
+
+    /**
+     * Evaluate <em>inline</em> Groovy source against the cached base case — the adapter's
+     * other entry point, so a caller need not write a {@code .gvy} file. The loading,
+     * digest and error contract are identical to
+     * {@link #runGvy(String, String, String, boolean)}; mutations are in place and are
+     * never rolled back.
+     */
+    public synchronized String runGvySource(String format, String absoluteCasePath,
+            String source, boolean reload) {
+        if (source == null || source.isBlank()) {
+            return gvyFail("the script source is empty");
+        }
+        try {
+            AclfNetwork net = gvyTargetNet(format, absoluteCasePath, reload);
+            return gvyJson(absoluteCasePath, GvyScriptRunner.runSourceOnNet(net, source, inlineLabel(source)));
+        } catch (GvyScriptRunner.ScriptError e) {
+            return gvyError(e);
+        } catch (Exception e) {
+            return error(e);
+        }
+    }
+
+    /** The network one Groovy evaluation runs against: the held case, or a fresh parse. */
+    private AclfNetwork gvyTargetNet(String format, String absoluteCasePath, boolean reload) throws Exception {
+        AclfNetwork net = repo.getAclfNetBase();
+        if (reload || net == null || loadedInput == null || !loadedInput.equals(absoluteCasePath)) {
+            net = NetworkLoader.loadNetwork(format, absoluteCasePath);
+            repo.setAclfNetBase(net);
+            loadedInput = absoluteCasePath;
+        }
+        return net;
+    }
+
+    /** The script result as JSON, with only scalars — never a live model object. */
+    private static String gvyJson(String absoluteCasePath, GvyScriptRunner.Result result) {
+        JsonObject o = new JsonObject();
+        o.addProperty("ok", true);
+        o.addProperty("case", absoluteCasePath);
+        o.addProperty("script", result.script);
+        if (result.returnValue != null) {
+            o.addProperty("returnValue", result.returnValue);
+        }
+        if (result.returnType != null) {
+            o.addProperty("returnType", result.returnType);
+        }
+        o.addProperty("elapsedMs", result.elapsedMs);
+        o.addProperty("buses", result.busCount);
+        o.addProperty("branches", result.branchCount);
+        o.addProperty("loadMw", result.loadMw);
+        o.addProperty("generationMw", result.generationMw);
+        o.addProperty("loadMwBefore", result.loadMwBefore);
+        o.addProperty("generationMwBefore", result.generationMwBefore);
+        o.addProperty("lfConverged", result.lfConverged);
+        return GSON.toJson(o);
+    }
+
+    private static String gvyFail(String message) {
+        JsonObject o = new JsonObject();
+        o.addProperty("ok", false);
+        o.addProperty("error", message);
+        return GSON.toJson(o);
+    }
+
+    private static String gvyError(GvyScriptRunner.ScriptError e) {
+        JsonObject o = new JsonObject();
+        o.addProperty("ok", false);
+        o.addProperty("error", e.getMessage());
+        if (e.line() > 0) {
+            o.addProperty("line", e.line());
+        }
+        return GSON.toJson(o);
+    }
+
+    /** {@code inline Groovy (3 lines)} — the digest label for source with no file name. */
+    static String inlineLabel(String source) {
+        if (source == null || source.isBlank()) {
+            return "inline Groovy";
+        }
+        int lines = 1;
+        for (int i = 0; i < source.length(); i++) {
+            if (source.charAt(i) == '\n') {
+                lines++;
+            }
+        }
+        return "inline Groovy (" + lines + (lines == 1 ? " line)" : " lines)");
     }
 
     /**

@@ -19,19 +19,12 @@ and `config/` are shared infrastructure at the parent level. The tree below uses
 ipss-agent/
 ├── .agents/
 │   └── skills/
-│       ├── ipss-sim/              # OpenAI Codex Desktop — simulation skill
+│       ├── ipss-sim/              # Canonical simulation skill (DSH, Codex)
 │       ├── nerc-report-html/      # Interactive HTML dashboard skill
 │       └── nerc-report-slides/    # NERC TPL slide-deck skill
-├── .claude/
-│   ├── commands/
-│   │   ├── ipss-sim.md            # Claude Code slash-command entry point
-│   │   ├── nerc-report-html.md
-│   │   └── nerc-report-slides.md
-│   └── skills/
-│       └── ipss-sim/              # Claude Code skill copy (synced from .agents)
 ├── interpss-persistent/           # DeepSeek Harness DSH plugin package
 ├── scripts/
-│   └── sync_ipss_skills.sh        # Copy canonical ipss-sim skill to .claude/
+│   └── sync_ipss_skills.sh        # Install canonical skills into the DSH / Codex roots
 ├── pom.xml                        # Maven build for the Java CLI (Uber JAR)
 ├── config/
 │   ├── aclf_run.json              # ACLF NR / limit-control settings (used by IpssCmd)
@@ -184,7 +177,7 @@ artifacts).
 `tolerance`, `lfMethod`, PV/PQ limits, tap/shunt adjustments, and so on). For
 ACLF, `IpssCmd` resolves the file with a **two-tier lookup**:
 
-1. **Case-specific (preferred):** `<input_parent>/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/aclf_run.json` for input under that folder).
+1. **Case-specific (preferred):** `<input_parent>/config/aclf_run.json` relative to `wspace/` (e.g. `data/psse/OpenEInterconnect/config/aclf_run.json` for input under that folder).
 2. **Project default (fallback):** `config/aclf_run.json` at the project root.
 
 The chosen path is loaded via `AclfRunConfigRec.loadAclfRunConfig` and applied
@@ -196,15 +189,18 @@ Edit the JSON to tune convergence or solver behavior.
 
 `ca_run.json` (also written by the InterPSS tab's **CA** dialog) selects the
 contingency and monitored-branch inputs for DC contingency analysis. It lives
-beside the case file — `wspace/<input_parent>/ca_run.json` — next to that case's
-`aclf_run.json`. There is no project-level default, because contingency lists are
+under the case folder — `wspace/<input_parent>/config/ca_run.json` — next to that
+case's `aclf_run.json`. There is no project-level default, because contingency lists are
 case-specific; `IpssCmd` resolves each section independently:
 
 1. **Explicit CLI argument** — `cont_file` / `monitor_file`.
 2. **Case `ca_run.json`** — the `custom` entry for that section.
 3. **Built-in defaults** — all N-1 branch outages, every branch monitored.
 
-The CLI prints `Using ca_run.json: <path>` to stderr when it reads the file.
+The CLI prints `Using ca_run.json: <path>` to stderr when it reads the file. Its optional
+`overloadThreshold` key (a percentage, `0 < t <= 1000`) is the loading at which a monitored branch is
+reported as an overload; the tab's **CA** dialog edits it as **Over Loading Threshold(%)**, and both
+fall back to `90`.
 
 ```json
 {
@@ -333,33 +329,15 @@ the workflow from `wspace/`:
 2. CA with `java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar ca ...` when contingency and monitored files are provided or auto-discovered
 3. Report generation with `java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar report nerc ...`
 
-### Claude Code CLI
-
-Claude skill and command registration files are stored at:
-
-```text
-.claude/skills/ipss-sim/SKILL.md
-.claude/commands/ipss-sim.md
-```
-
-Use the slash-command form:
-
-```text
-/ipss-sim data/ieee/Ieee118Bus/ieee118.ieee "IEEE 118-Bus Test Case"
-```
-
-or directory mode:
-
-```text
-/ipss-sim data/psse/Texas2K "Texas 2K-Bus System"
-```
-
 ### Version-Control Notes
 
-- `.agents/skills/ipss-sim/**`, `.claude/skills/ipss-sim/**`, and `.claude/commands/ipss-sim.md` should be committed.
-- `.agents/skills/nerc-report-html/**`, `.agents/skills/nerc-report-slides/**`, and `.claude/commands/nerc-report-*.md` should be committed.
+- `.agents/skills/**` (every canonical skill, including the `agents/openai.yaml` companions) should be committed.
 - `target/`, generated `lib/deps/*.jar`, `.mvn/wrapper/dists/`, and `wspace/**/result/` are local build or output artifacts and should remain uncommitted.
-- If the skill instructions change, edit `.agents/skills/ipss-sim/SKILL.md` (canonical), then run `./scripts/sync_ipss_skills.sh` from the project root to copy it to `.claude/skills/ipss-sim/SKILL.md`. Set `SYNC_CODEX=1` to also refresh `~/.codex/skills/ipss-sim/SKILL.md` when that directory exists.
+- If the skill instructions change, edit `.agents/skills/<name>/SKILL.md` (canonical), then reinstall the targets you use:
+  `SYNC_DSH_SKILLS=1 ./scripts/sync_ipss_skills.sh` (DSH `/<name>` in every session),
+  `SYNC_CODEX_PROMPTS=1 ./scripts/sync_ipss_skills.sh` (Codex `/<name>`), and/or
+  `SYNC_CODEX=1 ./scripts/sync_ipss_skills.sh` (the `~/.codex/skills/ipss-sim/SKILL.md` copy).
+  A bare run does nothing and prints that usage.
 
 ### DeepSeek Harness (DSH Plugin)
 
@@ -368,10 +346,9 @@ follow [InstallDSHPlugin.md](InstallDSHPlugin.md). The plugin package lives in
 `interpss-persistent/`; activation requires this workspace's `README.md` H1 to be
 exactly `# iPSS Agent`.
 
-Follow-on report artifacts use the Codex skills `$nerc-report-html` and
-`$nerc-report-slides` (canonical files under `.agents/skills/`). Claude Code
-slash commands `/nerc-report-html` and `/nerc-report-slides` point at the same
-skills.
+Follow-on report artifacts use the skills `$nerc-report-html` and
+`$nerc-report-slides` (canonical files under `.agents/skills/`), reachable as the
+`/nerc-report-html` and `/nerc-report-slides` commands in DSH and Codex.
 
 **Bridge heap.** The plugin starts the embedded JVM with `-Xmx8g` (plugin 0.3.20+;
 `-Xmx4g` before that), which is what the largest case here needs — the Eastern
@@ -382,18 +359,20 @@ separate JVM: give it its own `-Xmx` flag when running a very large case by hand
 
 ### Quick Verification
 
-From the project root, these commands should show the registered skill files:
+From the project root, these commands should show the canonical skill files and, once installed, the DSH user-level copies:
 
 macOS / Linux:
 
 ```bash
-find .agents/skills/ipss-sim .claude/skills/ipss-sim .claude/commands -maxdepth 2 -type f | sort
+find .agents/skills -maxdepth 2 -type f | sort
+ls ~/.dsh/skills 2>/dev/null        # DSH user-level install, SYNC_DSH_SKILLS=1
+ls ~/.codex/prompts 2>/dev/null     # Codex prompts, SYNC_CODEX_PROMPTS=1
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-ChildItem .agents\skills\ipss-sim, .claude\skills\ipss-sim, .claude\commands -Recurse -File |
+Get-ChildItem .agents\skills -Recurse -File |
   ForEach-Object { Resolve-Path -Relative $_.FullName }
 ```
 
@@ -402,8 +381,6 @@ Expected entries include:
 ```text
 .agents/skills/ipss-sim/SKILL.md
 .agents/skills/ipss-sim/agents/openai.yaml
-.claude/commands/ipss-sim.md
-.claude/commands/nerc-report-html.md
-.claude/commands/nerc-report-slides.md
-.claude/skills/ipss-sim/SKILL.md
+.agents/skills/ipss-case-load/SKILL.md
+.agents/skills/nerc-report-html/SKILL.md
 ```

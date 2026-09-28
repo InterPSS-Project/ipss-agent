@@ -55,7 +55,8 @@ public final class ContingencyRunner {
     public static ContAnalysisSummary run(ProjectPaths paths, CliArgs cli, AclfNetwork net,
             Path resultsDir, String stem) throws Exception {
         ValidatedContingencyInputs inputs = resolveInputs(paths, cli);
-        return runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.monitorPath());
+        return runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.monitorPath(),
+                inputs.overloadThreshold());
     }
 
     /**
@@ -70,6 +71,16 @@ public final class ContingencyRunner {
      */
     public static ContAnalysisSummary runOnNet(AclfNetwork net, Path resultsDir, String stem,
             Path contPath, Path monitorPath) throws Exception {
+        return runOnNet(net, resultsDir, stem, contPath, monitorPath,
+                CaRunConfig.DEFAULT_OVERLOAD_THRESHOLD);
+    }
+
+    /**
+     * As above, with the violation-check loading threshold in percent: a monitored
+     * branch at or above it after a contingency lands in the result CSV.
+     */
+    public static ContAnalysisSummary runOnNet(AclfNetwork net, Path resultsDir, String stem,
+            Path contPath, Path monitorPath, double overloadThreshold) throws Exception {
         ContingencyAnalysisAlgorithm algo = createContingencyAnalysisAlgorithm(net);
         algo.calculateDclf(DclfMethod.INC_LOSS);
 
@@ -97,7 +108,7 @@ public final class ContingencyRunner {
 
         DclfContingencyConfig dclfConfig = new DclfContingencyConfig();
         dclfConfig.setDclfInclLoss(true);
-        dclfConfig.setOverloadThreshold(90);
+        dclfConfig.setOverloadThreshold(overloadThreshold);
 
         int threads = Runtime.getRuntime().availableProcessors();
         System.out.println("Using " + threads + " threads for contingency analysis");
@@ -162,12 +173,12 @@ public final class ContingencyRunner {
                 throw new IllegalStateException("Monitor file not found: " + monPath);
             }
         }
-        return new ValidatedContingencyInputs(contPath, monPath);
+        return new ValidatedContingencyInputs(contPath, monPath, CaRunConfig.DEFAULT_OVERLOAD_THRESHOLD);
     }
 
     /**
      * Resolve the contingency/monitor files for a run. Explicit CLI arguments
-     * win and must exist; otherwise the case-folder {@code ca_run.json} supplies
+     * win and must exist; otherwise the case {@code config/ca_run.json} supplies
      * the {@code custom} entries; otherwise both are null and the built-in
      * defaults apply (N-1 outages, all branches monitored). The GUI tab writes
      * the same file, so both entry points agree.
@@ -194,7 +205,7 @@ public final class ContingencyRunner {
         Path monitorPath = explicit.monitorPath() != null ? explicit.monitorPath()
                 : resolveConfigEntry(paths, configFile, config.monitoredBranchInput(),
                         config.monitorIsCustom(), "monitoredBranchFile", "custom monitored branches");
-        return new ValidatedContingencyInputs(contPath, monitorPath);
+        return new ValidatedContingencyInputs(contPath, monitorPath, config.overloadThresholdOrDefault());
     }
 
     /**
@@ -231,7 +242,7 @@ public final class ContingencyRunner {
         return resolved;
     }
 
-    public record ValidatedContingencyInputs(Path contPath, Path monitorPath) {
+    public record ValidatedContingencyInputs(Path contPath, Path monitorPath, double overloadThreshold) {
     }
 
     public static record ContAnalysisSummary(double threshold, 

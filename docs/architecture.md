@@ -77,8 +77,7 @@ ipss-agent/
 ├── lib/                                 # ipss_runnable.jar, deps/, m2-repo/
 ├── wspace/                              # Working directory (cases + results)
 ├── target/                              # ipss-agent-cmd-1.0.0-uber.jar
-├── .agents/skills/                      # Canonical agent skills (Codex)
-├── .claude/commands/ + .claude/skills/  # Claude Code integration
+├── .agents/skills/                      # Canonical agent skills (DSH, Codex)
 ├── interpss-persistent/                 # DSH persistent Cordis plugin
 ├── interpss-dynamic/                    # Legacy dynamic DSH injection (superseded)
 ├── scripts/                             # sync_ipss_skills.sh, bridge setup
@@ -160,13 +159,13 @@ AclfRunner.runOnNet(net, configPath, resultsDir, stem)
 Optional scenario edits (before or between solves):
 
 GvyScriptRunner.runOnNet(net, <case dir>/scripts/<name>.gvy)
-  1. AclfNetGvyScriptProcessor(net).evaluate(<file>)   // binding: aclfnet
+  1. AclfNetDshGvyScriptProcessor(net).evaluate(<file>)  // bindings: aclfnet, senAlgo
   2. digest before/after: buses, branches, load, generation, lfConverged
 ```
 
 **ACLF config resolution** (two-tier, printed as `Using config file: …`):
 
-1. Case-specific: `wspace/<input_parent>/aclf_run.json`
+1. Case-specific: `wspace/<input_parent>/config/aclf_run.json`
 2. Project default: `config/aclf_run.json`
 
 ### Step 3 — Contingency analysis (CA, optional)
@@ -186,7 +185,7 @@ branch and every branch monitored.
 `Using ca_run.json: …`), per section and most specific first:
 
 1. Explicit CLI argument: `cont_file` / `monitor_file`
-2. Case-specific: `wspace/<input_parent>/ca_run.json` (the `custom` entry)
+2. Case-specific: `wspace/<input_parent>/config/ca_run.json` (the `custom` entry)
 3. Built-in default: N-1 contingencies / monitor every branch
 
 There is no project-level default — contingency lists are case-specific. The
@@ -273,8 +272,7 @@ Skills are thin orchestration documents. They instruct LLM agents which CLI comm
 
 ### Canonical skill: `ipss-sim`
 
-Location: `.agents/skills/ipss-sim/SKILL.md`  
-Claude copy: `.claude/skills/ipss-sim/SKILL.md` (synced via `scripts/sync_ipss_skills.sh`)
+Location: `.agents/skills/ipss-sim/SKILL.md` (canonical; DSH sessions opened in this repo discover it directly)
 
 Four-step workflow:
 
@@ -296,7 +294,18 @@ Invocation modes:
 | `nerc-report-html` | Bundled Python script: `.agents/skills/nerc-report-html/scripts/generate_nerc_html.py` |
 | `nerc-report-slides` | Presentations skill workflow; converts Markdown to PPTX |
 
-Claude Code registers slash commands in `.claude/commands/` that point back to the canonical `.agents/skills/` files.
+### Installing the skills
+
+`scripts/sync_ipss_skills.sh` installs the canonical tree into the roots each agent scans:
+
+| Target | Command | Effect |
+|--------|---------|--------|
+| `~/.dsh/skills/<name>/SKILL.md` | `SYNC_DSH_SKILLS=1` | `/<name>` in the DSH composer of **every** session, whatever the workspace |
+| `~/.codex/prompts/<name>.md` | `SYNC_CODEX_PROMPTS=1` | Codex custom prompt (slash command) carrying the full skill text |
+| `~/.codex/skills/ipss-sim/SKILL.md` | `SYNC_CODEX=1` | Verbatim copy kept for Codex skill discovery |
+
+A bare run does nothing and prints that usage. Installed copies are snapshots outside the
+repository, so re-run the relevant flag after editing a canonical skill.
 
 ---
 
@@ -348,7 +357,7 @@ Loaded by `AclfRunConfigRec` in `AclfRunner.runOnNet()`. Controls:
 
 Editable from the DSH GUI via `getAclfOptions` / `saveAclfOptions`.
 
-### `wspace/<input_parent>/ca_run.json`
+### `wspace/<input_parent>/config/ca_run.json`
 
 Per-case contingency-analysis run settings, persisting what the tab's **CA**
 dialog collects and what `ContingencyRunner.resolveInputs` reads for the CLI.
@@ -360,9 +369,16 @@ Deliberately **not** a project-level default: contingency lists are case-specifi
 | `contingencyFile` | path under `wspace/` | `{"contingencies": [...]}` JSON; required when `contingencyMode` is `custom` |
 | `monitorMode` | `all` (default) \| `custom` | Monitor every branch, or only the listed ones |
 | `monitoredBranchFile` | path under `wspace/` | `{"monitored_branches": [...]}` JSON; required when `monitorMode` is `custom` |
+| `overloadThreshold` | `0 < t <= 1000` (default `90`) | Loading percentage at or above which a monitored branch is reported as an overload |
 
 Written and read from the GUI via `getCaOptions` / `saveCaOptions`; the candidate
-files in the case folder (and their entry counts) come from `listCaFiles`. When
+files in the case folder (and their entry counts) come from `listCaFiles`. The tab's
+**Run Contingency Analysis** dialog edits all four input keys plus `overloadThreshold`
+(rendered as **Over Loading Threshold(%)**), and `interpss_run_ca` accepts the same
+threshold as its `overloadThreshold` argument; both reach the runner through
+`IpssAgentBridge.runContingency(…, double overloadThreshold)`, which validates it and
+defaults it to 90. `ContingencyRunner` applies it as the DC contingency analyser's
+overload threshold rather than a constant. When
 the file is absent the dialog and `runCa` fall back to per-case filename discovery
 (first `*contingenc*.json` / `*monitor*.json`) and then to `all`/`all`, so a case
 that never opened the dialog behaves as before.
@@ -460,7 +476,7 @@ Used at runtime by agent code:
 3. **CSV-driven reports** — Markdown generators analyze exported DataFrames; they never re-run load flow.
 4. **Agent skills as orchestration** — LLM skills shell out to the CLI; they do not embed simulation logic.
 5. **JSON bridge boundary** — Node/DSH code never traverses Java EMF objects; only paths and JSON cross the boundary.
-6. **Case-specific overrides** — per-case `aclf_run.json` and `ca_run.json` under `<input_parent>/` override project and built-in defaults.
+6. **Case-specific overrides** — per-case `aclf_run.json` and `ca_run.json` under `<input_parent>/config/` override project and built-in defaults.
 7. **Settled results** — a load flow that converges before its last adjustment is re-solved
    (`AclfRunner.settle()`), and every artifact reports `net.maxMismatch(NR)`, so the returned CSVs,
    the network info and the tools can never describe a state the model does not satisfy.

@@ -865,7 +865,7 @@ return {
       }
 
       // --- Run Contingency Analysis dialog -----------------------------------
-      // The CA button opens this dialog; OK saves the four-key ca_run.json in
+      // The CA button opens this dialog; OK saves the four-key config/ca_run.json in
       // the case folder and runs CA with it. Cancel writes nothing.
 
       function caCountFor(file, kind) {

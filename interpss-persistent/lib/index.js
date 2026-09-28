@@ -23,6 +23,42 @@ function diag(line) {
   try { appendFileSync(DIAG, line + '\n', 'utf8') } catch {}
 }
 
+// Persist a run-config JSON the ACLF/CA dialogs own. The DSH `fs` service fences every
+// mutation against the deployment's writable roots, and in an app-hosted profile that
+// root can be narrower than the workspace this plugin resolved — the dialog then fails
+// with FS_SANDBOX_DENIED for a path that is inside the session's own workspace (the
+// bash/fs tools, bound to the session, still write there). Both callers build the target
+// from that resolved root and the case folder, never from caller text, so a fenced write
+// falls back to node:fs — the same unfenced mechanism this plugin already uses for its
+// diagnostic log and its JDK probe.
+async function writeConfigText(fs, target, text, directPath) {
+  try {
+    await fs.writeText(target, text)
+    return { ok: true, via: 'fs' }
+  } catch (e) {
+    const message = e && e.message ? e.message : String(e)
+    if (!/file access denied|FS_SANDBOX_DENIED|sandbox mode/i.test(message)) return { ok: false, error: message }
+    // `fs.resolve()` hands back an opaque handle, which node:fs cannot open: the direct
+    // write needs the absolute path string the caller built.
+    const direct = typeof directPath === 'string' && directPath !== ''
+      ? directPath
+      : (typeof target === 'string' ? target : (target && typeof target.path === 'string' ? target.path : ''))
+    if (direct === '') {
+      return { ok: false, error: message + '; no filesystem path was available for a direct write' }
+    }
+    try {
+      writeFileSync(direct, text, 'utf8')
+      diag('fenced fs write, persisted via node:fs: ' + direct)
+      return { ok: true, via: 'node:fs' }
+    } catch (e2) {
+      return {
+        ok: false,
+        error: message + '; direct write of ' + direct + ' failed: ' + (e2 && e2.message ? e2.message : String(e2)),
+      }
+    }
+  }
+}
+
 const NAMESPACE = 'interpss'
 const PACKAGE = '@deepseek-ai/dsh-interpss'
 const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase']
@@ -190,6 +226,47 @@ function relativeCasePath(absPath) {
   return marker >= 0 ? 'data/' + String(absPath).slice(marker + WS_DATA_MARKER.length) : String(absPath)
 }
 
+// --- Chat tools: DC contingency analysis -------------------------------------
+// A CA input file is addressed the way the tab's dialog addresses it: relative to
+// wspace/ ("data/<case dir>/x.json"). A bare name resolves inside the *resolved case's*
+// folder, so the common case needs no path at all.
+function resolveCaFileArgument(caseInput, raw) {
+  const value = typeof raw === 'string' ? stripWspacePrefix(raw) : ''
+  if (value === '') return { ok: false, error: 'empty JSON file selector' }
+  if (value.indexOf('..') >= 0) return { ok: false, error: 'the file path must not contain "..": ' + value }
+  const pathRe = /^data\/[A-Za-z0-9_.\/-]+\.json$/i
+  if (pathRe.test(value)) return { ok: true, input: value }
+  if (!value.includes('/') && /\.json$/i.test(value)) {
+    const { parent } = casePartsOf(caseInput)
+    return { ok: true, input: wspaceJoin(parent, value) }
+  }
+  const marker = value.indexOf(WS_DATA_MARKER)
+  if (marker >= 0) {
+    const candidate = 'data/' + value.slice(marker + WS_DATA_MARKER.length)
+    if (pathRe.test(candidate)) return { ok: true, input: candidate }
+  }
+  return {
+    ok: false,
+    error: 'unrecognized JSON file selector "' + value + '": expected a file name in the case folder, ' +
+      'a data/... path (wspace/data/... is accepted too), or an absolute path containing ' + WS_DATA_MARKER,
+  }
+}
+
+// The Java runner prints ContAnalysisSummary as "Label=value" lines; lift the numbers so
+// the card can show them without the caller parsing that text.
+function parseCaSummary(text) {
+  const pick = (label) => {
+    const m = new RegExp(label + '=([0-9.]+)').exec(String(text === null || text === undefined ? '' : text))
+    return m ? Number(m[1]) : null
+  }
+  return {
+    threshold: pick('Threshold'),
+    contingencies: pick('Contingencies'),
+    monitoredBranches: pick('Monitored Branches'),
+    overloads: pick('Overloading Branches'),
+  }
+}
+
 // --- Chat tools: Groovy scenario scripts -------------------------------------
 // A scenario script lives next to the case it edits: wspace/data/<case dir>/scripts/<name>.gvy.
 // The Java runner reads the file and evaluates it against the bridge-held network
@@ -198,6 +275,109 @@ function relativeCasePath(absPath) {
 const GVY_SCRIPT_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\/scripts\/[A-Za-z0-9_.\/-]+\.gvy$/
 const GVY_MAX_LISTED = 20
 const GVY_STDOUT_LIMIT = 8000
+// A batch is a scenario sequence, not a script library: cap it so one call cannot run away.
+const GVY_MAX_SCRIPTS = 20
+// The `script` argument carries the adapter's two entry points (see
+// docs/groovy-script-adapter-architecture.md): a .gvy file selector, or the Groovy
+// source itself. A value is a selector when it can name a file — it ends in .gvy,
+// carries a path separator, or is a bare name (the form that already failed as an
+// "unrecognized script selector"). Whitespace or statement punctuation means source.
+const GVY_CODE_PUNCT_RE = /[\s;{}()'"=,+\*%<>&|!?[\]:@]/
+const GVY_BARE_NAME_RE = /^[A-Za-z0-9_-]+$/
+// A workspace-level fixtures folder, beside the case folders: wspace/script/*.gvy. The
+// Host reads these itself and hands the JVM the source (the Java rule confines *file*
+// scripts to the case folder), so a shared what-if script no longer needs a copy per case.
+const GVY_WORKSPACE_SCRIPT_RE = /^script\/[A-Za-z0-9_.\/-]+\.gvy$/i
+const GVY_WORKSPACE_MARKER = '/wspace/script/'
+
+// Mirrors GvyScriptRunner.MAX_SCRIPT_BYTES; the JVM enforces the byte limit itself.
+const GVY_SOURCE_MAX_CHARS = 256 * 1024
+
+// Decide whether `script` names a file or is inline Groovy source.
+function classifyGvyArgument(raw) {
+  const value = typeof raw === 'string' ? raw.trim() : ''
+  if (value === '') return { kind: 'none' }
+  if (GVY_CODE_PUNCT_RE.test(value)) return { kind: 'source', value }
+  if (/\.gvy$/i.test(value)) return { kind: 'file', value }
+  if (GVY_BARE_NAME_RE.test(value)) return { kind: 'file', value }
+  if (value.includes('/')) return { kind: 'file', value }
+  return { kind: 'source', value }
+}
+
+// The label an inline script carries in the result and on the card; no file name exists.
+function gvySourceLabel(source) {
+  const lines = String(source).split('\n').length
+  return 'inline Groovy (' + lines + (lines === 1 ? ' line)' : ' lines)')
+}
+
+// Inline source needs the same guard rails as a file: non-empty and bounded.
+function validateGvySource(value) {
+  const source = typeof value === 'string' ? value : ''
+  if (source.trim() === '') {
+    return { ok: false, error: 'the `script` argument is empty' }
+  }
+  if (source.length > GVY_SOURCE_MAX_CHARS) {
+    return {
+      ok: false,
+      error: 'the inline script is too large (' + source.length + ' characters; limit ' + GVY_SOURCE_MAX_CHARS + ')',
+    }
+  }
+  return { ok: true, source: source }
+}
+
+// `script` is one .gvy selector, one inline source, or an **array** of those applied in
+// order (0.4.11+). Every entry is resolved up front, so a bad second selector fails the
+// call before the first script has touched the model. Returns { ok, kind, steps } with
+// one step per script: { kind: 'file'|'source', input?, abs?, source?, label }.
+async function resolveGvyArguments(ctx, root, caseInput, raw) {
+  const list = Array.isArray(raw) ? raw : [raw]
+  const batch = Array.isArray(raw)
+  if (list.length === 0) {
+    return { ok: false, error: 'the `script` argument is empty: pass a .gvy file name, Groovy source, or an array of those' }
+  }
+  if (list.length > GVY_MAX_SCRIPTS) {
+    return { ok: false, error: 'too many scripts in one call: ' + list.length + ' (limit ' + GVY_MAX_SCRIPTS + ')' }
+  }
+  const steps = []
+  for (let i = 0; i < list.length; i++) {
+    const where = batch ? ' (script ' + (i + 1) + ' of ' + list.length + ')' : ''
+    const argument = classifyGvyArgument(list[i])
+    if (argument.kind === 'none') {
+      return {
+        ok: false,
+        error: batch
+          ? 'script ' + (i + 1) + ' of ' + list.length + ' is empty: pass a .gvy file name, Groovy source, or null to skip'
+          : 'the `script` argument is required: a .gvy file name in <case folder>/scripts/ ' +
+            '(for example "ieee14_adjBus14.gvy"), a data/.../scripts/x.gvy path, or the Groovy source itself',
+      }
+    }
+    if (argument.kind === 'file') {
+      const script = await resolveGvyScript(ctx, root, caseInput, argument.value)
+      if (script.ok !== true) return { ok: false, error: script.error + where }
+      if (script.workspace === true) {
+        // Evaluated as source: the file lives outside the case folder, and only the
+        // Host opens it. The label stays the path the caller asked for.
+        const fs = ctx.get('fs')
+        let text = null
+        try {
+          text = await fs.readText(await fs.resolve(script.abs))
+        } catch (e) {
+          return { ok: false, error: 'could not read ' + script.input + ': ' + (e && e.message ? e.message : String(e)) + where }
+        }
+        const checked = validateGvySource(text)
+        if (checked.ok !== true) return { ok: false, error: checked.error + where }
+        steps.push({ kind: 'source', source: checked.source, label: script.input })
+      } else {
+        steps.push({ kind: 'file', input: script.input, abs: script.abs, label: script.input })
+      }
+    } else {
+      const checked = validateGvySource(argument.value)
+      if (checked.ok !== true) return { ok: false, error: checked.error + where }
+      steps.push({ kind: 'source', source: checked.source, label: gvySourceLabel(checked.source) })
+    }
+  }
+  return { ok: true, kind: batch ? 'batch' : 'single', steps: steps }
+}
 
 // Resolve the `script` argument to a workspace-relative .gvy path under the case's
 // scripts/ folder, then confirm it exists. Returns { ok, input, abs } or { ok:false, error }.
@@ -211,6 +391,34 @@ async function resolveGvyScript(ctx, root, caseInput, raw) {
     }
   }
   if (value.indexOf('..') >= 0) return { ok: false, error: 'the script path must not contain "..": ' + value }
+  // Workspace fixtures: `script/x.gvy`, `wspace/script/x.gvy` (the prefix is stripped
+  // above) or an absolute path containing `/wspace/script/`. The caller reads the text
+  // and evaluates it as source — the JVM never opens a path outside the case folder.
+  let workspace = ''
+  const marker = value.indexOf(GVY_WORKSPACE_MARKER)
+  if (marker >= 0) {
+    const candidate = 'script/' + value.slice(marker + GVY_WORKSPACE_MARKER.length)
+    if (GVY_WORKSPACE_SCRIPT_RE.test(candidate)) workspace = candidate
+  } else if (GVY_WORKSPACE_SCRIPT_RE.test(value)) {
+    workspace = value
+  }
+  if (workspace !== '') {
+    const workspaceAbs = root + '/wspace/' + workspace
+    const wsFs = ctx.get('fs')
+    let wsFound = false
+    if (wsFs !== undefined) {
+      try {
+        const info = await wsFs.stat(await wsFs.resolve(workspaceAbs))
+        wsFound = info !== undefined
+      } catch (e) {
+        wsFound = false
+      }
+    }
+    if (!wsFound) {
+      return { ok: false, error: 'script not found: ' + workspace + ' (the workspace script/ folder)' }
+    }
+    return { ok: true, workspace: true, input: workspace, abs: workspaceAbs }
+  }
   let input = ''
   if (GVY_SCRIPT_PATH_RE.test(value)) {
     input = value
@@ -325,13 +533,17 @@ function casePartsOf(caseInput) {
   return { parent, stem }
 }
 
-// Case-specific aclf_run.json (same folder as the case) wins, then the project
+function wspaceJoin(parent, name) {
+  return parent === '' ? name : parent + '/' + name
+}
+
+// Case-specific config/aclf_run.json (under the case folder) wins, then the project
 // default config/aclf_run.json. Shared by the `interpss` service and `runAclfTool`.
 async function resolveAclfConfigPath(ctx, root, caseInput) {
   const fs = ctx.get('fs')
   if (fs === undefined) return root + '/config/aclf_run.json'
   const { parent } = casePartsOf(caseInput)
-  const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+  const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
   const defCfg = root + '/config/aclf_run.json'
   try {
     const target = await fs.resolve(caseCfg)
@@ -424,32 +636,32 @@ const DEFAULT_ACLF_CONFIG = {
   psXfrPContrlAccFactor: 1.0,
 }
 
-// Contingency-analysis run config (ca_run.json, beside aclf_run.json in the
-// case folder) written by the CA dialog and read by `runCa`. Contingency inputs
-// are case-specific, so there is no project-level default: an absent file falls
-// back to the per-case suggestion below, which reproduces the filename
+// Contingency-analysis run config (config/ca_run.json, beside config/aclf_run.json
+// under the case folder) written by the CA dialog and read by `runCa`. Contingency
+// inputs are case-specific, so there is no project-level default: an absent file
+// falls back to the per-case suggestion below, which reproduces the filename
 // discovery the CA run has always used.
 const DEFAULT_CA_CONFIG = {
   contingencyMode: 'all',
   contingencyFile: null,
   monitorMode: 'all',
   monitoredBranchFile: null,
+  // Violation-check loading (%): a monitored branch at or above it after a contingency
+  // lands in the result CSV. The CA dialog's field, the tool's `overloadThreshold` and
+  // config/ca_run.json all feed this one number.
+  overloadThreshold: 90,
 }
 
 // The dialog reports how many entries a candidate file holds, which means
 // parsing every .json in the case folder; skip absurd ones.
 const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
 
-function wspaceJoin(parent, name) {
-  return parent === '' ? name : parent + '/' + name
-}
-
 function caConfigPath(root, parent) {
-  return root + '/wspace/' + wspaceJoin(parent, 'ca_run.json')
+  return root + '/wspace/' + wspaceJoin(parent, 'config/ca_run.json')
 }
 
 function caConfigRel(parent) {
-  return wspaceJoin(parent, 'ca_run.json')
+  return wspaceJoin(parent, 'config/ca_run.json')
 }
 
 // Case-folder .json files that can be contingency inputs: our own two config
@@ -535,6 +747,17 @@ async function validateCaConfig(ctx, root, value, requireFiles) {
     return { ok: false, error: 'the run configuration must be a JSON object' }
   }
   const out = Object.assign({}, DEFAULT_CA_CONFIG)
+  if (value.overloadThreshold !== undefined && value.overloadThreshold !== null && value.overloadThreshold !== '') {
+    const threshold = Number(value.overloadThreshold)
+    if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1000) {
+      return {
+        ok: false,
+        error: 'overloadThreshold must be a loading percentage between 0 and 1000 (got ' +
+          JSON.stringify(value.overloadThreshold) + ')',
+      }
+    }
+    out.overloadThreshold = threshold
+  }
   const fields = [
     ['contingencyMode', 'contingencyFile'],
     ['monitorMode', 'monitoredBranchFile'],
@@ -710,6 +933,67 @@ function captureStdio() {
   return { out: () => '', err: () => '', stop: () => {} }
 }
 
+// Run one Groovy evaluation through the bridge: capture the script's println output,
+// then mirror the held case and its counts. Shared by `runGvy` (a .gvy file) and
+// `runGvySource` (inline source), so the two entry points cannot drift.
+async function gvyThrough(run, absCase) {
+  const cap = captureStdio()
+  let raw
+  try {
+    raw = await run()
+  } finally {
+    cap.stop()
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.ok === true) {
+        lastLoadedAbs = absCase
+        rememberLoadedCounts(parsed.buses, parsed.branches)
+      }
+      parsed.stdout = cap.out()
+      parsed.stderr = cap.err()
+      raw = JSON.stringify(parsed)
+    }
+  } catch (e) {}
+  return raw
+}
+
+// Sort CSV data rows by one header column. Numeric when every non-empty value in that
+// column parses as a finite number (LoadingPercent, flows, ratings), lexicographic
+// otherwise. An unknown column is not an error: the caller gets the file order back and
+// `column: null`, so a UI can avoid claiming a sort it did not get.
+function applyCsvSort(rows, header, column, desc) {
+  const names = String(header).split(',')
+  const wanted = typeof column === 'string' ? column.trim().toLowerCase() : ''
+  if (wanted === '') return { rows: rows, column: null, desc: false }
+  const index = names.findIndex((name) => name.trim().toLowerCase() === wanted)
+  if (index < 0) return { rows: rows, column: null, desc: false }
+  const valueOf = (line) => {
+    const cells = String(line).split(',')
+    return index < cells.length ? cells[index].trim() : ''
+  }
+  const numeric = rows.every((line) => {
+    const value = valueOf(line)
+    return value === '' || Number.isFinite(Number(value))
+  })
+  const compare = (a, b) => {
+    const left = valueOf(a)
+    const right = valueOf(b)
+    let result
+    if (numeric) {
+      const l = left === '' ? Number.NEGATIVE_INFINITY : Number(left)
+      const r = right === '' ? Number.NEGATIVE_INFINITY : Number(right)
+      result = l < r ? -1 : l > r ? 1 : 0
+    } else {
+      result = left.localeCompare(right)
+    }
+    return desc ? -result : result
+  }
+  const sorted = rows.slice().sort(compare)
+  return { rows: sorted, column: names[index].trim(), desc: desc }
+}
+
 class InterpssService extends TypertRemoteService {
   constructor(ctx) {
     super(ctx, NAMESPACE)
@@ -851,13 +1135,28 @@ class InterpssService extends TypertRemoteService {
     }
     const lines = String(text).replace(/\r\n/g, '\n').split('\n')
     while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
-    if (lines.length === 0) return { ok: true, header: '', rows: [], totalRows: 0, hasMore: false }
+    if (lines.length === 0) {
+      return { ok: true, header: '', rows: [], totalRows: 0, hasMore: false, sortColumn: null, sortDesc: false }
+    }
     const header = lines[0]
-    const totalRows = Math.max(0, lines.length - 1)
-    const dataStart = 1 + start
-    const dataEnd = Math.min(dataStart + limit, lines.length)
-    const rows = dataStart < lines.length ? lines.slice(dataStart, dataEnd) : []
-    return { ok: true, header: header, rows: rows, totalRows: totalRows, hasMore: dataEnd < lines.length }
+    let data = lines.slice(1)
+    // Sorting happens here, before the page is sliced, so a sorted table is sorted over
+    // the whole file rather than over the rows the caller happens to have loaded.
+    const applied = applyCsvSort(data, header, input && input.sortColumn, input && input.sortDesc === true)
+    data = applied.rows
+    const totalRows = data.length
+    const dataStart = Math.min(start, data.length)
+    const dataEnd = Math.min(dataStart + limit, data.length)
+    const rows = dataStart < data.length ? data.slice(dataStart, dataEnd) : []
+    return {
+      ok: true,
+      header: header,
+      rows: rows,
+      totalRows: totalRows,
+      hasMore: dataEnd < data.length,
+      sortColumn: applied.column,
+      sortDesc: applied.desc,
+    }
   }
 
       async busConnections(input) {
@@ -1115,7 +1414,8 @@ class InterpssService extends TypertRemoteService {
         const absCont = contRel !== null ? root + '/wspace/' + contRel : null
         const absMon = monRel !== null ? root + '/wspace/' + monRel : null
         const absResults = root + '/wspace/' + resultDir
-        const raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
+        const raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
+          caConfig.overloadThreshold)
         const parsed = JSON.parse(raw)
         if (parsed && parsed.ok) {
           return {
@@ -1335,7 +1635,7 @@ class InterpssService extends TypertRemoteService {
     let cfgPath = defCfg
     if (caseInput !== '') {
       const { parent } = this.caseParts(caseInput)
-      const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+      const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
       try {
         const target = await fs.resolve(caseCfg)
         const info = await fs.stat(target)
@@ -1367,10 +1667,11 @@ class InterpssService extends TypertRemoteService {
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
     if (caseInput === '') return { ok: false, error: 'no case selected' }
     const { parent } = this.caseParts(caseInput)
-    const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+    const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
     try {
       const target = await fs.resolve(caseCfg)
-      await fs.writeText(target, JSON.stringify(config, null, 2) + '\n')
+      const written = await writeConfigText(fs, target, JSON.stringify(config, null, 2) + '\n', caseCfg)
+      if (written.ok !== true) return { ok: false, error: 'failed to write ' + caseCfg + ': ' + written.error }
       return { ok: true }
     } catch (e) {
       return { ok: false, error: 'failed to write ' + caseCfg + ': ' + (e && e.message ? e.message : String(e)) }
@@ -1453,7 +1754,7 @@ class InterpssService extends TypertRemoteService {
     return { ok: true, config: validated.config, source: 'case', path: cfgRel }
   }
 
-  // Persist the dialog's configuration as <case folder>/ca_run.json.
+  // Persist the dialog's configuration as <case folder>/config/ca_run.json.
   async saveCaOptions(input) {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
@@ -1471,10 +1772,14 @@ class InterpssService extends TypertRemoteService {
       contingencyFile: validated.config.contingencyFile,
       monitorMode: validated.config.monitorMode,
       monitoredBranchFile: validated.config.monitoredBranchFile,
+      // The dialog's over loading threshold. It must round-trip, or the next dialog
+      // open, the CLI and `interpss_run_ca` silently fall back to 90.
+      overloadThreshold: validated.config.overloadThreshold,
     }
     try {
       const target = await fs.resolve(caConfigPath(root, parent))
-      await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n')
+      const written = await writeConfigText(fs, target, JSON.stringify(payload, null, 2) + '\n', caConfigPath(root, parent))
+      if (written.ok !== true) return { ok: false, error: 'failed to write ' + cfgRel + ': ' + written.error }
       return { ok: true, path: cfgRel }
     } catch (e) {
       return { ok: false, error: 'failed to write ' + cfgRel + ': ' + (e && e.message ? e.message : String(e)) }
@@ -1735,7 +2040,7 @@ function runAclfTool(ctx) {
       'the resulting network information. Writes <case>_DF_bus.csv, <case>_DF_branch.csv, <case>_DF_gen.csv, ' +
       '<case>_DF_load.csv and <case>_network_info.txt under wspace/<case dir>/result/. The case comes from ' +
       'the `case` argument when given, otherwise from the case selected in the InterPSS tab, otherwise from ' +
-      'the case the bridge already holds. Solver options come from the case folder aclf_run.json when ' +
+      'the case the bridge already holds. Solver options come from the case folder config/aclf_run.json when ' +
       'present, otherwise config/aclf_run.json. Large cases can take minutes.',
     parameters: {
       type: 'object',
@@ -2148,23 +2453,45 @@ function caseSummaryTool(ctx) {
   }
 }
 
+// `load 259.00 \u2192 262.10 MW (+3.10)` for one step of a batch, or '' when it moved nothing
+// (a pure query script has no delta worth a line).
+function gvyStepDelta(step) {
+  const before = finiteOrNull(step && step.loadMwBefore)
+  const after = finiteOrNull(step && step.loadMw)
+  if (before === null || after === null) return ''
+  const delta = after - before
+  if (Math.abs(delta) < 0.005) return 'load unchanged (' + formatAmount(after, 'MW') + ' MW)'
+  return 'load ' + formatAmount(before, 'MW') + ' \u2192 ' + formatAmount(after, 'MW') + ' MW (' +
+    signed(formatAmount(after, 'MW'), formatAmount(before, 'MW')) + ')'
+}
+
 // --- Chat tool: interpss_run_gvy ---------------------------------------------
-// Applies a Groovy (.gvy) scenario script to the case held in the embedded bridge.
-// The script mutates that network in place (binding `aclfnet`, Complex pre-imported),
-// which is what makes the tool useful and also what makes it dangerous: edits are not
-// rolled back, so `reload: true` re-parses the case and the docs say the scripts are
-// trusted code. Solving stays a separate step (interpss_run_aclf).
+// Applies Groovy to the case held in the embedded bridge — a .gvy file, or the source
+// itself. The script mutates that network in place and may query it (bindings `aclfnet`
+// and `senAlgo`, the DC sensitivity analyser; Complex and the sensitivity types are
+// pre-imported), which is what makes the tool useful and also what makes it dangerous:
+// edits are not rolled back, so `reload: true` re-parses the case and the docs say the
+// scripts are trusted code. Solving stays a separate step (interpss_run_aclf).
 function runGvyTool(ctx) {
   return {
     name: 'interpss_run_gvy',
     description:
       LOAD_FIRST_HINT +
-      'Apply a Groovy (.gvy) scenario script to the power-system case held in the embedded InterPSS ' +
-      'bridge, then report what the script changed. The script file comes from its case folder\'s ' +
-      'scripts/ directory: pass just the file name (for example "ieee14_adjBus14.gvy") or a ' +
-      'data/.../scripts/x.gvy path. Inside the script the network is bound as `aclfnet` (for example ' +
-      '`aclfnet.getBus("Bus14").getContributeLoad("Bus14-L1").loadCP = new Complex(0.18, 0.07)`), and ' +
-      'Complex is already imported. The script edits the model in place and edits are NOT rolled back, ' +
+      'Apply one or more Groovy scenario scripts to the power-system case held in the embedded ' +
+      'InterPSS bridge, then report what they changed. A script comes from its case folder\'s ' +
+      'scripts/ directory — pass the file name (for example "ieee14_adjBus14.gvy") or a ' +
+      'data/.../scripts/x.gvy path — or pass the Groovy source itself, which is evaluated the same ' +
+      'way without writing a file (for example "aclfnet.getBus(\'Bus14\').getContributeLoad(\'Bus14-L1\')' +
+      '.loadCP = new Complex(0.50, 0.30)"). A single bare word is read as a file name, so anything ' +
+      'containing whitespace or statement punctuation is taken as source. Pass an ARRAY to apply ' +
+      'several in order on the same held model (for example ["mask_branch.gvy", ' +
+      '"aclfnet.getBus(\'Bus14\').loadP = 0.5"]): they accumulate, the run stops at the first failure, ' +
+      'and `steps` reports each one. Inside the script the ' +
+      'network is bound as `aclfnet` and a DC sensitivity analyser on that same network as `senAlgo` ' +
+      '(for example `aclfnet.getBus("Bus14").getContributeLoad("Bus14-L1").loadCP = new Complex(0.18, 0.07)`, ' +
+      'or `senAlgo.calGenShiftFactor("Bus14", aclfnet.getBranch("Bus1","Bus5","1"))`); `Complex` and the ' +
+      'sensitivity types (`SenAnalysisType`, `ContingencyBranchOutageType`, `DclfAlgoObjectFactory`) are ' +
+      'already imported. The script edits the model in place and edits are NOT rolled back, ' +
       'so pass `reload: true` to re-parse the case before applying it; a failing script keeps whatever ' +
       'it already changed. Script output from println is returned as `stdout`. This tool only edits the ' +
       'model — call interpss_run_aclf afterwards to solve the edited case. See ' +
@@ -2174,12 +2501,18 @@ function runGvyTool(ctx) {
       additionalProperties: false,
       properties: {
         script: {
-          type: 'string',
+          type: ['string', 'array'],
+          items: { type: 'string' },
           description:
-            'The .gvy script to apply: a file name in the case folder\'s scripts/ directory ' +
-            '(e.g. "ieee14_adjBus14.gvy"), or a workspace-relative path such as ' +
-            '"data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy" — the "wspace/data/..." spelling of ' +
-            'the same path is accepted too.',
+            'The Groovy to apply: a .gvy file name in the case folder\'s scripts/ directory ' +
+            '(e.g. "ieee14_adjBus14.gvy"), a workspace-relative path such as ' +
+            '"data/ieee/Ieee14Bus/scripts/ieee14_adjBranch1_2.gvy" (the "wspace/data/..." spelling is ' +
+            'accepted too), or the Groovy source itself — for example ' +
+            '"aclfnet.getBus(\'Bus14\').getContributeLoad(\'Bus14-L1\').loadCP = new Complex(0.50, 0.30)" ' +
+            'or a multi-line script. Whitespace or statement punctuation marks source; a single bare ' +
+            'word is read as a file name. An **array** applies several scripts in order (0.4.11+, up ' +
+            'to 20) on the same held model — e.g. ["base_case.gvy", "mask_branch.gvy", "export.gvy"] — ' +
+            'stopping at the first failure, with `steps` reporting what each one did.',
         },
         case: {
           type: 'string',
@@ -2209,6 +2542,31 @@ function runGvyTool(ctx) {
           source: { type: 'string' },
           format: { type: 'string' },
           script: { type: 'string' },
+          scripts: { type: 'array', items: { type: 'string' } },
+          scriptCount: { type: 'number' },
+          applied: { type: 'number' },
+          failedScript: { type: 'string' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                script: { type: 'string' },
+                elapsedMs: { type: 'number' },
+                returnValue: { type: 'string' },
+                returnType: { type: 'string' },
+                stdout: { type: 'string' },
+                buses: { type: 'number' },
+                branches: { type: 'number' },
+                loadMw: { type: 'number' },
+                generationMw: { type: 'number' },
+                loadMwBefore: { type: 'number' },
+                generationMwBefore: { type: 'number' },
+                lfConverged: { type: 'boolean' },
+              },
+            },
+          },
           reload: { type: 'boolean' },
           elapsedMs: { type: 'number' },
           returnValue: { type: 'string' },
@@ -2226,6 +2584,9 @@ function runGvyTool(ctx) {
         },
       },
       render(args, value) {
+        // A batch names itself by count and then lists what each script did; a single
+        // script keeps the original one-line-per-fact card.
+        const batch = value && value.ok === true && Array.isArray(value.steps)
         if (value && value.ok === true) {
           const lines = [
             'InterPSS run script \u2014 ' + String(value.script || '') + ' on ' + String(value.case || '') +
@@ -2237,6 +2598,28 @@ function runGvyTool(ctx) {
               formatAmount(value.generationMwBefore, 'MW') + ' \u2192 ' + formatAmount(value.generationMw, 'MW') +
               ' MW \u00b7 ' + (value.lfConverged === true ? 'solved' : 'not solved'),
           ]
+          if (batch) {
+            // Each step on its own line: the label, its own delta and what it returned.
+            const width = String(value.steps.length).length
+            value.steps.forEach((step, i) => {
+              const parts = [
+                String(i + 1).padStart(width) + '. ' + String(step.script || '?'),
+                formatAmount(step.elapsedMs, 'ms') + ' ms',
+              ]
+              const delta = gvyStepDelta(step)
+              if (delta !== '') parts.push(delta)
+              if (typeof step.returnValue === 'string' && step.returnValue !== '') {
+                parts.push('returned ' + step.returnValue)
+              } else if (typeof step.returnType === 'string' && step.returnType !== '') {
+                parts.push('returned a ' + step.returnType)
+              }
+              lines.push(parts.join(' \u00b7 '))
+              if (typeof step.stdout === 'string' && step.stdout.trim() !== '') {
+                lines.push('   output: ' + step.stdout.trimEnd().split('\n').join('\n   '))
+              }
+            })
+            return [{ type: 'text', text: lines.join('\n') }]
+          }
           if (typeof value.returnValue === 'string' && value.returnValue !== '') {
             lines.push('Returned: ' + value.returnValue)
           } else if (typeof value.returnType === 'string' && value.returnType !== '') {
@@ -2250,9 +2633,15 @@ function runGvyTool(ctx) {
         const where = value && typeof value.line === 'number' && value.line > 0
           ? ' (script line ' + value.line + ')'
           : ''
+        // A batch that failed part-way: say how far it got, because those edits stay.
+        const partial = value && typeof value.applied === 'number' && value.scriptCount > 1
+          ? '\n' + value.applied + ' of ' + value.scriptCount + ' scripts applied before the failure' +
+            (value.failedScript ? ' (failed: ' + value.failedScript + ')' : '') +
+            '; the model keeps those edits \u2014 pass reload: true to reset'
+          : ''
         return [{
           type: 'text',
-          text: 'InterPSS run script failed' + where + ': ' + String((value && value.error) || 'unknown error'),
+          text: 'InterPSS run script failed' + where + ': ' + String((value && value.error) || 'unknown error') + partial,
         }]
       },
       // Persisted to the card's block.meta so the script card renders directly.
@@ -2284,54 +2673,371 @@ function runGvyTool(ctx) {
       }
       const target = resolvedCase.target
       const source = resolvedCase.source
-      const script = await resolveGvyScript(ctx, root, target.input, args && args.script)
-      if (script.ok !== true) return fail(script.error, 'argument')
+
+      // `script` is a .gvy selector, inline Groovy source, or an array of those applied in
+      // order. Every entry is resolved before the first one runs, so a bad selector cannot
+      // leave the model half-edited by an argument mistake.
+      const resolved = await resolveGvyArguments(ctx, root, target.input, args && args.script)
+      if (resolved.ok !== true) return fail(resolved.error, 'argument')
+      const steps = resolved.steps
+      const batch = resolved.kind === 'batch'
+
       const bridge = ctx.get('javaBridge')
       if (bridge === undefined || typeof bridge.runGvy !== 'function') {
         return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
       }
+      if (steps.some((step) => step.kind === 'source') && typeof bridge.runGvySource !== 'function') {
+        return fail(
+          'this bridge cannot evaluate inline Groovy yet (it predates the adapter\'s source entry point); ' +
+          'rebuild the uber JAR (see scripts/setup-java-bridge.sh), or pass .gvy files in `script`',
+          source,
+        )
+      }
+      // `reload` re-parses the case *once*, before the first script: every later script
+      // must see the edits the earlier ones made.
       const reload = args && args.reload === true
-      try {
-        const raw = await bridge.runGvy(target.format, root + '/wspace/' + target.input, script.abs, reload)
-        const parsed = JSON.parse(raw)
-        if (!parsed || parsed.ok !== true) {
-          // A script can fail *after* editing, so the case and script stay in the
-          // result: the line number is what the caller needs to fix it.
-          const value = {
-            ok: false,
-            error: String((parsed && parsed.error) || 'bridge runGvy failed'),
-            case: target.input,
-            source: source,
-            script: script.input,
-          }
-          if (parsed && typeof parsed.line === 'number') value.line = parsed.line
-          if (parsed && typeof parsed.stdout === 'string' && parsed.stdout !== '') {
-            value.stdout = truncateStdout(parsed.stdout)
-          }
-          return value
+      const absCase = root + '/wspace/' + target.input
+      const runStep = (step, first) => (step.kind === 'file'
+        ? bridge.runGvy(target.format, absCase, step.abs, first && reload)
+        : bridge.runGvySource(target.format, absCase, step.source, first && reload))
+
+      // One digest per step, plus the failure that stopped the run. A script can fail
+      // *after* editing, so everything that already ran stays in the result.
+      const done = []
+      let failure = null
+      for (let i = 0; i < steps.length; i++) {
+        let parsed = null
+        try {
+          parsed = JSON.parse(await runStep(steps[i], i === 0))
+        } catch (e) {
+          failure = { step: steps[i], error: 'InterPSS run script failed: ' + (e && e.message ? e.message : String(e)) }
+          break
         }
-        adoptLoadedCase(sessionId, target)
+        if (!parsed || parsed.ok !== true) {
+          failure = {
+            step: steps[i],
+            error: String((parsed && parsed.error) || 'bridge runGvy failed'),
+            line: parsed && typeof parsed.line === 'number' ? parsed.line : undefined,
+            stdout: parsed && typeof parsed.stdout === 'string' ? parsed.stdout : undefined,
+          }
+          break
+        }
+        done.push({ step: steps[i], parsed: parsed })
+      }
+      if (done.length > 0) adoptLoadedCase(sessionId, target)
+
+      const stepValue = (entry) => {
+        const value = { script: entry.step.label }
+        for (const key of ['elapsedMs', 'buses', 'branches', 'loadMw', 'generationMw', 'loadMwBefore',
+          'generationMwBefore']) {
+          const n = finiteOrNull(entry.parsed[key])
+          if (n !== null) value[key] = n
+        }
+        for (const key of ['returnValue', 'returnType']) {
+          if (typeof entry.parsed[key] === 'string' && entry.parsed[key] !== '') value[key] = entry.parsed[key]
+        }
+        if (entry.parsed.lfConverged === true) value.lfConverged = true
+        if (typeof entry.parsed.stdout === 'string' && entry.parsed.stdout !== '') {
+          value.stdout = truncateStdout(entry.parsed.stdout)
+        }
+        return value
+      }
+      const labels = steps.map((step) => step.label)
+
+      if (failure !== null) {
+        const value = {
+          ok: false,
+          error: failure.error,
+          case: target.input,
+          source: source,
+          script: failure.step.label,
+          applied: done.length,
+        }
+        if (batch) {
+          value.scripts = labels
+          value.scriptCount = steps.length
+          value.failedScript = failure.step.label
+          value.steps = done.map(stepValue)
+        }
+        if (typeof failure.line === 'number') value.line = failure.line
+        if (typeof failure.stdout === 'string' && failure.stdout !== '') value.stdout = truncateStdout(failure.stdout)
+        return value
+      }
+
+      const first = done[0].parsed
+      const last = done[done.length - 1].parsed
+
+      // A single script (the pre-0.4.11 form) keeps its flat result exactly as before.
+      if (!batch) {
         const value = {
           ok: true,
           case: target.input,
           source: source,
           format: target.format,
-          script: script.input,
+          script: labels[0],
           reload: reload,
         }
         for (const key of ['elapsedMs', 'buses', 'branches', 'loadMw', 'generationMw', 'loadMwBefore',
           'generationMwBefore', 'line']) {
-          const n = finiteOrNull(parsed[key])
+          const n = finiteOrNull(last[key])
           if (n !== null) value[key] = n
         }
         for (const key of ['returnValue', 'returnType']) {
-          if (typeof parsed[key] === 'string' && parsed[key] !== '') value[key] = parsed[key]
+          if (typeof last[key] === 'string' && last[key] !== '') value[key] = last[key]
         }
-        value.lfConverged = parsed.lfConverged === true
-        if (typeof parsed.stdout === 'string' && parsed.stdout !== '') value.stdout = truncateStdout(parsed.stdout)
+        value.lfConverged = last.lfConverged === true
+        if (typeof last.stdout === 'string' && last.stdout !== '') value.stdout = truncateStdout(last.stdout)
+        return value
+      }
+
+      const value = {
+        ok: true,
+        case: target.input,
+        source: source,
+        format: target.format,
+        script: steps.length + (steps.length === 1 ? ' script' : ' scripts'),
+        scripts: labels,
+        scriptCount: steps.length,
+        applied: steps.length,
+        steps: done.map(stepValue),
+        reload: reload,
+      }
+      // The batch digest spans the whole run: before the first script, after the last.
+      for (const key of ['buses', 'branches']) {
+        const n = finiteOrNull(last[key])
+        if (n !== null) value[key] = n
+      }
+      const before = finiteOrNull(first.loadMwBefore)
+      const after = finiteOrNull(last.loadMw)
+      if (before !== null) value.loadMwBefore = before
+      if (after !== null) value.loadMw = after
+      const genBefore = finiteOrNull(first.generationMwBefore)
+      const genAfter = finiteOrNull(last.generationMw)
+      if (genBefore !== null) value.generationMwBefore = genBefore
+      if (genAfter !== null) value.generationMw = genAfter
+      let elapsed = 0
+      let seen = false
+      for (const entry of done) {
+        const n = finiteOrNull(entry.parsed.elapsedMs)
+        if (n !== null) { elapsed += n; seen = true }
+      }
+      if (seen) value.elapsedMs = elapsed
+      value.lfConverged = last.lfConverged === true
+      return value
+    },
+  }
+}
+
+// --- Chat tool: interpss_run_ca ----------------------------------------------
+// DC contingency analysis with the dialog bypassed: the inputs come from an explicit
+// contingencyFile/monitorFile, else the case folder's config/ca_run.json, else the case-folder
+// discovery (*contingenc*.json / *monitor*.json), else the Java defaults (N-1 outages on
+// every branch not connected to the reference bus, every branch monitored). The runner
+// solves its own DC load flow, so no ACLF run is needed first.
+function runCaTool(ctx) {
+  return {
+    name: 'interpss_run_ca',
+    description:
+      LOAD_FIRST_HINT +
+      'Run a DC contingency analysis (CA) on a power-system case in the embedded InterPSS bridge and report ' +
+      'the overload summary. No dialog is involved and nothing is prompted for: the contingency and ' +
+      'monitored-branch inputs come from the `contingencyFile` / `monitorFile` arguments when given, ' +
+      'otherwise from the case folder config/ca_run.json, otherwise from the case folder discovery ' +
+      '(*contingenc*.json / *monitor*.json), otherwise from the Java defaults (N-1 outages on every branch ' +
+      'not connected to the reference bus, every branch monitored). `overloadThreshold` sets the ' +
+      'over loading threshold in percent (default 90, overridable per call or in config/ca_run.json). Writes ' +
+      '<stem>_DF_contingency.csv under wspace/<case dir>/result/ — the file the NERC TPL-001-5 report and ' +
+      'the ACLF card Report button consume. The runner solves its own DC load flow, so the case only has ' +
+      'to be loaded, not solved; large cases (PSS/E 2K-bus and up) take minutes.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        case: {
+          type: 'string',
+          description:
+            "Optional case selector: a workspace-relative path such as 'data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW', " +
+            "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
+            "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
+            'held by the bridge.',
+        },
+        contingencyFile: {
+          type: 'string',
+          description:
+            'Optional contingency JSON: a file name in the case folder (e.g. ' +
+            '"2k_contingencies_115kVAbove.json"), or a workspace-relative path such as ' +
+            '"data/psse/Texas2K/2k_contingencies_115kVAbove.json". Omit it to use the case folder config/ca_run.json, ' +
+            'then the case-folder discovery, then all N-1 outages.',
+        },
+        monitorFile: {
+          type: 'string',
+          description:
+            'Optional monitored-branch JSON, addressable like `contingencyFile`. Omit it to use the case ' +
+            'folder config/ca_run.json, then the case-folder discovery, then every branch.',
+        },
+        overloadThreshold: {
+          type: 'number',
+          description:
+            'Optional over loading threshold in percent (default 90): a monitored branch whose ' +
+            'post-contingency loading reaches it is written to the result CSV. Overrides the case ' +
+            'folder config/ca_run.json for this run.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          format: { type: 'string' },
+          resultDir: { type: 'string' },
+          contingencyCsv: { type: 'string' },
+          contingencyFile: { type: 'string' },
+          monitoredBranchFile: { type: 'string' },
+          threshold: { type: 'number' },
+          contingencies: { type: 'number' },
+          monitoredBranches: { type: 'number' },
+          overloads: { type: 'number' },
+          caSummary: { type: 'string' },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (value && value.ok === true) {
+          const amount = (n) => (typeof n === 'number' && Number.isFinite(n) ? String(n) : '?')
+          const inputs = [
+            typeof value.contingencyFile === 'string' && value.contingencyFile !== ''
+              ? value.contingencyFile
+              : 'all N-1 outages',
+            typeof value.monitoredBranchFile === 'string' && value.monitoredBranchFile !== ''
+              ? value.monitoredBranchFile
+              : 'all branches monitored',
+          ]
+          return [{
+            type: 'text',
+            text: [
+              'InterPSS DC contingency analysis \u2014 ' + String(value.case || '') +
+                ' (source: ' + String(value.source || '') + ')',
+              'Threshold ' + amount(value.threshold) + '% \u00b7 ' + amount(value.contingencies) +
+                ' contingencies \u00b7 ' + amount(value.monitoredBranches) + ' monitored branches \u00b7 ' +
+                amount(value.overloads) + ' overload rows',
+              'Inputs: ' + inputs.join(' \u00b7 '),
+              'Results: wspace/' + String(value.resultDir || '') + ' (' + String(value.contingencyCsv || '') + ')',
+            ].join('\n'),
+          }]
+        }
+        return [{
+          type: 'text',
+          text: 'InterPSS DC contingency analysis failed: ' + String((value && value.error) || 'unknown error'),
+        }]
+      },
+      // Persisted to the card's block.meta so the card can render without the generic
+      // row's expand toggle.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          source: String(value.source || ''),
+          resultDir: String(value.resultDir || ''),
+          contingencyCsv: String(value.contingencyCsv || ''),
+        }
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS contingency analysis', kind: 'execute', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      const resolvedCase = resolveToolCase(sessionId, args && typeof args.case === 'string' ? args.case : '')
+      if (resolvedCase.error !== undefined) return fail(resolvedCase.error, 'argument')
+      if (resolvedCase.target === null) {
+        return fail('no simulation case is selected: pick one in the InterPSS tab, or pass `case` (a data/... path, an absolute path containing /wspace/data/, or a preset label)', 'none')
+      }
+      const target = resolvedCase.target
+      const source = resolvedCase.source
+
+      const { parent, stem } = casePartsOf(target.input)
+
+      // Arguments override the case's ca_run.json per key; anything omitted keeps following the
+      // dialog-free resolution order (ca_run.json -> discovery -> Java defaults), so passing only
+      // `overloadThreshold` still runs the case's own contingency and monitored-branch selections.
+      const hasCont = args && typeof args.contingencyFile === 'string' && args.contingencyFile.trim() !== ''
+      const hasMon = args && typeof args.monitorFile === 'string' && args.monitorFile.trim() !== ''
+      const hasThreshold = args && typeof args.overloadThreshold === 'number' &&
+        Number.isFinite(args.overloadThreshold)
+      const explicit = {}
+      if (hasCont) {
+        const cont = resolveCaFileArgument(target.input, args.contingencyFile)
+        if (cont.ok !== true) return fail(cont.error, 'argument')
+        explicit.contingencyMode = 'custom'
+        explicit.contingencyFile = cont.input
+      }
+      if (hasMon) {
+        const mon = resolveCaFileArgument(target.input, args.monitorFile)
+        if (mon.ok !== true) return fail(mon.error, 'argument')
+        explicit.monitorMode = 'custom'
+        explicit.monitoredBranchFile = mon.input
+      }
+      if (hasThreshold) explicit.overloadThreshold = args.overloadThreshold
+
+      const resolvedConfig = await resolveCaRunConfig(ctx, root, parent, undefined)
+      if (resolvedConfig.ok !== true) return fail(resolvedConfig.error, 'argument')
+      let configured = resolvedConfig
+      if (Object.keys(explicit).length > 0) {
+        const merged = Object.assign({}, resolvedConfig.config, explicit)
+        const validated = await validateCaConfig(ctx, root, merged, true)
+        if (!validated.ok) return fail('invalid run configuration: ' + validated.error, 'argument')
+        configured = { ok: true, config: validated.config, source: resolvedConfig.source }
+      }
+      const caConfig = configured.config
+
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.runContingency !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
+      }
+      try {
+        const absCase = root + '/wspace/' + target.input
+        const absResults = root + '/wspace/' + parent + '/result'
+        const absCont = caConfig.contingencyFile === null ? null : root + '/wspace/' + caConfig.contingencyFile
+        const absMon = caConfig.monitoredBranchFile === null ? null : root + '/wspace/' + caConfig.monitoredBranchFile
+        const raw = await bridge.runContingency(target.format, absCase, absCont, absMon, absResults, stem,
+          caConfig.overloadThreshold)
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          return fail(String((parsed && parsed.error) || 'bridge runContingency failed'), source)
+        }
+        adoptLoadedCase(sessionId, target)
+        const summary = typeof parsed.caSummary === 'string' ? parsed.caSummary : ''
+        const value = {
+          ok: true,
+          case: target.input,
+          source: source,
+          format: target.format,
+          resultDir: parent + '/result',
+          contingencyCsv: typeof parsed.contingencyFile === 'string'
+            ? parsed.contingencyFile
+            : stem + '_DF_contingency.csv',
+          caSummary: summary,
+        }
+        if (caConfig.contingencyFile !== null) value.contingencyFile = caConfig.contingencyFile
+        if (caConfig.monitoredBranchFile !== null) value.monitoredBranchFile = caConfig.monitoredBranchFile
+        const numbers = parseCaSummary(summary)
+        for (const key of Object.keys(numbers)) {
+          if (numbers[key] !== null) value[key] = numbers[key]
+        }
         return value
       } catch (e) {
-        return fail('InterPSS run script failed: ' + (e && e.message ? e.message : String(e)), source)
+        return fail('InterPSS DC contingency analysis failed: ' + (e && e.message ? e.message : String(e)), source)
       }
     },
   }
@@ -2428,26 +3134,13 @@ export default {
       // println output reaches the caller instead of the dsh terminal.
       async runGvy(format, absCase, absScript, reload) {
         const bridge = await ensureBridge(rootFor(absCase))
-        const cap = captureStdio()
-        let raw
-        try {
-          raw = await bridge.runGvy(format, absCase, absScript, reload === true)
-        } finally {
-          cap.stop()
-        }
-        try {
-          const parsed = JSON.parse(raw)
-          if (parsed && typeof parsed === 'object') {
-            if (parsed.ok === true) {
-              lastLoadedAbs = absCase
-              rememberLoadedCounts(parsed.buses, parsed.branches)
-            }
-            parsed.stdout = cap.out()
-            parsed.stderr = cap.err()
-            raw = JSON.stringify(parsed)
-          }
-        } catch (e) {}
-        return raw
+        return gvyThrough(() => bridge.runGvy(format, absCase, absScript, reload === true), absCase)
+      },
+      // The adapter's inline entry point: the same evaluation without a .gvy file.
+      // Kept beside runGvy so both share the stdio capture and held-case bookkeeping.
+      async runGvySource(format, absCase, source, reload) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        return gvyThrough(() => bridge.runGvySource(format, absCase, source, reload === true), absCase)
       },
       async networkInfo() {
         const bridge = await ensureBridge(rootFor(''))
@@ -2496,12 +3189,15 @@ export default {
         const bridge = await ensureBridge(projectRoot || rootFor(''))
         return bridge.runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)
       },
-      async runContingency(format, absCase, absCont, absMon, absResults, stem) {
+      async runContingency(format, absCase, absCont, absMon, absResults, stem, overloadThreshold) {
         const bridge = await ensureBridge(rootFor(absCase))
         const cap = captureStdio()
+        const threshold = typeof overloadThreshold === 'number' && Number.isFinite(overloadThreshold)
+          ? overloadThreshold
+          : 90
         let raw
         try {
-          raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
+          raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem, threshold)
         } finally {
           cap.stop()
         }
@@ -2544,7 +3240,7 @@ export default {
     // call is gated on the iPSS Agent workspace activation check.
     const tools = ctx.get('tools')
     if (tools !== undefined) {
-      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx), runGvyTool(ctx)]
+      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx), runGvyTool(ctx), runCaTool(ctx)]
       for (const definition of chatToolDefs) {
         ctx.effect(() => tools.register(definition))
       }

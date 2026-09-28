@@ -2,5 +2,6 @@
   "contingencyMode": "all",
   "contingencyFile": null,
   "monitorMode": "all",
-  "monitoredBranchFile": null
+  "monitoredBranchFile": null,
+  "overloadThreshold": 90
 }

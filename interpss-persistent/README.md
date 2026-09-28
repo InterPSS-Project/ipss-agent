@@ -33,8 +33,11 @@ parameters and results, no build-time Typert compiler required.
 - AC Loadflow Options dialog (3 tabs — Main / NR Config / Adj-Ctrl Setting), backed by `config/aclf_run.json`.
 - **CA dialog** — the CA button opens a *Run Contingency Analysis* dialog that picks
   the contingency and monitored-branch inputs (all N-1 / every branch, or a `.json`
-  from the case folder, with the entry count shown after the pick), saves them as
-  `ca_run.json` beside that case's `aclf_run.json`, and runs CA — the same file the
+  from the case folder, with the entry count shown after the pick), sets the
+  **Over Loading Threshold(%)** the screening reports against (default 90, 0.4.6+; written with the
+  other four keys since 0.4.7),
+  saves them as
+  `config/ca_run.json` beside that case's `config/aclf_run.json`, and runs CA — the same file the
   CLI reads (OK = save + run, Cancel = write nothing).
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
@@ -59,11 +62,12 @@ iPSS Agent workspace activation check.
 
 | Tool | Purpose |
 | --- | --- |
-| `interpss_case_load` | Load the selected simulation case into the embedded bridge. No-op (`alreadyLoaded: true`) when the bridge already holds it; call it before the other tools. A load also moves the session's current case, the tab's Simu Case picker and its `✓ Loaded: N buses, M branches` indicator mirror it (0.3.19/0.3.22), and its card prints the same line (0.3.21). |
+| `interpss_case_load` | Load the selected simulation case into the embedded bridge. No-op (`alreadyLoaded: true`) when the bridge already holds it; call it before the other tools. Result tables in the **InterPSS tab** sort by any column (0.4.4+), with the Contingency table opening worst-loading-first. A load also moves the session's current case, the tab's Simu Case picker and its `✓ Loaded: N buses, M branches` indicator mirror it (0.3.19/0.3.22), and its card prints the same line (0.3.21). |
 | `interpss_network_info` | Show the InterPSS network information (active buses and branches, total generation and load, load-flow convergence, max mismatch) of a simulation case. |
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
-| `interpss_run_gvy` | Apply a Groovy (`.gvy`) scenario script from the case folder's `scripts/` directory to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. |
+| `interpss_run_ca` | Run a DC contingency analysis (N-1 screening) on the held case without the CA dialog: inputs come from `contingencyFile`/`monitorFile`, else the case-folder `config/ca_run.json`, else case-folder discovery, else the Java N-1 defaults; `overloadThreshold` (0.4.6+) sets the over loading threshold the run reports against (argument → `ca_run.json` → 90). Writes `<stem>_DF_contingency.csv`, browsable from the card's **Explore result → Contingency** row (0.4.2+), which opens sorted by `LoadingPercent` with clickable headers (0.4.3+). |
+| `interpss_run_gvy` | Apply Groovy to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. `script` takes a `.gvy` file from the case folder's `scripts/` directory, the source itself (0.4.9+), or an array of those applied in order (0.4.11+ — stops at the first failure, `steps` reports each one). Whitespace or statement punctuation marks source, a single bare word is a file name. |
 
 The first three tools resolve the target case through one shared helper, in this order:
 
@@ -99,7 +103,7 @@ so the Host slices it instead of forwarding it; and an unknown `scope` is reject
 would silently fall back to `net`. Branch ranking is by flow magnitude, not rating loading.
 
 `interpss_run_gvy` edits the held model through InterPSS's Groovy script adapter
-(`org.interpss.script.gvy.AclfNetGvyScriptProcessor`, binding `aclfnet`). The script
+(`org.interpss.agent.script.gvy.AclfNetDshGvyScriptProcessor`, bindings `aclfnet` + `senAlgo`). The script
 file is resolved inside the **case folder's `scripts/` directory** (a bare file
 name, or a `data/…/scripts/x.gvy` path); the Host and the Java bridge both refuse
 anything else. Scripts mutate the model in place with no rollback, so `reload: true`
@@ -111,7 +115,7 @@ what it changed. Groovy 4.0.x is a Maven dependency merged into the uber JAR.
 `interpss_run_aclf` solves the case and writes
 `<stem>_DF_{bus,branch,gen,load}.csv` plus `<stem>_network_info.txt` under
 `wspace/<case dir>/result/`, so the report tools can consume them. Solver options
-come from the case-folder `aclf_run.json` when present, otherwise
+come from the case-folder `config/aclf_run.json` when present, otherwise
 `config/aclf_run.json` — the same two-tier rule as `ProjectPaths`. A run that
 does not converge is still a successful call (`converged: false`); large cases
 can take minutes.
@@ -168,9 +172,18 @@ bridge is unavailable, it falls back to shelling out with a classpath of
 
 ## Install
 
-See `InstallDSHPlugin.md` in the repository root. Two methods:
+See `InstallDSHPlugin.md` in the repository root. Three methods:
 
-1. **Automatic (`dsh plugin`)** — from the unzipped directory or the npm
+1. **DSH Desktop (plugin manager)** — the app owns the `desktop` profile and the
+   `dsh` CLI refuses it (`profile "desktop" is managed exclusively by the
+   Electron application`), so install the bundle through the app's plugin
+   manager and reopen the app:
+
+   ```text
+   install the bundle at /path/to/deepseek-ai-dsh-interpss-<version>.tgz
+   ```
+
+2. **Automatic (`dsh plugin`, web profile)** — from the unzipped directory or the npm
    tarball:
 
    ```sh
@@ -183,7 +196,7 @@ See `InstallDSHPlugin.md` in the repository root. Two methods:
    `dsh.profile.bundles`; the bundle's `cordis.patch.yml` inserts the
    `interpss` row automatically. No manual patch editing needed.
 
-2. **Manual copy** — copy the package under the profile and add the row by
+3. **Manual copy** — copy the package under the profile and add the row by
    hand:
 
    ```sh
@@ -199,7 +212,8 @@ See `InstallDSHPlugin.md` in the repository root. Two methods:
          name: '@deepseek-ai/dsh-interpss'
    ```
 
-In both cases, restart the web server (`dsh web`), then hard-reload the page.
+For the web profile, restart the web server (`dsh web`), then hard-reload the page; for
+DSH Desktop, quit and reopen the app.
 
 ## Activation gate
 

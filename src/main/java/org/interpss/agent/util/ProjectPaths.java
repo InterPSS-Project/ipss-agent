@@ -82,9 +82,9 @@ public final class ProjectPaths {
     public Path caseAclfRunConfig(String inputRelative) {
         String parent = inputParentRelative(inputRelative);
         if (parent.isEmpty()) {
-            return wspaceDir.resolve("aclf_run.json");
+            return wspaceDir.resolve("config").resolve("aclf_run.json");
         }
-        return wspaceDir.resolve(parent).resolve("aclf_run.json");
+        return wspaceDir.resolve(parent).resolve("config").resolve("aclf_run.json");
     }
 
     public Path resolveAclfRunConfig(String inputRelative) {
@@ -96,15 +96,15 @@ public final class ProjectPaths {
     }
 
     /**
-     * Case-folder {@code ca_run.json} for the contingency-analysis run settings
+     * Case {@code config/ca_run.json} for the contingency-analysis run settings
      * (may not exist). Contingency inputs are case-specific, so there is no
      * project-level fallback: callers check {@link Files#isRegularFile}.
      */
     public Path caseCaRunConfig(String inputRelative) {
         String parent = inputParentRelative(inputRelative);
         if (parent.isEmpty()) {
-            return wspaceDir.resolve("ca_run.json");
+            return wspaceDir.resolve("config").resolve("ca_run.json");
         }
-        return wspaceDir.resolve(parent).resolve("ca_run.json");
+        return wspaceDir.resolve(parent).resolve("config").resolve("ca_run.json");
     }
 }

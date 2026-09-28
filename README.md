@@ -1,6 +1,6 @@
 # iPSS Agent
 
-**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and report generation, including NERC TPL-001-5 style. This repository ships agent-facing skills for **OpenAI Codex Desktop**, **Claude Code CLI**, and **DeepSeek Harness** (build and CLI details in [Setup.md](Setup.md); DSH plugin in [InstallDSHPlugin.md](InstallDSHPlugin.md)). The batch run canonical skill is `[.agents/skills/ipss-sim/SKILL.md](.agents/skills/ipss-sim/SKILL.md)`. (see [batch chat user guide](docs/user_guide/batch_chat_user_guide.md) for details):
+**[InterPSS Agentic Power System Simulation Agent](https://tinyurl.com/interpss)** for AC load flow, DC-based contingency analysis, and report generation, including NERC TPL-001-5 style. This repository ships agent-facing skills for **OpenAI Codex Desktop** and **DeepSeek Harness** (build and CLI details in [Setup.md](Setup.md); DSH plugin in [InstallDSHPlugin.md](InstallDSHPlugin.md)). The batch run canonical skill is `[.agents/skills/ipss-sim/SKILL.md](.agents/skills/ipss-sim/SKILL.md)`. (see [batch chat user guide](docs/user_guide/batch_chat_user_guide.md) for details):
 
 ![ipss-agent-chat](./docs/image/ipss-agent-chat.png)
 
@@ -68,8 +68,10 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 | Interactive HTML dashboards               | `[.agents/skills/nerc-report-html/SKILL.md](.agents/skills/nerc-report-html/SKILL.md)`     |
 | NERC slide decks                          | `[.agents/skills/nerc-report-slides/SKILL.md](.agents/skills/nerc-report-slides/SKILL.md)` |
 | Load a simulation case into the bridge    | [.agents/skills/ipss-case-load/SKILL.md](.agents/skills/ipss-case-load/SKILL.md)           |
+| Run DC contingency analysis for the current case | [.agents/skills/ipss-case-ca/SKILL.md](.agents/skills/ipss-case-ca/SKILL.md)             |
 | Current case network info                 | [.agents/skills/ipss-case-info/SKILL.md](.agents/skills/ipss-case-info/SKILL.md)           |
 | Run ACLF for the current case             | [.agents/skills/ipss-case-aclf/SKILL.md](.agents/skills/ipss-case-aclf/SKILL.md)           |
+| Adjust load Q to a bus-voltage band       | [.agents/skills/ipss-case-aclf-adjust/SKILL.md](.agents/skills/ipss-case-aclf-adjust/SKILL.md) |
 | Summary report for the current case       | [.agents/skills/ipss-case-summary/SKILL.md](.agents/skills/ipss-case-summary/SKILL.md)     |
 | Run a scenario script on the current case | [.agents/skills/ipss-case-script/SKILL.md](.agents/skills/ipss-case-script/SKILL.md)       |
 

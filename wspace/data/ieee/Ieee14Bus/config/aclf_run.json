@@ -7,7 +7,7 @@
   "autoSetZeroZBranch": true,
   "turnOffIslandBus": true,
   "autoTurnLine2Xfr": true,
-  "busLoadLowVoltAdj": true,
+  "busLoadLowVoltAdj": false,
   "vConstPMin": 0.7,
   "vConstIMin": 0.5,
   "includeAdjustments": true,

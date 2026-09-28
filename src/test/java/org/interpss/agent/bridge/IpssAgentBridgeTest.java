@@ -113,6 +113,54 @@ class IpssAgentBridgeTest {
     }
 
     @Test
+    void runGvySource_evaluatesInlineCodeWithoutAFile() throws Exception {
+        Path caseDir = caseWithScripts("unused.gvy", "aclfnet.id = 'unused'\n");
+        String casePath = caseDir.resolve("ieee14.ieee").toString();
+
+        String json = bridge.runGvySource("ieee", casePath, """
+                bus = aclfnet.getBus('Bus14');
+                load = bus.getContributeLoad('Bus14-L1');
+                load.loadCP = new Complex(0.50, 0.30);
+                """, false);
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isTrue();
+        assertThat(o.get("script").getAsString()).isEqualTo("inline Groovy (4 lines)");
+        assertThat(o.get("buses").getAsInt()).isEqualTo(14);
+        assertThat(o.get("loadMw").getAsDouble() - o.get("loadMwBefore").getAsDouble()).isCloseTo(35.1,
+                org.assertj.core.data.Offset.offset(0.05));
+
+        // The inline edit lands on the same held model the other tools read.
+        JsonObject info = JsonParser.parseString(bridge.summarize("net", null, 1)).getAsJsonObject();
+        assertThat(info.get("ok").getAsBoolean()).isTrue();
+    }
+
+    @Test
+    void runGvySource_reportsAScriptFailureWithItsLineAndRejectsEmptySource() throws Exception {
+        Path caseDir = caseWithScripts("unused.gvy", "aclfnet.id = 'unused'\n");
+        String casePath = caseDir.resolve("ieee14.ieee").toString();
+
+        JsonObject broken = JsonParser.parseString(
+                bridge.runGvySource("ieee", casePath, "aclfnet.noSuchThing = 1\n", false)).getAsJsonObject();
+        assertThat(broken.get("ok").getAsBoolean()).isFalse();
+        assertThat(broken.get("error").getAsString()).contains("noSuchThing");
+        assertThat(broken.get("line").getAsInt()).isEqualTo(1);
+
+        JsonObject empty = JsonParser.parseString(bridge.runGvySource("ieee", casePath, "  \n", false)).getAsJsonObject();
+        assertThat(empty.get("ok").getAsBoolean()).isFalse();
+        assertThat(empty.get("error").getAsString()).contains("empty");
+    }
+
+    @Test
+    void inlineLabel_countsTheScriptLines() {
+        assertThat(IpssAgentBridge.inlineLabel("x = 1")).isEqualTo("inline Groovy (1 line)");
+        assertThat(IpssAgentBridge.inlineLabel("a\nb\nc")).isEqualTo("inline Groovy (3 lines)");
+        assertThat(IpssAgentBridge.inlineLabel("a\n")).isEqualTo("inline Groovy (2 lines)");
+        assertThat(IpssAgentBridge.inlineLabel("   ")).isEqualTo("inline Groovy");
+        assertThat(IpssAgentBridge.inlineLabel(null)).isEqualTo("inline Groovy");
+    }
+
+    @Test
     void runGvy_rejectsAScriptOutsideTheScriptsDir() throws Exception {
         Path caseDir = caseWithScripts("adj.gvy", "aclfnet.id = 'x'\n");
         Path stray = Files.writeString(tempDir.resolve("stray.gvy"), "aclfnet.id = 'y'\n");

@@ -270,13 +270,29 @@ module.exports = {
       return lines.join('\n')
     }
 
-    function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatDecimals) {
+    // A sortable header cell. Clicking hands the column name to the caller, which re-reads
+    // the file through `readCsv` with that sort — the Host sorts the whole file before
+    // slicing a page, so paging follows the order. The active column carries its direction.
+    function csvHeaderCell(h, key, sort) {
+      const label = String(h).trim()
+      const column = sort !== null && sort !== undefined && typeof sort.column === 'string' ? sort.column : null
+      const active = column !== null && column.toLowerCase() === label.toLowerCase()
+      const onSort = sort !== null && sort !== undefined && typeof sort.onSort === 'function' ? sort.onSort : null
+      return React.createElement('th', {
+        key: key,
+        onClick: onSort === null ? undefined : () => onSort(label),
+        title: onSort === null ? undefined : 'Sort by ' + label,
+        style: onSort === null ? thStyle : { ...thStyle, cursor: 'pointer', userSelect: 'none' },
+      }, h + (active ? (sort.desc === true ? ' \u25bc' : ' \u25b2') : ''))
+    }
+
+    function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatDecimals, sort) {
       if (!header) return null
       const headerCols = header.split(',')
       const isBusCol = (ci) => busCols && onBusDoubleClick && busCols.indexOf(ci) !== -1
       return React.createElement('table', { style: tableStyle },
         React.createElement('thead', null,
-          React.createElement('tr', null, headerCols.map((h, i) => React.createElement('th', { key: i, style: thStyle }, h))),
+          React.createElement('tr', null, headerCols.map((h, i) => csvHeaderCell(h, i, sort))),
         ),
         React.createElement('tbody', null,
           (rows || []).map((r, ri) => React.createElement('tr', { key: ri }, r.split(',').map((c, ci) => {
@@ -295,12 +311,12 @@ module.exports = {
       )
     }
 
-    function renderBusTable(header, rows, selectedBus, onSelect, onContextMenu) {
+    function renderBusTable(header, rows, selectedBus, onSelect, onContextMenu, sort) {
       if (!header) return null
       const headerCols = header.split(',')
       return React.createElement('table', { style: tableStyle },
         React.createElement('thead', null,
-          React.createElement('tr', null, headerCols.map((h, i) => React.createElement('th', { key: i, style: thStyle }, h))),
+          React.createElement('tr', null, headerCols.map((h, i) => csvHeaderCell(h, i, sort))),
         ),
         React.createElement('tbody', null,
           (rows || []).map((r, ri) => {
@@ -696,6 +712,9 @@ module.exports = {
       const [pickerOpen, setPickerOpen] = React.useState(false)
       const [loadingCases, setLoadingCases] = React.useState(false)
       const [csvSel, setCsvSel] = React.useState(null)
+      // Sort of the open result table; the Contingency table opens worst-loading-first,
+      // the DF tables open in file order. The Host applies it, so it survives paging.
+      const [csvSort, setCsvSort] = React.useState({ column: null, desc: false })
       const [csvHeader, setCsvHeader] = React.useState(null)
       const [csvRows, setCsvRows] = React.useState([])
       const [csvTotal, setCsvTotal] = React.useState(0)
@@ -893,7 +912,7 @@ module.exports = {
       }
 
       // --- Run Contingency Analysis dialog -----------------------------------
-      // The CA button opens this dialog; OK saves the four-key ca_run.json in
+      // The CA button opens this dialog; OK saves the five-key config/ca_run.json in
       // the case folder and runs CA with it. Cancel writes nothing.
 
       function caCountFor(file, kind) {
@@ -956,6 +975,10 @@ module.exports = {
       // Only the picked custom sections must be valid before OK runs.
       function caFormError() {
         if (caForm === null) return 'the run configuration is still loading'
+        const threshold = Number(caForm.overloadThreshold)
+        if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1000) {
+          return 'over loading threshold must be a percentage between 0 and 1000'
+        }
         const kinds = ['contingency', 'monitored']
         for (const kind of kinds) {
           const mode = kind === 'contingency' ? caForm.contingencyMode : caForm.monitorMode
@@ -1003,6 +1026,11 @@ module.exports = {
                 contingencyFile: res.config.contingencyFile || null,
                 monitorMode: res.config.monitorMode === 'custom' ? 'custom' : 'all',
                 monitoredBranchFile: res.config.monitoredBranchFile || null,
+                // The over loading threshold the dialog shows; kept as typed so the input
+                // behaves normally, validated and coerced on OK.
+                overloadThreshold: typeof res.config.overloadThreshold === 'number'
+                  ? String(res.config.overloadThreshold)
+                  : '90',
               })
               setCaWarning(res.warning || null)
             } else {
@@ -1012,6 +1040,12 @@ module.exports = {
           (err) => { setCaLoading(false); setCaDialogError(String(err && err.message ? err.message : err)) },
         )
         loadCaFiles(c)
+      }
+
+      function setCaThreshold(value) {
+        if (caForm === null) return
+        setCaDialogError(null)
+        setCaForm({ ...caForm, overloadThreshold: value })
       }
 
       function setCaMode(kind, mode) {
@@ -1067,6 +1101,7 @@ module.exports = {
           contingencyFile: caForm.contingencyMode === 'custom' ? caForm.contingencyFile : null,
           monitorMode: caForm.monitorMode,
           monitoredBranchFile: caForm.monitorMode === 'custom' ? caForm.monitoredBranchFile : null,
+          overloadThreshold: Number(caForm.overloadThreshold),
         }
         setCaSaving(true)
         setCaDialogError(null)
@@ -1156,18 +1191,12 @@ module.exports = {
         return filePathForKind(csvSel)
       }
 
-      function openCsv(kind) {
-        setSelectedBus(null)
-        setConnOpen(false)
-        setConnResult(null)
-        if (csvSel === kind) {
-          setCsvSel(null)
-          setCsvHeader(null)
-          setCsvRows([])
-          setCsvError(null)
-          return
-        }
-        setCsvSel(kind)
+      // The Contingency table is only useful worst-first; the DF tables keep file order.
+      function defaultCsvSort(kind) {
+        return kind === 'contingency' ? { column: 'LoadingPercent', desc: true } : { column: null, desc: false }
+      }
+
+      function loadCsvFirstPage(kind, sort) {
         setCsvHeader(null)
         setCsvRows([])
         setCsvTotal(0)
@@ -1180,7 +1209,14 @@ module.exports = {
           setCsvError('result file not found for ' + kind)
           return
         }
-        callRemote('readCsv', { path: path, sessionId, start: 0, limit: 200 }).then(
+        callRemote('readCsv', {
+          path: path,
+          sessionId,
+          start: 0,
+          limit: 200,
+          sortColumn: sort === null || sort === undefined ? null : sort.column,
+          sortDesc: sort === null || sort === undefined ? false : sort.desc === true,
+        }).then(
           (res) => {
             setCsvLoading(false)
             if (res && res.ok) {
@@ -1188,6 +1224,11 @@ module.exports = {
               setCsvRows(res.rows || [])
               setCsvTotal(res.totalRows || 0)
               setCsvHasMore(!!res.hasMore)
+              // Trust the Host's report of the sort it actually applied.
+              setCsvSort({
+                column: typeof res.sortColumn === 'string' && res.sortColumn !== '' ? res.sortColumn : null,
+                desc: res.sortDesc === true,
+              })
             } else {
               setCsvError(res && res.error ? res.error : 'failed to read result file')
             }
@@ -1196,12 +1237,47 @@ module.exports = {
         )
       }
 
+      function openCsv(kind) {
+        setSelectedBus(null)
+        setConnOpen(false)
+        setConnResult(null)
+        if (csvSel === kind) {
+          setCsvSel(null)
+          setCsvHeader(null)
+          setCsvRows([])
+          setCsvError(null)
+          setCsvSort({ column: null, desc: false })
+          return
+        }
+        setCsvSel(kind)
+        const sort = defaultCsvSort(kind)
+        setCsvSort(sort)
+        loadCsvFirstPage(kind, sort)
+      }
+
+      // A header click: same column flips the direction, a new column starts ascending,
+      // and the open table re-reads its first page in the new order.
+      function changeCsvSort(clicked) {
+        const next = nextCsvSort(csvSort.column, csvSort.desc, clicked)
+        setCsvSort(next)
+        if (csvSel !== null) loadCsvFirstPage(csvSel, next)
+      }
+
+      const csvSortView = { column: csvSort.column, desc: csvSort.desc, onSort: changeCsvSort }
+
       function loadMoreCsv() {
         if (csvLoadingMore || !csvHasMore) return
         const path = currentCsvPath()
         if (path === null) return
         setCsvLoadingMore(true)
-        callRemote('readCsv', { path, sessionId, start: csvRows.length, limit: 200 }).then(
+        callRemote('readCsv', {
+          path,
+          sessionId,
+          start: csvRows.length,
+          limit: 200,
+          sortColumn: csvSort.column,
+          sortDesc: csvSort.desc,
+        }).then(
           (res) => {
             setCsvLoadingMore(false)
             if (res && res.ok) {
@@ -1391,7 +1467,7 @@ module.exports = {
         csvError ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px' } }, csvError) : null,
         csvHeader !== null ? React.createElement('div', null,
           React.createElement('div', { style: { marginTop: '8px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, csvHasMore ? 'Showing ' + csvRows.length + ' of ' + csvTotal + ' rows (scroll for more)' : 'Total rows: ' + csvTotal),
-          React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick) : renderCsvTable(csvHeader, csvRows, undefined, undefined, csvSel === 'contingency' ? 2 : 4)),
+          React.createElement('div', { style: { marginTop: '6px', maxHeight: '320px', overflow: 'auto', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', background: 'var(--dsw-alias-bg-layer-1)' }, onScroll: handleCsvScroll }, csvSel === 'bus' ? renderBusTable(csvHeader, csvRows, selectedBus, selectBus, busRowContextMenu, csvSortView) : (csvSel === 'gen' || csvSel === 'load') ? renderCsvTable(csvHeader, csvRows, [0], handleBusDoubleClick, undefined, csvSortView) : renderCsvTable(csvHeader, csvRows, undefined, undefined, csvSel === 'contingency' ? 2 : 4, csvSortView)),
           csvLoadingMore ? React.createElement('div', { style: { marginTop: '6px', color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } }, 'Loading more…') : null,
           csvSel === 'bus' && selectedBus !== null ? React.createElement('div', { style: { marginTop: '8px' } },
             React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, 'Selected bus: ' + selectedBus),
@@ -1730,6 +1806,19 @@ module.exports = {
             React.createElement('div', { style: { fontWeight: 600, fontSize: '16px' } }, 'Run Contingency Analysis'),
             React.createElement('button', { onClick: cancelCaDialog, style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
           ),
+          caForm !== null ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' } },
+            React.createElement('span', { style: { fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, 'Over Loading Threshold(%):'),
+            React.createElement('input', {
+              type: 'number',
+              min: 1,
+              max: 1000,
+              step: 1,
+              value: caForm.overloadThreshold,
+              onChange: (e) => setCaThreshold(e.target.value),
+              title: 'A monitored branch whose post-contingency loading reaches this percentage is reported',
+              style: { width: '92px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', textAlign: 'center' },
+            }),
+          ) : null,
           caCase !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginBottom: '10px' } }, 'Case: ' + caCase.displayName) : null,
           caLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
           caForm === null ? React.createElement('pre', { style: { ...mono, maxHeight: '180px', overflow: 'auto' } }, caDialogError || 'no run configuration available') :
@@ -1909,6 +1998,17 @@ module.exports = {
       }
     }
 
+    // Clicking a header sorts by it (ascending first); clicking the sorted one flips the
+    // direction. Pure, so the panel's state change stays a one-liner.
+    function nextCsvSort(column, desc, clicked) {
+      const name = String(clicked === null || clicked === undefined ? '' : clicked).trim()
+      if (name === '') return { column: column, desc: desc === true }
+      if (column !== null && String(column).toLowerCase() === name.toLowerCase()) {
+        return { column: column, desc: !(desc === true) }
+      }
+      return { column: name, desc: false }
+    }
+
     function explorerPathForKind(meta, kind) {
       const name = meta.files.filter((f) => f.indexOf('_DF_' + kind + '.csv') !== -1)[0]
       return name === undefined ? null : meta.resultDir + '/' + name
@@ -1951,6 +2051,49 @@ module.exports = {
         meta: aclfCardMeta(block),
         args: aclfCallArgs(block),
         text: toolResultText(block),
+        sessionId: props === null || props === undefined ? undefined : props.sessionId,
+        callRemote: props === null || props === undefined ? undefined : props.callRemote,
+        openFile: props === null || props === undefined ? undefined : props.openFile,
+      })
+    }
+
+    // The CA card reuses the ACLF explorer for its single Contingency result: the
+    // contingency CSV is what the tab's own Contingency tab pages through, so the same
+    // `interpss/readCsv` endpoint serves both.
+    function caCardMeta(block) {
+      if (block === null || block === undefined) return null
+      if (!('kind' in block)) return null
+      if (block.isError === true) return null
+      const meta = block.meta
+      if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return null
+      if (meta.ok !== true) return null
+      if (typeof meta.resultDir !== 'string' || meta.resultDir === '') return null
+      if (typeof meta.contingencyCsv !== 'string' || meta.contingencyCsv === '') return null
+      return {
+        case: typeof meta.case === 'string' ? meta.case : '',
+        resultDir: meta.resultDir,
+        files: [meta.contingencyCsv],
+      }
+    }
+
+    const CA_EXPLORER_KINDS = [{ kind: 'contingency', label: 'Contingency' }]
+
+    function CaResultCard(props) {
+      const block = props === null || props === undefined ? null : props.block
+      const settled = block !== null && block !== undefined && ('kind' in block)
+      return React.createElement(AclfResultPanel, {
+        settled: settled,
+        isError: settled && block.isError === true,
+        meta: caCardMeta(block),
+        args: aclfCallArgs(block),
+        text: toolResultText(block),
+        kinds: CA_EXPLORER_KINDS,
+        rowLabel: 'Explore result',
+        label: 'InterPSS contingency analysis',
+        showReport: false,
+        // Overload rows are only useful worst-first; the header stays clickable to flip it.
+        defaultSort: 'LoadingPercent',
+        defaultSortDesc: true,
         sessionId: props === null || props === undefined ? undefined : props.sessionId,
         callRemote: props === null || props === undefined ? undefined : props.callRemote,
         openFile: props === null || props === undefined ? undefined : props.openFile,
@@ -2020,6 +2163,7 @@ module.exports = {
     // The script result is short: the applied script, the model digest with its load/gen
     // deltas, the script's return value or its stdout, and the failure with its line.
     const RunGvyCard = toolTextCard('InterPSS run script')
+    // CA result is a short text block too: threshold, counts, inputs, result file.
 
     // The chat report *is* the summary, so no `interpss_case_summary` card is shown:
     // every settled, successful block renders nothing at all, whichever scope it is.
@@ -2041,10 +2185,23 @@ module.exports = {
       return String(casePath).slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
     }
 
+    // Shared by the ACLF card and the CA card: the CA card passes a single Contingency
+    // scope and no Report button, everything else (paging, scroll, error handling) is
+    // the same machinery.
     function AclfResultPanel(props) {
       const meta = props.meta
       const callRemote = props.callRemote
       const sessionId = props.sessionId
+      const kinds = Array.isArray(props.kinds) && props.kinds.length > 0 ? props.kinds : EXPLORER_KINDS
+      const rowLabel = typeof props.rowLabel === 'string' && props.rowLabel !== '' ? props.rowLabel : 'Explore results'
+      const cardLabel = typeof props.label === 'string' && props.label !== '' ? props.label : 'InterPSS AC load flow'
+      const showReport = props.showReport !== false
+      // The Host sorts before slicing the page, so an opened scope can start sorted (the
+      // CA card opens worst-loading-first) and a header click re-reads page 0 sorted.
+      const [sortColumn, setSortColumn] = React.useState(
+        typeof props.defaultSort === 'string' && props.defaultSort !== '' ? props.defaultSort : null,
+      )
+      const [sortDesc, setSortDesc] = React.useState(props.defaultSortDesc === true)
       const [kind, setKind] = React.useState(null)
       const [header, setHeader] = React.useState(null)
       const [rows, setRows] = React.useState([])
@@ -2087,19 +2244,26 @@ module.exports = {
         )
       }
 
-      function openKind(next) {
+      // Read page 0 of one scope with the given sort. The response reports the sort the
+      // Host actually applied, so a column it could not find leaves the UI honest.
+      function loadScope(scopeKind, sort) {
         setHeader(null)
         setRows([])
         setTotal(0)
         setHasMore(false)
         setError(null)
-        if (kind === next) { setKind(null); return }
-        setKind(next)
         if (meta === null) { setError('result metadata is unavailable for this card'); return }
-        const path = explorerPathForKind(meta, next)
-        if (path === null) { setError('result file not found for ' + next); return }
+        const path = explorerPathForKind(meta, scopeKind)
+        if (path === null) { setError('result file not found for ' + scopeKind); return }
         setLoading(true)
-        callRemote('readCsv', { path: path, sessionId: sessionId, start: 0, limit: EXPLORER_PAGE }).then(
+        callRemote('readCsv', {
+          path: path,
+          sessionId: sessionId,
+          start: 0,
+          limit: EXPLORER_PAGE,
+          sortColumn: sort === null || sort === undefined ? null : sort.column,
+          sortDesc: sort === null || sort === undefined ? false : sort.desc === true,
+        }).then(
           (res) => {
             setLoading(false)
             if (res && res.ok) {
@@ -2107,12 +2271,37 @@ module.exports = {
               setRows(res.rows || [])
               setTotal(res.totalRows || 0)
               setHasMore(!!res.hasMore)
+              setSortColumn(typeof res.sortColumn === 'string' && res.sortColumn !== '' ? res.sortColumn : null)
+              setSortDesc(res.sortDesc === true)
             } else {
-              setError(res && res.error ? res.error : 'failed to read the ' + next + ' results')
+              setError(res && res.error ? res.error : 'failed to read the ' + scopeKind + ' results')
             }
           },
           (err) => { setLoading(false); setError(String(err && err.message ? err.message : err)) },
         )
+      }
+
+      function openKind(next) {
+        if (kind === next) {
+          setKind(null)
+          setHeader(null)
+          setRows([])
+          setTotal(0)
+          setHasMore(false)
+          setError(null)
+          return
+        }
+        setKind(next)
+        loadScope(next, { column: sortColumn, desc: sortDesc })
+      }
+
+      // Sort by a header cell: same column flips the direction, a new column starts
+      // ascending, and an open table re-reads its first page in the new order.
+      function changeSort(clicked) {
+        const next = nextCsvSort(sortColumn, sortDesc, clicked)
+        setSortColumn(next.column)
+        setSortDesc(next.desc)
+        if (kind !== null) loadScope(kind, next)
       }
 
       function loadMore() {
@@ -2121,7 +2310,14 @@ module.exports = {
         if (path === null) return
         loadingMoreRef.current = true
         setLoadingMore(true)
-        callRemote('readCsv', { path: path, sessionId: sessionId, start: rows.length, limit: EXPLORER_PAGE }).then(
+        callRemote('readCsv', {
+          path: path,
+          sessionId: sessionId,
+          start: rows.length,
+          limit: EXPLORER_PAGE,
+          sortColumn: sortColumn,
+          sortDesc: sortDesc,
+        }).then(
           (res) => {
             loadingMoreRef.current = false
             setLoadingMore(false)
@@ -2169,30 +2365,38 @@ module.exports = {
             fontWeight: 600,
             color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-secondary)',
           },
-        }, (failed ? 'InterPSS AC load flow failed' : 'InterPSS AC load flow') +
+        }, (failed ? cardLabel + ' failed' : cardLabel) +
           (caseLabel === '' ? '' : ' — ' + caseLabel) +
           (props.settled === true ? '' : ' · running…')))
       }
       if (meta !== null) {
-        children.push(React.createElement('div', { key: 'head', style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginTop: '8px' } },
-          React.createElement('span', { key: 'explore', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, 'Explore results'),
-          EXPLORER_KINDS.map((entry) => React.createElement('button', {
+        const head = [
+          React.createElement('span', { key: 'explore', style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-secondary)' } }, rowLabel),
+          ...kinds.map((entry) => React.createElement('button', {
             key: entry.kind,
             onClick: () => openKind(entry.kind),
             style: { ...smallBtn, borderColor: kind === entry.kind ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' },
           }, entry.label)),
-          React.createElement('span', {
-            key: 'sep',
-            style: { width: '1px', alignSelf: 'stretch', margin: '2px 4px', background: 'var(--dsw-alias-border-l1)' },
-          }),
-          React.createElement('button', {
-            key: 'report',
-            onClick: generateReport,
-            disabled: reportRunning,
-            title: 'Generate the AC Loadflow report from this run',
-            style: { ...smallBtn, opacity: reportRunning ? 0.6 : 1 },
-          }, reportRunning ? 'Generating…' : 'Report'),
-        ))
+        ]
+        if (showReport) {
+          head.push(
+            React.createElement('span', {
+              key: 'sep',
+              style: { width: '1px', alignSelf: 'stretch', margin: '2px 4px', background: 'var(--dsw-alias-border-l1)' },
+            }),
+            React.createElement('button', {
+              key: 'report',
+              onClick: generateReport,
+              disabled: reportRunning,
+              title: 'Generate the AC Loadflow report from this run',
+              style: { ...smallBtn, opacity: reportRunning ? 0.6 : 1 },
+            }, reportRunning ? 'Generating…' : 'Report'),
+          )
+        }
+        children.push(React.createElement('div', {
+          key: 'head',
+          style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '6px', marginTop: '8px' },
+        }, head))
       }
       if (kind !== null) {
         const status = error !== null
@@ -2211,7 +2415,16 @@ module.exports = {
           onScroll: handleTableScroll,
         }, React.createElement('table', { style: { ...tableStyle, marginTop: 0 } },
           React.createElement('thead', null,
-            React.createElement('tr', null, headerCols.map((h, i) => React.createElement('th', { key: i, style: thStyle }, h)))),
+            React.createElement('tr', null, headerCols.map((h, i) => {
+              const label = String(h).trim()
+              const active = sortColumn !== null && String(sortColumn).toLowerCase() === label.toLowerCase()
+              return React.createElement('th', {
+                key: i,
+                onClick: () => changeSort(label),
+                title: 'Sort by ' + label,
+                style: { ...thStyle, cursor: 'pointer', userSelect: 'none' },
+              }, h + (active ? (sortDesc ? ' \u25bc' : ' \u25b2') : ''))
+            }))),
           React.createElement('tbody', null,
             rows.map((line, ri) => React.createElement('tr', { key: ri },
               String(line).split(',').map((cell, ci) => React.createElement('td', { key: ci, style: tdStyle }, formatValue(cell)))))),
@@ -2256,6 +2469,15 @@ module.exports = {
     slots.inject('tool.call.toolview', () => slots.register(
       { name: 'tool.call.toolview', key: 'interpss_run_gvy' },
       (props) => React.createElement(RunGvyCard, { block: props && props.block }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_run_ca' },
+      (props) => React.createElement(CaResultCard, {
+        block: props && props.block,
+        sessionId: props && props.sessionId,
+        callRemote: callRemote,
+        openFile: props && props.openFile,
+      }),
     ))
   },
 }

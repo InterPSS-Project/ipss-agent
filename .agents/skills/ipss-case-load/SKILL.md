@@ -1,8 +1,8 @@
 ---
 name: ipss-case-load
-description: Use when asked to load a power-system simulation case into the embedded InterPSS bridge — the case selected in the InterPSS tab, or a named IEEE CDF / PSS/E RAW case — and to report its active bus and branch counts, including switching the bridge to a different case.
+description: Use when asked to load a power-system simulation case into the embedded InterPSS bridge — the case selected in the InterPSS tab, or a named IEEE CDF / PSS/E RAW case — and to report its active bus and branch counts, including switching the bridge to a different case, re-parsing the held case from disk ("reload"), and loading with a Groovy .gvy script applied in the same call.
 metadata:
-  short-description: Load a simulation case
+  short-description: Load a simulation case, optionally with a .gvy script
 ---
 
 # InterPSS Case Load
@@ -13,6 +13,10 @@ chat works on until another case replaces it.
 
 Loading **parses the case into the model and caches it** — it does not solve anything. Follow with
 `$ipss-case-aclf` when solved values are needed.
+
+A load request may also name a **Groovy script** — "reload this case and run `x.gvy`", or a call
+carrying a `.gvy` path. That is the scripted-reset form of the same step, not `interpss_case_load`:
+see **Loading with a script (reload + apply)** below.
 
 ## Preferred path (DeepSeek Harness)
 
@@ -56,6 +60,52 @@ Anything else fails with `unrecognized case selector …` before the bridge is t
 | `error` | Set instead of the above when the load failed |
 
 A large case (PSS/E 2K-bus and up) takes seconds to parse; the call is otherwise instant.
+
+### Loading with a script (reload + apply)
+
+`interpss_case_load` takes a **case** selector only and cannot force a re-parse: on a case the bridge
+already holds it answers `alreadyLoaded: true` and touches nothing. When the request names a `.gvy`
+file, or asks to **reload** the case, the step is a scripted reset instead:
+
+```
+interpss_run_gvy({ case: 'data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee',
+                   script: 'ieee14_adjBus1314Q_0p89to0p90.gvy',
+                   reload: true })
+```
+
+`reload: true` re-parses the case **from disk** before the script is evaluated, so one call does both
+halves: a fresh model — the stored, unedited case, replacing any solved state or earlier script edit
+the bridge was holding — plus the script's edit on top of it. The script is resolved inside the
+resolved case's `scripts/` folder, so pass `case` whenever the tab selection is not the case that owns
+the script.
+
+Reading a call that carries a script path:
+
+- `@wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/ieee14_adjBus1314Q_0p89to0p90.gvy` → case
+  `data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee` (the `.ieee` / `.RAW` file in the folder **above**
+  `scripts/`), script `ieee14_adjBus1314Q_0p89to0p90.gvy`.
+- A bare `x.gvy` → the script in the resolved case's `scripts/` folder (argument → tab → bridge), so
+  name `case` explicitly when the tab selection may differ.
+- If that folder holds no case file, or several, do not guess — pass `case` explicitly or ask.
+
+A `.gvy` path is never a valid `case` selector: `interpss_case_load` refuses it with
+`unrecognized case selector …` before the bridge is touched.
+
+**Re-parse with no edit.** `interpss_run_gvy` always requires a script, so pass a one-line read-only
+probe and read the state it prints back:
+
+```
+interpss_run_gvy({ case: '…', reload: true,
+  script: "println 'Q13=' + aclfnet.getBus('Bus13').loadQ + ' solved=' + aclfnet.isLfConverged()" })
+```
+
+**After the call** the model is the freshly parsed case plus the script's edit — still **unsolved**
+unless the script solves it itself (some adjuster scripts run their own load flow). Follow with
+`$ipss-case-aclf` when solved values are needed. The card carries the script, the case and its
+`source`, the load/generation delta and the script's return value or stdout; do not restate it.
+
+The full script contract — file vs inline source, the `wspace/script/` fixtures folder, the array
+form, the 20-script limit — belongs to `$ipss-case-script`.
 
 ## What loading does — and what it destroys
 
@@ -101,6 +151,7 @@ a one-line confirmation. Add prose only when the caller needs something the card
 | Show the loaded case's network info, without solving | `interpss_network_info` |
 | Solve the loaded case and write result CSVs | `interpss_run_aclf` |
 | Apply a scenario edit to the loaded case | `interpss_run_gvy` |
+| Re-parse the held case from disk, optionally applying a `.gvy` in the same call | `interpss_run_gvy({ script: '…', reload: true })` |
 | Summarize the loaded case | `interpss_case_summary` |
 
 The other tools load on demand, so a missing step 0 costs an extra parse, not a failure.
@@ -130,7 +181,9 @@ CLI invocation re-parses the case.
 |---|---|
 | `unrecognized case selector` | Use a `data/…` (or `wspace/data/…`) path, an absolute path containing `/wspace/data/`, or one of the three preset labels |
 | `no simulation case is selected` | Nothing is in the tab and the bridge is empty — pass `case` explicitly |
-| `alreadyLoaded: true` when a re-parse was wanted | The tool reuses the held model by design; use the tab's **Load** button, or `interpss_run_gvy({ reload: true })` for a scripted reset |
+| `alreadyLoaded: true` when a re-parse was wanted | The tool reuses the held model by design — it cannot re-parse. Use the tab's **Load** button, or `interpss_run_gvy({ script: '…', reload: true })`, which is also how a load is combined with a script |
+| A `.gvy` path passed as `case` | A script is not a case: `interpss_case_load` answers `unrecognized case selector`. Name the case (the `.ieee` / `.RAW` above `scripts/`) and pass the script to `interpss_run_gvy` separately |
+| `script not found: … (no .gvy files there)` | The **case folder** in that path does not exist — it was renamed or moved, so its `scripts/` folder is missing too. Check `wspace/data/…` for the current folder name and pass that case; on a folder that exists the message instead lists the `.gvy` files it holds |
 | The loaded case is not the one expected | Trust `source`: `selection` is the tab, `argument` is what you passed; pass `case` to be explicit |
 | A solved state or a script edit vanished | Another case was loaded (by this tool or the tab), which replaced the held model; re-apply the edit and re-solve |
 | `InterPSS is not available in this workspace` | The workspace `README.md` first heading must be exactly `iPSS Agent` |
@@ -141,6 +194,7 @@ CLI invocation re-parses the case.
 
 - `$ipss-case-info` — network info of the loaded case (base case, or solved after an ACLF run)
 - `$ipss-case-aclf` — solve the loaded case and write the result files
-- `$ipss-case-script` — apply a Groovy scenario edit to the loaded case
+- `$ipss-case-script` — the script contract (file vs inline source, `wspace/script/` fixtures, array
+  form, inline bounds) and the reload + apply pattern used to load a case together with a script
 - `$ipss-case-summary` — summarize the loaded case
 - [docs/interpss-tools.md](../../../docs/interpss-tools.md) — the `interpss_case_load` tool contract and the case-resolution rules

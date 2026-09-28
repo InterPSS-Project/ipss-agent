@@ -41,7 +41,15 @@ The InterPSS tab only enables its tools when the workspace `README.md` first `#`
 
 ## InterPSS DSH GUI Tab
 
-Open the iPSS Agent folder as a workspace in DSH. You can then run the power system simulation workflow or chat following the DSH plugin user guide.
+Open the iPSS Agent folder as a workspace in DSH. Create a new chat session under the workspace, select the Creater mode (recommended), prompt the following ipss-case-aclf command to run a sample AC Loadflow:
+
+```text
+/ipss-case-aclf @<ieee14.ieee>
+```
+
+![InterPSS DSH Start](../image/ipss-dsh-chat-start.png)
+
+You can then run the power system simulation workflow or chat following the procedures below.
 
 ### Open the InterPSS tab
 
@@ -121,7 +129,7 @@ Click the gear button next to **ACLF** (enabled after **Load**). The dialog titl
 
 **Where options are stored:**
 
-- **Save** writes the case-folder file `wspace/<case-parent>/aclf_run.json` (same folder as the case file).
+- **Save** writes the case-folder file `wspace/<case-parent>/config/aclf_run.json`.
 - ACLF runs prefer that case-folder file when it exists; otherwise they use the project default `config/aclf_run.json`.
 - Chat ACLF (`interpss_run_aclf`) uses the same two-tier rule.
 
@@ -215,13 +223,15 @@ From the bus table context menu (**Connection info**), or by navigating from Gen
 
 #### Run Contingency Analysis dialog
 
-The dialog has two sections. Each can use a built-in default or a user-defined `.json` from the case folder:
+The dialog shows the **Over Loading Threshold(%)** field at the top, then the two sections. Each
+section can use a built-in default or a user-defined `.json` from the case folder:
 
 
-| Section                         | Default                        | Custom                                                                       |
-| ------------------------------- | ------------------------------ | ---------------------------------------------------------------------------- |
-| **Define Contingency Branches** | Consider all N-1 contingencies | User-defined contingency — pick a `.json` with a `contingencies` array       |
-| **Define Monitored Branches**   | Monitor all branches           | Monitor selected branches — pick a `.json` with a `monitored_branches` array |
+| Field / Section                 | Default                        | Custom                                                                                                                  |
+| ------------------------------- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| **Over Loading Threshold(%)**   | `90`                           | Any percentage `0 < t <= 1000` — a branch whose post-contingency loading reaches it is reported as an overload (0.4.6+) |
+| **Define Contingency Branches** | Consider all N-1 contingencies | User-defined contingency — pick a `.json` with a `contingencies` array                                                  |
+| **Define Monitored Branches**   | Monitor all branches           | Monitor selected branches — pick a `.json` with a `monitored_branches` array                                            |
 
 
 For a custom pick:
@@ -230,16 +240,18 @@ For a custom pick:
 - A green line shows the entry count (for example `User-defined contingencies: 2359 (…json)`).
 - Invalid or missing shape shows a red error; **OK** stays blocked until custom picks are valid.
 
-**Starting values:** if the case folder already has `ca_run.json`, the dialog loads it. Otherwise it suggests companion files by name (filenames containing `contingenc` / `monitor`) when present.
+**Starting values:** if the case folder already has `config/ca_run.json`, the dialog loads it (including `overloadThreshold`; a file without that key — or no file at all — starts at `90`). Otherwise it suggests companion files by name (filenames containing `contingenc` / `monitor`) when present.
+
+An out-of-range threshold blocks **OK** with `over loading threshold must be a percentage between 0 and 1000`.
 
 
-| Button         | Effect                                                                   |
-| -------------- | ------------------------------------------------------------------------ |
-| **OK**         | Saves `wspace/<case-parent>/ca_run.json`, closes the dialog, and runs CA |
-| **Cancel** / ✕ | Closes without writing or running                                        |
+| Button         | Effect                                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| **OK**         | Saves `wspace/<case-parent>/config/ca_run.json` — the over loading threshold and both section choices (0.4.7+), closes the dialog, and runs CA |
+| **Cancel** / ✕ | Closes without writing or running                                                                                                              |
 
 
-`ca_run.json` is the same file the Java CLI reads for CA, so GUI and batch runs stay aligned.
+`config/ca_run.json` is the same file the Java CLI reads for CA, so GUI and batch runs stay aligned.
 
 On success:
 
@@ -303,11 +315,12 @@ For the full tool contract (inputs, cards, version history), see [interpss-tools
 | Load the selected (or named) case | `Load the IEEE 118-bus case` / `Load the selected InterPSS case` | `$ipss-case-load` / `interpss_case_load`       |
 | Network info                      | `Show network info for the current case`                         | `$ipss-case-info` / `interpss_network_info`    |
 | Run AC load flow                  | `Run ACLF on the selected case`                                  | `$ipss-case-aclf` / `interpss_run_aclf`        |
+| Adjust load Q to a voltage band   | `Adjust Bus14 load Q to bring it into [0.89, 0.90] pu`           | `$ipss-case-aclf-adjust` / `interpss_run_gvy` + `interpss_run_aclf` |
 | Case summary / top-N              | `Summarize the current case` / `Find the lowest voltage buses`   | `$ipss-case-summary` / `interpss_case_summary` |
 | What-if scenario script           | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve`             | `$ipss-case-script` / `interpss_run_gvy`       |
 
 
-Slash / skill forms (Claude Code style): `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-summary`, `$ipss-case-script`. Plain natural language works the same when the agent picks those tools.
+Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`. Plain natural language works the same when the agent picks those tools.
 
 ### Case selection
 
@@ -373,6 +386,8 @@ Important:
 - Loading a **different** case replaces the held model — any prior ACLF solution or script edits on the old case are gone.
 - Only run scripts you trust.
 
+To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bus14 / Bus13 examples), see [loadflow-adjustment-user-guide.md](loadflow-adjustment-user-guide.md).
+
 
 
 ### Chat vs InterPSS tab vs batch Chat
@@ -392,7 +407,7 @@ Important:
 ### Tips
 
 - Prefer naming the case when the tab selection might be stale (`source` in the tool result tells you: `argument`, `selection`, or `bridge`).
-- ACLF options still come from the case-folder `aclf_run.json` when present, otherwise `config/aclf_run.json` (same as the tab gear dialog).
+- ACLF options still come from the case-folder `config/aclf_run.json` when present, otherwise `config/aclf_run.json` (same as the tab gear dialog).
 - Large PSS/E cases (for example Texas 2K) can take minutes in Chat ACLF — wait for the tool card to settle.
 - If a tool says the bridge is unavailable, rebuild the uber JAR and restart `dsh web` (see [Setup.md](../../Setup.md) / `scripts/setup-java-bridge.sh`).
 - Very large cases need enough JVM heap; the plugin bridge uses `-Xmx8g` (0.3.20+).

@@ -149,13 +149,17 @@ return {
       return i >= 0 ? 'data/' + String(absPath).slice(i + marker.length) : String(absPath)
     }
 
-    // Case-specific aclf_run.json wins (same folder as the case), then the
+    function wspaceJoin(parent, name) {
+      return parent === '' ? name : parent + '/' + name
+    }
+
+    // Case-specific config/aclf_run.json wins (under the case folder), then the
     // project default config/aclf_run.json.
     async function resolveAclfConfigPath(root, caseInput) {
       const fs = ctx.get('fs')
       if (fs === undefined) return root + '/config/aclf_run.json'
       const { parent } = caseParts(caseInput)
-      const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+      const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
       const defCfg = root + '/config/aclf_run.json'
       try {
         const target = await fs.resolve(caseCfg)
@@ -166,10 +170,10 @@ return {
     }
 
     // ---------------------------------------------------------------------
-    // Contingency-analysis run config (ca_run.json)
+    // Contingency-analysis run config (config/ca_run.json)
     // ---------------------------------------------------------------------
-    // Written beside aclf_run.json in the case folder by the CA dialog and read
-    // by runCa. Contingency inputs are case-specific, so there is no
+    // Written beside config/aclf_run.json under the case folder by the CA dialog
+    // and read by runCa. Contingency inputs are case-specific, so there is no
     // project-level default: an absent file falls back to the per-case
     // suggestion below, which reproduces the filename discovery the CA run has
     // always used.
@@ -185,16 +189,12 @@ return {
     // parsing every .json in the case folder; skip absurd ones.
     const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
 
-    function wspaceJoin(parent, name) {
-      return parent === '' ? name : parent + '/' + name
-    }
-
     function caConfigPath(root, parent) {
-      return root + '/wspace/' + wspaceJoin(parent, 'ca_run.json')
+      return root + '/wspace/' + wspaceJoin(parent, 'config/ca_run.json')
     }
 
     function caConfigRel(parent) {
-      return wspaceJoin(parent, 'ca_run.json')
+      return wspaceJoin(parent, 'config/ca_run.json')
     }
 
     // Case-folder .json files that can be contingency inputs: our own two
@@ -959,7 +959,7 @@ return {
         let cfgPath = defCfg
         if (caseInput !== '') {
           const { parent } = caseParts(caseInput)
-          const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+          const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
           try {
             const target = await fs.resolve(caseCfg)
             const info = await fs.stat(target)
@@ -991,7 +991,7 @@ return {
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
         if (caseInput === '') return { ok: false, error: 'no case selected' }
         const { parent } = caseParts(caseInput)
-        const caseCfg = root + '/wspace/' + parent + '/aclf_run.json'
+        const caseCfg = root + '/wspace/' + wspaceJoin(parent, 'config/aclf_run.json')
         try {
           const target = await fs.resolve(caseCfg)
           await fs.writeText(target, JSON.stringify(config, null, 2) + '\n')
@@ -1077,7 +1077,7 @@ return {
         return { ok: true, config: validated.config, source: 'case', path: cfgRel }
       },
 
-      // Persist the dialog's configuration as <case folder>/ca_run.json.
+      // Persist the dialog's configuration as <case folder>/config/ca_run.json.
       async saveCaOptions(args) {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
