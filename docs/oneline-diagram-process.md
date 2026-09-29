@@ -17,6 +17,14 @@ Build an IEEE 14-bus power-grid **one-line diagram** in draw.io from bus/branch 
 1. **Community connector (later removed):** `next-ai-draw-io` — create/edit/export session in draw.io (`user-drawio`).
 2. **Official Draw.io MCP (kept):** `@drawio/mcp` as `user-drawio-official` — `list_pages` / `get_page` / `set_page`, open XML/CSV/Mermaid in the editor.
 3. Box workspace files under `/workspace/` (e.g. `ieee14-oneline.drawio`), then copy to the Mac via `CopyFromBox` → `Downloads/`.
+4. **In-app preview (since plugin 0.6.1):** the InterPSS tab's **Diagram** button lists the
+   workspace's `.drawio` files (`wspace/template/ieee14-oneline.drawio` included) and renders the
+   selected one as inline SVG in a modal, with a **Source** toggle for the raw XML — no browser
+   round-trip and no MCP call. The renderer is approximate by design (rounded rectangles, ellipses,
+   text labels, orthogonal edges); open the file in draw.io when exact geometry matters. Since
+   **0.6.2** the preview also pans (drag), zooms about the cursor (wheel, 0.1x–12x) and fits the
+   whole diagram (**Fit**), with a live zoom percentage in the header. See
+   [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md) for the implementation notes.
 
 ## Workflow
 

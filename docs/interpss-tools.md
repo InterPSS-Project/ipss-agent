@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.5.1**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.6.3**.
 
 ## Tool surface
 
@@ -600,6 +600,9 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.4.1 | `interpss_run_ca`: DC contingency analysis from chat with the CA dialog bypassed (explicit inputs → `ca_run.json` → case-folder discovery → N-1 defaults), plus its card and the `ipss-case-ca` skill |
 | 0.4.0 | Version-only release: the first 0.4.x, carrying 0.3.17–0.3.23 unchanged (the `interpss_run_gvy` tool and its skill, the `ipss-case-load` skill, `wspace/…` selector spellings, the Simu Case picker + `✓ Loaded:` sync, `-Xmx8g`, and the load card's confirmation line) |
 | 0.5.1 | The connection modal renders three full-precision columns to four decimals — `PFrom2To` and `QFrom2To` on the Branch tab (source columns 19/20) and `QGen` on the Gen tab (column 12): `renderConnTable` takes a per-source-column `decimals` map and routes those cells through the existing `formatValue`, so an already-short column stays exactly as the Host sent it |
+| 0.6.0 / 0.6.1 | The tab's **Diagram** button: it lists the workspace's `.drawio` files over `listDrawioFiles` / `readDrawio` and renders the chosen one as inline SVG with a **Rendered / Source** toggle — no frames (the preview CSP forbids them) and no MCP call. `diagramXmlFrom` accepts plain XML and draw.io's `base64(raw-deflate(uri-encoded))`; `parseDrawioScene` resolves geometry down the parent chain and skips `group` containers. 0.6.0 shipped a render-time ordering defect (the focus effect above its own state) that blanked the whole tab — silent, since the failure is entirely client-side — and 0.6.1 moved the effect below the state it reads |
+| 0.6.2 | Diagram **pan / zoom / fit**: the wheel zooms about the cursor (0.1x–12x), dragging pans, **Fit** returns to the scene viewBox, and the header shows the live percentage. The wheel listener is native and non-passive so `preventDefault` holds, and the cursor anchor is computed through the letterbox `xMidYMid meet` actually draws. The guard suite grows to 55 checks: §5 exercises the zoom/pan math, §7 asserts statically that no `useEffect` reads a binding declared below it, and §8 renders the modal *open* — nothing did before, so a reference error in the toolbar could ship |
+| 0.6.3 | The dynamic and persistent plugins are put back **in sync**, and a guard keeps them there: the dynamic body had never received the sortable CSV headers (`csvHeaderCell` + the sort flow) or the CA **Over Loading Threshold(%)** field, and dynamic `client.js` lacked the 0.5.1 connection-table `decimals`. Both halves now carry both features — `applyCsvSort` byte-identical in both hosts, `readCsv` sorting the whole file before slicing a page, `overloadThreshold` validated and round-tripped through `config/ca_run.json`. `nextCsvSort` moved out of the persistent-only tool-card region into the shared body (hoisting had hidden that dependency), and the guard's §9 fails on any drift beyond the documented transport/timer swap. Chat tools stay persistent-only: the dynamic Host is an injected body with no imports, so it cannot carry `node:fs` helpers |
 
 ## Troubleshooting
 

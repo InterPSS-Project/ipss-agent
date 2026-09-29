@@ -61,7 +61,7 @@ async function writeConfigText(fs, target, text, directPath) {
 
 const NAMESPACE = 'interpss'
 const PACKAGE = '@deepseek-ai/dsh-interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio']
 
 function jsonParam(name, wire) {
   return { name, wire, source: 'json', codec: { mode: 'src-json' } }
@@ -739,7 +739,7 @@ async function caEntryCheck(ctx, root, value) {
   return { ok: true, exists: exists }
 }
 
-// Normalise an untrusted config payload to the four known keys. Modes must be
+// Normalise an untrusted config payload to the five known keys. Modes must be
 // exactly 'all' | 'custom'; a custom mode must name a file, which must exist
 // when `requireFiles` is set.
 async function validateCaConfig(ctx, root, value, requireFiles) {
@@ -829,6 +829,42 @@ async function scanCases(fs, dirTarget, relDir, out) {
     } else if (entry.type === 'file') {
       if (/\.ieee$/i.test(entry.name)) out.push({ path: rel, format: 'ieee' })
       else if (/\.raw$/i.test(entry.name)) out.push({ path: rel, format: 'psse' })
+    }
+  }
+}
+
+// Recursive `.drawio` discovery for the tab's Diagram picker. Unlike scanCases —
+// which only walks wspace/data — this walks the whole workspace, so it skips the
+// heavy or irrelevant trees and caps both recursion depth and result count.
+const DRAWIO_SKIP_DIRS = new Set([
+  'node_modules', '.git', 'target', 'build', 'logs', 'temp', '.venv', '.mvn',
+  '.npm-cache-local', 'interpss-persistent.local-backup',
+])
+const MAX_DRAWIO_FILES = 200
+const MAX_DRAWIO_DEPTH = 6
+const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
+
+async function scanDrawio(fs, dirTarget, relDir, out, depth) {
+  if (depth > MAX_DRAWIO_DEPTH || out.length >= MAX_DRAWIO_FILES) return
+  let entries
+  try {
+    entries = await fs.listDir(dirTarget)
+  } catch (e) {
+    return
+  }
+  for (const entry of entries) {
+    if (out.length >= MAX_DRAWIO_FILES) return
+    const rel = relDir === '' ? entry.name : relDir + '/' + entry.name
+    if (entry.type === 'directory') {
+      if (entry.name.charAt(0) === '.' || DRAWIO_SKIP_DIRS.has(entry.name)) continue
+      await scanDrawio(fs, entry.target, rel, out, depth + 1)
+    } else if (entry.type === 'file' && /\.drawio$/i.test(entry.name)) {
+      let size = null
+      try {
+        const info = await fs.stat(entry.target)
+        size = info && typeof info.size === 'number' ? info.size : null
+      } catch (e) {}
+      out.push({ path: rel, size: size })
     }
   }
 }
@@ -1112,6 +1148,63 @@ class InterpssService extends TypertRemoteService {
     await scanCases(fs, dataTarget, 'data', out)
     out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     return { ok: true, cases: out }
+  }
+
+  // The tab's Diagram picker: every .drawio in the workspace, as workspace-relative
+  // paths, so `readDrawio` can take one straight back. A missing or unreadable root
+  // is an empty list, not an error.
+  async listDrawioFiles(input) {
+    const fs = this.ctx.get('fs')
+    if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+    let target
+    try {
+      target = await fs.resolve(root)
+    } catch (e) {
+      return { ok: false, error: 'cannot resolve the workspace root' }
+    }
+    const out = []
+    await scanDrawio(fs, target, '', out, 0)
+    out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+    return { ok: true, files: out }
+  }
+
+  // Read one .drawio as text for the client-side renderer. The whitelist is the same
+  // shape as readCsv's, plus an explicit `..` rejection, and the size check happens
+  // before the read so an oversized file never reaches the RPC payload.
+  async readDrawio(input) {
+    const fs = this.ctx.get('fs')
+    if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+    const path = input && typeof input.path === 'string' ? input.path : ''
+    if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-\/]*\.drawio$/i.test(path) || path.indexOf('..') !== -1) {
+      return { ok: false, error: 'Invalid diagram path: ' + path }
+    }
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+    let target
+    try {
+      target = await fs.resolve(root + '/' + path)
+    } catch (e) {
+      return { ok: false, error: 'cannot resolve diagram: ' + path }
+    }
+    let size = null
+    try {
+      const info = await fs.stat(target)
+      size = info && typeof info.size === 'number' ? info.size : null
+    } catch (e) {
+      return { ok: false, error: 'cannot stat diagram: ' + path }
+    }
+    if (size !== null && size > MAX_DRAWIO_BYTES) {
+      return { ok: false, error: 'diagram too large (' + size + ' bytes; limit ' + MAX_DRAWIO_BYTES + ')' }
+    }
+    let xml
+    try {
+      xml = await fs.readText(target)
+    } catch (e) {
+      return { ok: false, error: 'cannot read diagram: ' + path }
+    }
+    return { ok: true, path: path, xml: String(xml), size: size }
   }
 
   async readCsv(input) {

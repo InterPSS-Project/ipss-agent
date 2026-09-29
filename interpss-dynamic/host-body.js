@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -86,6 +86,78 @@ async function scanCases(fs, dirTarget, relDir, out) {
     } else if (entry.type === 'file') {
       if (/\.ieee$/i.test(entry.name)) out.push({ path: rel, format: 'ieee' })
       else if (/\.raw$/i.test(entry.name)) out.push({ path: rel, format: 'psse' })
+    }
+  }
+}
+
+// Recursive `.drawio` discovery for the tab's Diagram picker. Unlike scanCases —
+// which only walks wspace/data — this walks the whole workspace, so it skips the
+// heavy or irrelevant trees and caps both recursion depth and result count. The
+// join is inline because this helper is module-level while wspaceJoin is not.
+const DRAWIO_SKIP_DIRS = new Set([
+  'node_modules', '.git', 'target', 'build', 'logs', 'temp', '.venv', '.mvn',
+  '.npm-cache-local', 'interpss-persistent.local-backup',
+])
+const MAX_DRAWIO_FILES = 200
+const MAX_DRAWIO_DEPTH = 6
+const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
+
+// Sort CSV data rows by one header column. Numeric when every non-empty value in that
+// column parses as a finite number (LoadingPercent, flows, ratings), lexicographic
+// otherwise. An unknown column is not an error: the caller gets the file order back and
+// `column: null`, so a UI can avoid claiming a sort it did not get.
+function applyCsvSort(rows, header, column, desc) {
+  const names = String(header).split(',')
+  const wanted = typeof column === 'string' ? column.trim().toLowerCase() : ''
+  if (wanted === '') return { rows: rows, column: null, desc: false }
+  const index = names.findIndex((name) => name.trim().toLowerCase() === wanted)
+  if (index < 0) return { rows: rows, column: null, desc: false }
+  const valueOf = (line) => {
+    const cells = String(line).split(',')
+    return index < cells.length ? cells[index].trim() : ''
+  }
+  const numeric = rows.every((line) => {
+    const value = valueOf(line)
+    return value === '' || Number.isFinite(Number(value))
+  })
+  const compare = (a, b) => {
+    const left = valueOf(a)
+    const right = valueOf(b)
+    let result
+    if (numeric) {
+      const l = left === '' ? Number.NEGATIVE_INFINITY : Number(left)
+      const r = right === '' ? Number.NEGATIVE_INFINITY : Number(right)
+      result = l < r ? -1 : l > r ? 1 : 0
+    } else {
+      result = left.localeCompare(right)
+    }
+    return desc ? -result : result
+  }
+  const sorted = rows.slice().sort(compare)
+  return { rows: sorted, column: names[index].trim(), desc: desc }
+}
+
+async function scanDrawio(fs, dirTarget, relDir, out, depth) {
+  if (depth > MAX_DRAWIO_DEPTH || out.length >= MAX_DRAWIO_FILES) return
+  let entries
+  try {
+    entries = await fs.listDir(dirTarget)
+  } catch (e) {
+    return
+  }
+  for (const entry of entries) {
+    if (out.length >= MAX_DRAWIO_FILES) return
+    const rel = relDir === '' ? entry.name : relDir + '/' + entry.name
+    if (entry.type === 'directory') {
+      if (entry.name.charAt(0) === '.' || DRAWIO_SKIP_DIRS.has(entry.name)) continue
+      await scanDrawio(fs, entry.target, rel, out, depth + 1)
+    } else if (entry.type === 'file' && /\.drawio$/i.test(entry.name)) {
+      let size = null
+      try {
+        const info = await fs.stat(entry.target)
+        size = info && typeof info.size === 'number' ? info.size : null
+      } catch (e) {}
+      out.push({ path: rel, size: size })
     }
   }
 }
@@ -183,6 +255,10 @@ return {
       contingencyFile: null,
       monitorMode: 'all',
       monitoredBranchFile: null,
+      // Violation-check loading (%): a monitored branch at or above it after a contingency
+      // lands in the result CSV. The CA dialog's field and config/ca_run.json both feed
+      // this one number.
+      overloadThreshold: 90,
     }
 
     // The dialog reports how many entries a candidate file holds, which means
@@ -272,7 +348,7 @@ return {
       return { ok: true, exists: exists }
     }
 
-    // Normalise an untrusted config payload to the four known keys. Modes must
+    // Normalise an untrusted config payload to the five known keys. Modes must
     // be exactly 'all' | 'custom'; a custom mode must name a file, which must
     // exist when `requireFiles` is set.
     async function validateCaConfig(root, value, requireFiles) {
@@ -280,6 +356,17 @@ return {
         return { ok: false, error: 'the run configuration must be a JSON object' }
       }
       const out = Object.assign({}, DEFAULT_CA_CONFIG)
+      if (value.overloadThreshold !== undefined && value.overloadThreshold !== null && value.overloadThreshold !== '') {
+        const threshold = Number(value.overloadThreshold)
+        if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1000) {
+          return {
+            ok: false,
+            error: 'overloadThreshold must be a loading percentage between 0 and 1000 (got ' +
+              JSON.stringify(value.overloadThreshold) + ')',
+          }
+        }
+        out.overloadThreshold = threshold
+      }
       const fields = [
         ['contingencyMode', 'contingencyFile'],
         ['monitorMode', 'monitoredBranchFile'],
@@ -448,6 +535,63 @@ return {
         return { ok: true, cases: out }
       },
 
+      // The tab's Diagram picker: every .drawio in the workspace, as workspace-relative
+      // paths, so `readDrawio` can take one straight back. A missing or unreadable root
+      // is an empty list, not an error.
+      async listDrawioFiles(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        let target
+        try {
+          target = await fs.resolve(root)
+        } catch (e) {
+          return { ok: false, error: 'cannot resolve the workspace root' }
+        }
+        const out = []
+        await scanDrawio(fs, target, '', out, 0)
+        out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
+        return { ok: true, files: out }
+      },
+
+      // Read one .drawio as text for the client-side renderer. The whitelist is the same
+      // shape as readCsv's, plus an explicit `..` rejection, and the size check happens
+      // before the read so an oversized file never reaches the RPC payload.
+      async readDrawio(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const path = args && typeof args.path === 'string' ? args.path : ''
+        if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-\/]*\.drawio$/i.test(path) || path.indexOf('..') !== -1) {
+          return { ok: false, error: 'Invalid diagram path: ' + path }
+        }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        let target
+        try {
+          target = await fs.resolve(root + '/' + path)
+        } catch (e) {
+          return { ok: false, error: 'cannot resolve diagram: ' + path }
+        }
+        let size = null
+        try {
+          const info = await fs.stat(target)
+          size = info && typeof info.size === 'number' ? info.size : null
+        } catch (e) {
+          return { ok: false, error: 'cannot stat diagram: ' + path }
+        }
+        if (size !== null && size > MAX_DRAWIO_BYTES) {
+          return { ok: false, error: 'diagram too large (' + size + ' bytes; limit ' + MAX_DRAWIO_BYTES + ')' }
+        }
+        let xml
+        try {
+          xml = await fs.readText(target)
+        } catch (e) {
+          return { ok: false, error: 'cannot read diagram: ' + path }
+        }
+        return { ok: true, path: path, xml: String(xml), size: size }
+      },
+
       async readCsv(args) {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
@@ -469,13 +613,28 @@ return {
         }
         const lines = String(text).replace(/\r\n/g, '\n').split('\n')
         while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
-        if (lines.length === 0) return { ok: true, header: '', rows: [], totalRows: 0, hasMore: false }
+        if (lines.length === 0) {
+          return { ok: true, header: '', rows: [], totalRows: 0, hasMore: false, sortColumn: null, sortDesc: false }
+        }
         const header = lines[0]
-        const totalRows = Math.max(0, lines.length - 1)
-        const dataStart = 1 + start
-        const dataEnd = Math.min(dataStart + limit, lines.length)
-        const rows = dataStart < lines.length ? lines.slice(dataStart, dataEnd) : []
-        return { ok: true, header: header, rows: rows, totalRows: totalRows, hasMore: dataEnd < lines.length }
+        let data = lines.slice(1)
+        // Sorting happens here, before the page is sliced, so a sorted table is sorted over
+        // the whole file rather than over the rows the caller happens to have loaded.
+        const applied = applyCsvSort(data, header, args && args.sortColumn, args && args.sortDesc === true)
+        data = applied.rows
+        const totalRows = data.length
+        const dataStart = Math.min(start, data.length)
+        const dataEnd = Math.min(dataStart + limit, data.length)
+        const rows = dataStart < data.length ? data.slice(dataStart, dataEnd) : []
+        return {
+          ok: true,
+          header: header,
+          rows: rows,
+          totalRows: totalRows,
+          hasMore: dataEnd < data.length,
+          sortColumn: applied.column,
+          sortDesc: applied.desc,
+        }
       },
 
       async busConnections(args) {
@@ -731,7 +890,8 @@ return {
             const absCont = contRel !== null ? root + '/wspace/' + contRel : null
             const absMon = monRel !== null ? root + '/wspace/' + monRel : null
             const absResults = root + '/wspace/' + resultDir
-            const raw = await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
+            const raw = await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
+              caConfig.overloadThreshold)
             const parsed = JSON.parse(raw)
             if (parsed && parsed.ok) {
               return {
@@ -1095,6 +1255,9 @@ return {
           contingencyFile: validated.config.contingencyFile,
           monitorMode: validated.config.monitorMode,
           monitoredBranchFile: validated.config.monitoredBranchFile,
+          // The dialog's over loading threshold. It must round-trip, or the next dialog
+          // open and the CLI silently fall back to 90.
+          overloadThreshold: validated.config.overloadThreshold,
         }
         try {
           const target = await fs.resolve(caConfigPath(root, parent))

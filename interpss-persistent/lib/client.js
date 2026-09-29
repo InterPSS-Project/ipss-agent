@@ -286,6 +286,18 @@ module.exports = {
       }, h + (active ? (sort.desc === true ? ' \u25bc' : ' \u25b2') : ''))
     }
 
+    // Clicking a header sorts by it (ascending first); clicking the sorted one flips the
+    // direction. Pure, so the panel's state change stays a one-liner. Shared by the tab's
+    // result table and the ACLF explorer card, so it lives in the tab body.
+    function nextCsvSort(column, desc, clicked) {
+      const name = String(clicked === null || clicked === undefined ? '' : clicked).trim()
+      if (name === '') return { column: column, desc: desc === true }
+      if (column !== null && String(column).toLowerCase() === name.toLowerCase()) {
+        return { column: column, desc: !(desc === true) }
+      }
+      return { column: name, desc: false }
+    }
+
     function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatDecimals, sort) {
       if (!header) return null
       const headerCols = header.split(',')
@@ -592,6 +604,390 @@ module.exports = {
       return blocks
     }
 
+    // --- draw.io preview -------------------------------------------------------
+    // The Diagram button reads a .drawio file over `interpss/readDrawio` and renders it
+    // as inline SVG in a modal. The renderer is deliberately self-contained and offline:
+    // the harness forbids frames (`frame-src 'none'` in the preview CSP) and the app
+    // page CSP cannot be assumed, so an embedded draw.io viewer is not an option. It
+    // covers the subset these workspaces' diagrams use — rounded rectangles, ellipses,
+    // text labels, groups and orthogonal edges — and degrades an unknown shape to a
+    // rectangle instead of failing.
+
+    // draw.io stores a diagram either as plain XML or as base64(raw-deflate(uri-encoded
+    // XML)). Both round-trip here; the compressed form needs DecompressionStream.
+    function diagramXmlFrom(raw) {
+      const text = String(raw === null || raw === undefined ? '' : raw).trim()
+      if (text === '') return Promise.reject(new Error('the diagram file is empty'))
+      if (/<mxGraphModel|<mxfile/i.test(text)) return Promise.resolve(text)
+      if (typeof DecompressionStream !== 'function') {
+        return Promise.reject(new Error('this diagram is stored compressed and DecompressionStream is unavailable — re-save it uncompressed in draw.io'))
+      }
+      let bytes
+      try {
+        const bin = atob(text.replace(/\s+/g, ''))
+        bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
+      } catch (e) {
+        return Promise.reject(new Error('unrecognized diagram encoding'))
+      }
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+      return new Response(stream).text().then(
+        (xml) => { try { return decodeURIComponent(xml) } catch (e) { return xml } },
+        () => { throw new Error('could not inflate the diagram — re-save it uncompressed in draw.io') },
+      )
+    }
+
+    function styleMap(style) {
+      const out = {}
+      const parts = String(style === null || style === undefined ? '' : style).split(';')
+      for (const part of parts) {
+        if (part === '') continue
+        const eq = part.indexOf('=')
+        if (eq === -1) out[part] = '1'
+        else out[part.slice(0, eq)] = part.slice(eq + 1)
+      }
+      return out
+    }
+
+    function numOr(value, fallback) {
+      const n = typeof value === 'number' ? value : parseFloat(value)
+      return Number.isFinite(n) ? n : fallback
+    }
+
+    // A cell label is plain text or light HTML; keep the line structure, drop the markup.
+    function labelLines(value) {
+      if (value === null || value === undefined || value === '') return []
+      return String(value)
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#10;/g, '\n')
+        .replace(/&amp;/gi, '&')
+        .split('\n')
+    }
+
+    const DRAWIO_STROKE = '#64748b'
+    const DRAWIO_TEXT = '#111827'
+    const DRAWIO_PAD = 20
+    const DRAWIO_MAX_CELLS = 2000
+
+    // mxGraphModel -> a flat, React-free scene description: { viewBox, nodes, edges }.
+    // Geometry is resolved to absolute coordinates so grouped cells (style=group, whose
+    // children carry relative="1" geometry) land in the right place.
+    function parseDrawioScene(xml) {
+      const doc = new DOMParser().parseFromString(xml, 'text/xml')
+      if (doc.getElementsByTagName('parsererror').length > 0) throw new Error('the file is not valid draw.io XML')
+      const cells = doc.getElementsByTagName('mxCell')
+      if (cells.length === 0) throw new Error('no diagram cells found')
+      if (cells.length > DRAWIO_MAX_CELLS) {
+        throw new Error('this diagram has ' + cells.length + ' cells (limit ' + DRAWIO_MAX_CELLS + ') and is too large to preview')
+      }
+
+      const byId = {}
+      for (let i = 0; i < cells.length; i += 1) byId[cells[i].getAttribute('id')] = cells[i]
+
+      // The mxGeometry a cell owns. A descendant search would be wrong here: a `group`
+      // cell has no geometry of its own but its children do, so the first descendant
+      // would be a child's box and every offset below it would be applied twice.
+      function ownGeometry(cell) {
+        const kids = cell.children
+        for (let i = 0; i < kids.length; i += 1) {
+          if (kids[i].tagName === 'mxGeometry') return kids[i]
+        }
+        return null
+      }
+
+      // Absolute offset of a cell: every ancestor's own x/y accumulates down the parent
+      // chain. The guard bounds a malformed/cyclic parent graph.
+      function originOf(cell) {
+        let x = 0
+        let y = 0
+        let cur = cell
+        let guard = 0
+        while (cur !== undefined && guard < 64) {
+          guard += 1
+          const parentId = cur.getAttribute('parent')
+          const parent = parentId === null ? undefined : byId[parentId]
+          if (parent === undefined || parent === cur) break
+          const pg = ownGeometry(parent)
+          if (pg === null) break
+          x += numOr(pg.getAttribute('x'), 0)
+          y += numOr(pg.getAttribute('y'), 0)
+          cur = parent
+        }
+        return { x: x, y: y }
+      }
+
+      const rects = {}
+      const nodes = []
+      for (let i = 0; i < cells.length; i += 1) {
+        const cell = cells[i]
+        if (cell.getAttribute('vertex') !== '1') continue
+        const g = ownGeometry(cell)
+        if (g === null) continue
+        const st = styleMap(cell.getAttribute('style'))
+        // A `group` is a container, not a shape: it draws nothing itself, and its children
+        // are positioned relative to it. Skipping it here is what keeps those children
+        // (this workspace's transformer symbols, two ellipses each) in place without a
+        // spurious box behind them.
+        if (st.group !== undefined) continue
+        const o = originOf(cell)
+        const x = o.x + numOr(g.getAttribute('x'), 0)
+        const y = o.y + numOr(g.getAttribute('y'), 0)
+        const w = Math.max(1, numOr(g.getAttribute('width'), 0) || 120)
+        const h = Math.max(1, numOr(g.getAttribute('height'), 0) || 60)
+        const style = st
+        const kind = style.ellipse !== undefined || style.shape === 'ellipse' ? 'ellipse' : (style.text !== undefined ? 'text' : 'rect')
+        const node = {
+          id: cell.getAttribute('id'),
+          kind: kind,
+          x: x, y: y, w: w, h: h,
+          rounded: style.rounded !== undefined && kind === 'rect',
+          fill: style.fillColor !== undefined ? style.fillColor : null,
+          stroke: style.strokeColor !== undefined ? style.strokeColor : DRAWIO_STROKE,
+          strokeWidth: numOr(style.strokeWidth, 1),
+          dashed: style.dashed === '1',
+          fontColor: style.fontColor !== undefined ? style.fontColor : DRAWIO_TEXT,
+          fontSize: numOr(style.fontSize, 12),
+          bold: (numOr(style.fontStyle, 0) & 1) === 1,
+          italic: (numOr(style.fontStyle, 0) & 2) === 2,
+          lines: labelLines(cell.getAttribute('value')),
+        }
+        rects[node.id] = node
+        nodes.push(node)
+      }
+
+      const edges = []
+      for (let i = 0; i < cells.length; i += 1) {
+        const cell = cells[i]
+        if (cell.getAttribute('edge') !== '1') continue
+        const st = styleMap(cell.getAttribute('style'))
+        const g = ownGeometry(cell)
+        const src = rects[cell.getAttribute('source')]
+        const tgt = rects[cell.getAttribute('target')]
+        // exit/entry are fractions of the source/target box; absent means the centre, and
+        // nodes are painted over the edge ends so the overlap is invisible.
+        const sx = numOr(st.exitX, 0.5)
+        const sy = numOr(st.exitY, 0.5)
+        const tx = numOr(st.entryX, 0.5)
+        const ty = numOr(st.entryY, 0.5)
+        const from = src === undefined ? null : { x: src.x + src.w * sx, y: src.y + src.h * sy }
+        const to = tgt === undefined ? null : { x: tgt.x + tgt.w * tx, y: tgt.y + tgt.h * ty }
+        const pts = []
+        if (g !== null) {
+          const arrays = g.getElementsByTagName('Array')
+          for (let a = 0; a < arrays.length; a += 1) {
+            if (arrays[a].getAttribute('as') !== 'points') continue
+            const ps = arrays[a].getElementsByTagName('mxPoint')
+            for (let p = 0; p < ps.length; p += 1) {
+              pts.push({ x: numOr(ps[p].getAttribute('x'), 0), y: numOr(ps[p].getAttribute('y'), 0) })
+            }
+          }
+          if (from === null) {
+            const sp = g.getElementsByTagName('mxPoint')
+            for (let p = 0; p < sp.length; p += 1) {
+              if (sp[p].getAttribute('as') === 'sourcePoint') from = { x: numOr(sp[p].getAttribute('x'), 0), y: numOr(sp[p].getAttribute('y'), 0) }
+              else if (sp[p].getAttribute('as') === 'targetPoint') to = { x: numOr(sp[p].getAttribute('x'), 0), y: numOr(sp[p].getAttribute('y'), 0) }
+            }
+          }
+        }
+        if (from === null && pts.length > 0) from = pts.shift()
+        if (to === null && pts.length > 0) to = pts.pop()
+        const points = []
+        if (from !== null) points.push(from)
+        for (const p of pts) points.push(p)
+        if (to !== null) points.push(to)
+        if (points.length < 2) continue
+
+        let arrow = null
+        if (st.endArrow !== 'none' && points.length >= 2) {
+          const a = points[points.length - 2]
+          const b = points[points.length - 1]
+          const dx = b.x - a.x
+          const dy = b.y - a.y
+          const len = Math.sqrt(dx * dx + dy * dy)
+          if (len > 0.001) {
+            const ux = dx / len
+            const uy = dy / len
+            const size = 9
+            const wing = 4
+            arrow = [
+              b.x + ',' + b.y,
+              (b.x - ux * size - uy * wing) + ',' + (b.y - uy * size + ux * wing),
+              (b.x - ux * size + uy * wing) + ',' + (b.y - uy * size - ux * wing),
+            ].join(' ')
+          }
+        }
+        const mid = points[Math.floor(points.length / 2)]
+        edges.push({
+          points: points,
+          stroke: st.strokeColor !== undefined ? st.strokeColor : DRAWIO_STROKE,
+          strokeWidth: numOr(st.strokeWidth, 1),
+          dashed: st.dashed === '1',
+          arrow: arrow,
+          label: labelLines(cell.getAttribute('value')).join(' '),
+          labelAt: mid,
+        })
+      }
+
+      if (nodes.length === 0 && edges.length === 0) throw new Error('empty diagram — nothing to draw')
+
+      // Bounding box over every drawn coordinate; the shared modulo root cell has no
+      // geometry of its own, so it never contributes.
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      const extend = (x, y) => {
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+      }
+      for (const n of nodes) { extend(n.x, n.y); extend(n.x + n.w, n.y + n.h) }
+      for (const e of edges) { for (const p of e.points) extend(p.x, p.y) }
+      if (!Number.isFinite(minX)) throw new Error('empty diagram — nothing to draw')
+      return {
+        viewBox: {
+          x: minX - DRAWIO_PAD,
+          y: minY - DRAWIO_PAD,
+          w: Math.max(1, maxX - minX + DRAWIO_PAD * 2),
+          h: Math.max(1, maxY - minY + DRAWIO_PAD * 2),
+        },
+        nodes: nodes,
+        edges: edges,
+      }
+    }
+
+    function drawioLabel(lines, cx, cy, node, key) {
+      if (lines.length === 0) return null
+      const spans = lines.map((line, i) => React.createElement('tspan', {
+        key: 't' + i,
+        x: cx,
+        dy: i === 0 ? (lines.length > 1 ? (-(lines.length - 1) * 0.6) + 'em' : '0.32em') : '1.2em',
+      }, line))
+      return React.createElement('text', {
+        key: key,
+        x: cx, y: cy, textAnchor: 'middle',
+        fontSize: node.fontSize, fontWeight: node.bold ? 600 : 400,
+        fontStyle: node.italic ? 'italic' : 'normal', fill: node.fontColor,
+      }, spans)
+    }
+
+    // Pan/zoom for the preview. The renderer always draws the whole scene and only the
+    // SVG viewBox moves, so a zoom step re-parses nothing and measures nothing. A
+    // `rect` below is the visible rectangle in scene coordinates ({x,y,w,h}); null means
+    // "fit", and a fit is simply the scene's own viewBox.
+    const DRAWIO_MIN_ZOOM = 0.1
+    const DRAWIO_MAX_ZOOM = 12
+
+    function drawioFitRect(vb) {
+      return { x: vb.x, y: vb.y, w: vb.w, h: vb.h }
+    }
+
+    // Bounds on the visible width, derived from the zoom limits. Expressed as widths
+    // because that is what the rect carries; the height follows the width.
+    function drawioZoomLimits(vb) {
+      const w = Number.isFinite(vb.w) && vb.w > 0 ? vb.w : 1
+      return { minW: w / DRAWIO_MAX_ZOOM, maxW: w / DRAWIO_MIN_ZOOM }
+    }
+
+    // Zoom by `factor` (>1 zooms in), holding the scene point at the window fractions
+    // (fx, fy) -- both in [0,1] -- in place, so one wheel notch zooms about the cursor.
+    // The height follows the width so the aspect ratio cannot drift, and an unmeasurable
+    // input falls back to a centre anchor rather than throwing mid-gesture.
+    function drawioZoomRect(rect, factor, fx, fy, limits) {
+      const f = Number.isFinite(factor) && factor > 0 ? factor : 1
+      const minW = limits && Number.isFinite(limits.minW) ? limits.minW : 1e-6
+      const maxW = limits && Number.isFinite(limits.maxW) ? limits.maxW : 1e9
+      let w = rect.w / f
+      if (!Number.isFinite(w) || w <= 0) w = rect.w
+      w = Math.min(maxW, Math.max(minW, w))
+      const h = rect.h * (w / rect.w)
+      const ax = Number.isFinite(fx) ? Math.min(1, Math.max(0, fx)) : 0.5
+      const ay = Number.isFinite(fy) ? Math.min(1, Math.max(0, fy)) : 0.5
+      return { x: rect.x + (rect.w - w) * ax, y: rect.y + (rect.h - h) * ay, w: w, h: h }
+    }
+
+    function drawioPanRect(rect, dx, dy) {
+      const sx = Number.isFinite(dx) ? dx : 0
+      const sy = Number.isFinite(dy) ? dy : 0
+      return { x: rect.x + sx, y: rect.y + sy, w: rect.w, h: rect.h }
+    }
+
+    // One wheel notch -> one zoom factor, kept apart from the event so the guard test can
+    // exercise the direction without a DOM.
+    function drawioWheelFactor(deltaY) {
+      const d = Number.isFinite(deltaY) ? deltaY : 0
+      if (d === 0) return 1
+      return d < 0 ? 1.15 : 1 / 1.15
+    }
+
+    function drawioZoomPercent(scene, rect) {
+      if (scene === null || rect === null || !Number.isFinite(rect.w) || rect.w <= 0) return 100
+      const pct = Math.round((scene.viewBox.w / rect.w) * 100)
+      return Number.isFinite(pct) && pct > 0 ? pct : 100
+    }
+
+    function DrawioDiagram(props) {
+      const scene = props.scene
+      const vb = props.view || scene.viewBox
+      const children = []
+      for (let i = 0; i < scene.edges.length; i += 1) {
+        const e = scene.edges[i]
+        const parts = [React.createElement('polyline', {
+          key: 'l',
+          points: e.points.map((p) => p.x + ',' + p.y).join(' '),
+          fill: 'none',
+          stroke: e.stroke,
+          strokeWidth: e.strokeWidth,
+          strokeDasharray: e.dashed ? '6 4' : undefined,
+        })]
+        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: e.stroke }))
+        if (e.label !== '') {
+          parts.push(React.createElement('text', {
+            key: 't',
+            x: e.labelAt.x + 4, y: e.labelAt.y - 4,
+            fontSize: 10, fill: DRAWIO_TEXT,
+          }, e.label))
+        }
+        children.push(React.createElement('g', { key: 'e' + i }, parts))
+      }
+      for (let i = 0; i < scene.nodes.length; i += 1) {
+        const n = scene.nodes[i]
+        const parts = []
+        if (n.kind === 'ellipse') {
+          parts.push(React.createElement('ellipse', {
+            key: 's',
+            cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2, ry: n.h / 2,
+            fill: n.fill === null ? 'none' : n.fill,
+            stroke: n.stroke, strokeWidth: n.strokeWidth,
+            strokeDasharray: n.dashed ? '6 4' : undefined,
+          }))
+        } else if (n.kind === 'rect') {
+          parts.push(React.createElement('rect', {
+            key: 's',
+            x: n.x, y: n.y, width: n.w, height: n.h,
+            rx: n.rounded ? Math.min(8, n.h / 2) : 0,
+            fill: n.fill === null ? 'none' : n.fill,
+            stroke: n.stroke, strokeWidth: n.strokeWidth,
+            strokeDasharray: n.dashed ? '6 4' : undefined,
+          }))
+        }
+        const label = drawioLabel(n.lines, n.x + n.w / 2, n.y + n.h / 2, n, 't')
+        if (label !== null) parts.push(label)
+        children.push(React.createElement('g', { key: 'n' + i }, parts))
+      }
+      return React.createElement('svg', {
+        viewBox: vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h,
+        preserveAspectRatio: 'xMidYMid meet',
+        style: { width: '100%', height: '100%', display: 'block' },
+      }, children)
+    }
+
     function InterPssView(props) {
       const sessionId = props && props.sessionId
       const callRemote = props && props.callRemote
@@ -755,6 +1151,37 @@ module.exports = {
       const [reportType, setReportType] = React.useState('nerc')
       const [reportView, setReportView] = React.useState('rendered')
       const [reportAvailable, setReportAvailable] = React.useState(false)
+      // draw.io preview: the picker and the rendered/source views share one modal.
+      const [drawioOpen, setDrawioOpen] = React.useState(false)
+      const [drawioFiles, setDrawioFiles] = React.useState(null)
+      const [drawioFilesLoading, setDrawioFilesLoading] = React.useState(false)
+      const [drawioFilesError, setDrawioFilesError] = React.useState(null)
+      const [drawioPath, setDrawioPath] = React.useState('')
+      const [drawioXml, setDrawioXml] = React.useState('')
+      const [drawioScene, setDrawioScene] = React.useState(null)
+      const [drawioLoading, setDrawioLoading] = React.useState(false)
+      const [drawioError, setDrawioError] = React.useState(null)
+      const [drawioView, setDrawioView] = React.useState('rendered')
+      const drawioOverlayRef = React.useRef(null)
+      // Pan/zoom of the rendered pane: the visible rectangle in scene coordinates, or
+      // null for "fit the whole diagram". Declared here, above every reader, because a
+      // dependency array is evaluated during render (see the focus effect's note).
+      const [drawioRect, setDrawioRect] = React.useState(null)
+      const [drawioDragging, setDrawioDragging] = React.useState(false)
+      const drawioCanvasRef = React.useRef(null)
+      const drawioDragRef = React.useRef(null)
+      // Focus the preview overlay when it opens so Escape reaches its own onKeyDown.
+      // Deliberately no window listener: the dynamic Client half is given no `window`
+      // (see docs/persistent-plugin-rebuild.md), so the two tab bodies stay identical.
+      // This effect must sit BELOW the state it reads: a dependency array is evaluated
+      // during render, so referencing `drawioOpen` above its `const` is a TDZ
+      // ReferenceError that blanks the whole tab.
+      React.useEffect(() => {
+        if (!drawioOpen) return undefined
+        const el = drawioOverlayRef.current
+        if (el !== null && typeof el.focus === 'function') el.focus()
+        return undefined
+      }, [drawioOpen])
       const [caseLoaded, setCaseLoaded] = React.useState(false)
       const [caseLoading, setCaseLoading] = React.useState(false)
       const [caseLoadError, setCaseLoadError] = React.useState(null)
@@ -1010,6 +1437,145 @@ module.exports = {
           (res) => { setCaFilesLoading(false); setCaFiles(res && res.ok ? res.files : []) },
           () => { setCaFilesLoading(false); setCaFiles([]) },
         )
+      }
+
+      // Open the preview modal straight into its picker: one surface holds the file list,
+      // the rendered diagram and the raw XML, so no second popover is needed.
+      function openDrawioPicker() {
+        setDrawioOpen(true)
+        setDrawioPath('')
+        setDrawioXml('')
+        setDrawioScene(null)
+        setDrawioError(null)
+        setDrawioView('rendered')
+        setDrawioFiles(null)
+        setDrawioFilesError(null)
+        setDrawioRect(null)
+        setDrawioFilesLoading(true)
+        callRemote('listDrawioFiles', { sessionId }).then(
+          (res) => {
+            setDrawioFilesLoading(false)
+            if (res && res.ok) setDrawioFiles(res.files || [])
+            else setDrawioFilesError(res && res.error ? res.error : 'failed to list .drawio files')
+          },
+          (err) => { setDrawioFilesLoading(false); setDrawioFilesError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
+      // The function the Diagram feature is built on: read a workspace-relative .drawio
+      // over the Host, decode it (plain or compressed), and render it in the modal.
+      function openDrawio(path) {
+        if (typeof path !== 'string' || path === '') return
+        setDrawioOpen(true)
+        setDrawioPath(path)
+        setDrawioXml('')
+        setDrawioScene(null)
+        setDrawioError(null)
+        setDrawioView('rendered')
+        setDrawioRect(null)
+        setDrawioLoading(true)
+        callRemote('readDrawio', { path: path, sessionId }).then(
+          (res) => {
+            if (!res || !res.ok) throw new Error(res && res.error ? res.error : 'failed to read the diagram')
+            setDrawioXml(res.xml)
+            return diagramXmlFrom(res.xml)
+          },
+        ).then(
+          (xml) => {
+            const scene = parseDrawioScene(xml)
+            setDrawioScene(scene)
+            setDrawioLoading(false)
+          },
+          (err) => {
+            setDrawioLoading(false)
+            setDrawioError(String(err && err.message ? err.message : err))
+          },
+        )
+      }
+
+      // --- Diagram pan/zoom ---------------------------------------------------
+      // One SVG with a moving viewBox: the wheel zooms about the cursor, dragging pans,
+      // and Fit returns to the scene's own viewBox.
+      function drawioCurrentRect() {
+        if (drawioScene === null) return null
+        return drawioRect === null ? drawioFitRect(drawioScene.viewBox) : drawioRect
+      }
+
+      // Screen -> scene mapping for the rendered box. preserveAspectRatio="xMidYMid meet"
+      // letterboxes the scene inside the element, so the scale is the smaller of the two
+      // ratios and the slack is centred; ignoring that would let the zoom anchor drift
+      // away from the cursor.
+      function drawioMetrics(rect) {
+        const el = drawioCanvasRef.current
+        if (el === null || typeof el.getBoundingClientRect !== 'function') return null
+        const box = el.getBoundingClientRect()
+        if (!(box.width > 0) || !(box.height > 0)) return null
+        const scale = Math.min(box.width / rect.w, box.height / rect.h)
+        if (!Number.isFinite(scale) || scale <= 0) return null
+        return { box: box, scale: scale, offX: (box.width - rect.w * scale) / 2, offY: (box.height - rect.h * scale) / 2 }
+      }
+
+      function drawioApplyZoom(factor, clientX, clientY) {
+        const rect = drawioCurrentRect()
+        if (rect === null) return
+        const limits = drawioZoomLimits(drawioScene.viewBox)
+        const m = drawioMetrics(rect)
+        if (m === null) { setDrawioRect(drawioZoomRect(rect, factor, 0.5, 0.5, limits)); return }
+        const sx = rect.x + (clientX - m.box.left - m.offX) / m.scale
+        const sy = rect.y + (clientY - m.box.top - m.offY) / m.scale
+        setDrawioRect(drawioZoomRect(rect, factor, (sx - rect.x) / rect.w, (sy - rect.y) / rect.h, limits))
+      }
+
+      function drawioStepZoom(factor) {
+        const rect = drawioCurrentRect()
+        if (rect === null) return
+        setDrawioRect(drawioZoomRect(rect, factor, 0.5, 0.5, drawioZoomLimits(drawioScene.viewBox)))
+      }
+
+      function drawioFit() {
+        setDrawioRect(null)
+        drawioDragRef.current = null
+        setDrawioDragging(false)
+      }
+
+      // Registered natively rather than as onWheel so preventDefault is permitted: React
+      // delegates wheel passively, which would let the page behind the modal scroll while
+      // the pointer is over the diagram.
+      React.useEffect(() => {
+        if (!drawioOpen || drawioScene === null) return undefined
+        const el = drawioCanvasRef.current
+        if (el === null || typeof el.addEventListener !== 'function') return undefined
+        const onWheel = (e) => {
+          if (e.preventDefault) e.preventDefault()
+          drawioApplyZoom(drawioWheelFactor(e.deltaY), e.clientX, e.clientY)
+        }
+        el.addEventListener('wheel', onWheel, { passive: false })
+        return () => el.removeEventListener('wheel', onWheel)
+      }, [drawioOpen, drawioScene, drawioRect])
+
+      function drawioPointerDown(e) {
+        const rect = drawioCurrentRect()
+        if (rect === null) return
+        const m = drawioMetrics(rect)
+        if (m === null) return
+        drawioDragRef.current = { x: e.clientX, y: e.clientY, scale: m.scale }
+        setDrawioDragging(true)
+        if (e.preventDefault) e.preventDefault()
+      }
+
+      function drawioPointerMove(e) {
+        const rect = drawioCurrentRect()
+        const drag = drawioDragRef.current
+        if (rect === null || drag === null) return
+        const dx = (e.clientX - drag.x) / drag.scale
+        const dy = (e.clientY - drag.y) / drag.scale
+        drawioDragRef.current = { x: e.clientX, y: e.clientY, scale: drag.scale }
+        setDrawioRect(drawioPanRect(rect, -dx, -dy))
+      }
+
+      function drawioPointerUp() {
+        drawioDragRef.current = null
+        setDrawioDragging(false)
       }
 
       function openCaDialog() {
@@ -1442,6 +2008,8 @@ module.exports = {
           }, gearIcon),
           React.createElement('button', { onClick: openCaDialog, disabled: running || caRunning || !caseLoaded, title: 'Run DC contingency analysis', style: { ...btn, marginLeft: '12px', opacity: (running || caRunning || !caseLoaded) ? 0.6 : 1 } }, caRunning ? 'Running…' : 'CA'),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
+          // Not gated on caseLoaded: a .drawio preview is independent of the simulation case.
+          React.createElement('button', { onClick: openDrawioPicker, title: 'Open a draw.io diagram', style: { ...btn, marginLeft: '12px' } }, 'Diagram'),
         ),
         caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
         optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Options saved') : null,
@@ -1909,6 +2477,69 @@ module.exports = {
         ),
       ) : null
 
+      // The draw.io preview body: picker -> rendered diagram / raw XML. The rendered
+      // pane gets a white surface because a draw.io model carries its own light
+      // background, which would otherwise be unreadable in the dark theme.
+      const drawioBody = drawioLoading
+        ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading diagram…')
+        : drawioError !== null
+          ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, drawioError)
+          : drawioPath === ''
+            ? (drawioFilesLoading
+              ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Looking for .drawio files…')
+              : drawioFilesError !== null
+                ? React.createElement('pre', { style: { ...mono, margin: 0 } }, drawioFilesError)
+                : (drawioFiles !== null && drawioFiles.length > 0
+                  ? React.createElement('div', { style: { flex: '1 1 auto', minHeight: 0, overflowY: 'auto' } },
+                    drawioFiles.map((f) => React.createElement('button', {
+                      key: f.path,
+                      onClick: () => openDrawio(f.path),
+                      style: { display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: 'none', borderBottom: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' },
+                    }, f.path + (typeof f.size === 'number' ? '  (' + Math.max(1, Math.round(f.size / 1024)) + ' KB)' : ''))))
+                  : React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No .drawio files found under this workspace.')))
+            : drawioView === 'source'
+              ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, drawioXml || '')
+              : drawioScene !== null
+                ? React.createElement('div', {
+                  ref: drawioCanvasRef,
+                  onPointerDown: drawioPointerDown,
+                  onPointerMove: drawioPointerMove,
+                  onPointerUp: drawioPointerUp,
+                  onPointerCancel: drawioPointerUp,
+                  onPointerLeave: drawioPointerUp,
+                  style: { flex: '1 1 auto', minHeight: 0, overflow: 'hidden', background: '#ffffff', borderRadius: '6px', cursor: drawioDragging ? 'grabbing' : 'grab', touchAction: 'none' },
+                }, React.createElement(DrawioDiagram, { scene: drawioScene, view: drawioRect }))
+                : null
+
+      const drawioModal = drawioOpen ? React.createElement('div', {
+        ref: drawioOverlayRef,
+        tabIndex: -1,
+        onKeyDown: (e) => { if (e.key === 'Escape') setDrawioOpen(false) },
+        style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', outline: 'none' },
+        onClick: () => { if (!drawioLoading) setDrawioOpen(false) },
+      },
+        React.createElement('div', {
+          onClick: (e) => e.stopPropagation(),
+          style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '1100px', height: '86vh', display: 'flex', flexDirection: 'column' },
+        },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' } },
+            React.createElement('div', { style: { fontWeight: 600, fontSize: '15px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+              drawioPath === '' ? 'Open draw.io diagram' : drawioPath),
+            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
+              drawioPath !== '' ? React.createElement('button', { onClick: openDrawioPicker, style: { ...btn, padding: '4px 10px' } }, 'Back') : null,
+              drawioPath !== '' ? React.createElement('button', { onClick: () => setDrawioView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: drawioView === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered') : null,
+              drawioPath !== '' ? React.createElement('button', { onClick: () => setDrawioView('source'), style: { ...btn, padding: '4px 10px', borderColor: drawioView === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source') : null,
+              drawioPath !== '' && drawioView === 'rendered' && drawioScene !== null ? React.createElement('button', { onClick: () => drawioStepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
+              drawioPath !== '' && drawioView === 'rendered' && drawioScene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(drawioScene, drawioRect) + '%') : null,
+              drawioPath !== '' && drawioView === 'rendered' && drawioScene !== null ? React.createElement('button', { onClick: () => drawioStepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
+              drawioPath !== '' && drawioView === 'rendered' && drawioScene !== null ? React.createElement('button', { onClick: drawioFit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
+              React.createElement('button', { onClick: () => setDrawioOpen(false), style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
+            ),
+          ),
+          drawioBody,
+        ),
+      ) : null
+
       if (activated === null) {
         return React.createElement('div', { style: { padding: '20px', color: 'var(--dsw-alias-label-secondary)' } }, 'Checking workspace…')
       }
@@ -1969,6 +2600,7 @@ module.exports = {
         caModal,
         optModal,
         reportModal,
+        drawioModal,
         diagramTipEl,
       )
     }
@@ -2008,17 +2640,6 @@ module.exports = {
         files: files,
         converged: meta.converged === true,
       }
-    }
-
-    // Clicking a header sorts by it (ascending first); clicking the sorted one flips the
-    // direction. Pure, so the panel's state change stays a one-liner.
-    function nextCsvSort(column, desc, clicked) {
-      const name = String(clicked === null || clicked === undefined ? '' : clicked).trim()
-      if (name === '') return { column: column, desc: desc === true }
-      if (column !== null && String(column).toLowerCase() === name.toLowerCase()) {
-        return { column: column, desc: !(desc === true) }
-      }
-      return { column: name, desc: false }
     }
 
     function explorerPathForKind(meta, kind) {
