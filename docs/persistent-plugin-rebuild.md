@@ -284,6 +284,40 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     and white: draw.io's default text colour `#111827` computes as 39% "saturated" while
     reading as plain ink, and testing saturation first left every default label near-black on
     a dark canvas. §5 covers the mapping and §4 the rendered result.
+- **Diagram element tooltips** (Client half, since 0.6.7): hovering a bus or a branch in the
+  preview shows the same tooltip the connection diagram shows, from the same builders —
+  `busTooltip(record)` and `branchTooltip(row)` — so the two cannot word things differently.
+  It is a client-only feature: `METHODS` and the Host half are unchanged.
+  - **Element → data.** `parseDrawioScene` now also keeps what a tooltip needs: each edge's
+    `id`/`source`/`target` and each vertex's `parent`. `drawioBranchPairs(scene)` resolves every
+    interactive cell to a `busa|busb` key of lowercased bus cell ids. A branch is either one
+    edge between two bars, or a transformer symbol drawn as **two chained edges** (`bus4 → xf8`
+    then `xf8b → bus7`); an edge with a single bus end is paired with the sibling edge whose
+    endpoint shares the same `parent` group, and both take the union of their bus ends — the
+    group id, not the `xfN`/`xfNb` spelling, is what pairs them. The transformer **nodes** take
+    their group's key too, so the symbol itself is hoverable. It is resolved once per parsed
+    scene, not per repaint, and runs only when a `hover` prop is passed.
+  - **Hit areas.** A branch is a 1.5px line and a bar is 6px wide, so the drawn geometry is
+    impractical to hover: each interactive edge also emits an invisible twin polyline
+    (`stroke: transparent`, `strokeWidth: 10`, `pointerEvents: 'stroke'`) and each interactive
+    vertex a transparent rect padded by 4 scene units. They live inside the SVG, so they follow
+    the `viewBox` with no coordinate maths, and they do not stop propagation — panning and
+    wheel-zoom still work over them.
+  - **Data.** The branch table is indexed once per opened diagram: `readCsv` is paged over
+    `<case>/result/<stem>_DF_branch.csv` (5000 rows/page, 20-page cap) into a
+    `Map<'busa|busb', row[]>` — an **array** per pair, so parallel circuits all match — plus a
+    `canonical` map of the `BusN` spelling the Host matches on (a diagram cell is `bus1`, but
+    `busConnections` compares against the table's `Bus1` exactly; an isolated bus falls back to
+    capitalising the cell id). Bus records are **not** preloaded: one `busConnections` call fills
+    the cache for the hovered bus *and its branch neighbours*, and `readCsv` rows are raw CSV
+    lines split at hover time because `branchTooltip` wants columns.
+  - **Degradation.** With no result table the tooltip names the element and adds
+    `no result data — run ACLF` and fires **no** call; with a table but no matching row it says
+    `not found in the case result tables`. Fetch failures are swallowed: a tooltip is an
+    enhancement and must never error or block the preview. The tip is dropped when the modal
+    closes, and a late `busConnections` answer is applied only if that bus is still under the
+    cursor. Guard §11 covers the pairing (all 25 edges resolve, and the 20 resolved pairs agree
+    with the result table), the hit areas, the wiring and the tooltip wording.
 - **`interpss_case_summary`** ports `IpssAgentBridge.summarize()`. Java always returns
   every result section in full (only the requested one is ranked/limited) and
   `text` is a JSON string inside the envelope, so the tool does a second parse and
@@ -384,7 +418,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 96 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 124 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js` and `wspace/template/ieee14-oneline.drawio`

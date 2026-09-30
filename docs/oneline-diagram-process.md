@@ -28,7 +28,11 @@ Build an IEEE 14-bus power-grid **one-line diagram** in draw.io from bus/branch 
    whole diagram (**Fit**), with a live zoom percentage in the header. Since **0.6.5** it also
    follows the **app theme**: the model's grayscale palette (paper, ink, mid greys) is
    re-expressed as theme tokens, so in the dark theme the diagram is light-on-dark instead of a
-   white slab. See [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md) for the
+   white slab. Since **0.6.7** hovering a **bus** (its bar or its `Bus-N` label) or a **branch**
+   (a line, either half of a transformer chain, or the transformer symbol) shows the same
+   tooltip the Bus connection diagram shows, from the same builders — the case's result tables
+   are the source, and a case with no results says so instead of showing an empty panel. See
+   [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md) for the
    implementation notes.
 
 ## Workflow

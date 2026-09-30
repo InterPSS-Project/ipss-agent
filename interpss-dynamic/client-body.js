@@ -648,6 +648,11 @@ return {
     const DRAWIO_TEXT = '#111827'
     const DRAWIO_PAD = 20
     const DRAWIO_MAX_CELLS = 2000
+    // Tooltip hit areas. A branch is a 1.5px line and a bus bar is 6px wide, so the drawn
+    // geometry is impractical to hover; each interactive cell also emits an invisible shape
+    // with this stroke width, or a transparent rect padded by this many scene units.
+    const DRAWIO_HIT_STROKE = 10
+    const DRAWIO_HIT_PAD = 4
 
     // A draw.io model carries its own palette, and these one-line diagrams are ink on paper:
     // white surfaces, black strokes and text, a few greys. Painting that literally drops a
@@ -764,6 +769,9 @@ return {
         const kind = style.ellipse !== undefined || style.shape === 'ellipse' ? 'ellipse' : (style.text !== undefined ? 'text' : 'rect')
         const node = {
           id: cell.getAttribute('id'),
+          // The parent cell. A transformer symbol is two ellipses inside a `style=group`
+          // cell, so the group id is what pairs them — not the `xfN`/`xfNb` spelling.
+          parent: cell.getAttribute('parent'),
           // Document position. The renderer paints in this order — see DrawioDiagram.
           order: i,
           kind: kind,
@@ -851,6 +859,9 @@ return {
         }
         const mid = points[Math.floor(points.length / 2)]
         edges.push({
+          id: cell.getAttribute('id'),
+          source: cell.getAttribute('source'),
+          target: cell.getAttribute('target'),
           order: i,
           points: points,
           stroke: st.strokeColor !== undefined ? st.strokeColor : DRAWIO_STROKE,
@@ -958,6 +969,108 @@ return {
     // A case with exactly ONE diagram skips the picker: there is nothing to choose. Any
     // other count (including none) returns null, so the caller decides what to do. Pure and
     // module-level, beside the other drawio helpers, so the guard can exercise it directly.
+    // A bus bar's cell id is \`busN\` in the exported diagrams.
+    function drawioIsBusId(id) {
+      return typeof id === 'string' && /^bus\d+$/i.test(id)
+    }
+
+    // Map every interactive diagram element to the branch it belongs to, as a
+    // `busa|busb` key of lowercased bus cell ids (so they compare with the table's BusN).
+    //
+    // A branch is either ONE edge between two bus bars, or a transformer symbol drawn as TWO
+    // chained edges (\`bus4 -> xf8\` then \`xf8b -> bus7\`) joined through a group cell. So an
+    // edge with a single bus end is paired with its sibling — the other edge whose endpoint
+    // shares the same parent group — and both take the union of their bus ends. The
+    // transformer NODES take their group's key too, so the symbol itself is hoverable.
+    function drawioBranchPairs(scene) {
+      const edgePair = {}
+      const nodePair = {}
+      if (scene === null || scene === undefined) return { edgePair: edgePair, nodePair: nodePair }
+      const byId = {}
+      for (const n of scene.nodes) byId[n.id] = n
+      const busEndsOf = (e) => {
+        const out = []
+        for (const end of [e.source, e.target]) {
+          if (drawioIsBusId(end)) out.push(String(end).toLowerCase())
+        }
+        return out
+      }
+      const keyOf = (ends) => (ends.length < 2 ? null : ends.slice().sort().join('|'))
+      const groupOf = (cellId) => {
+        const n = byId[cellId]
+        return n === undefined ? null : n.parent
+      }
+      const edges = scene.edges
+      for (let i = 0; i < edges.length; i += 1) {
+        const e = edges[i]
+        if (edgePair[e.id] !== undefined) continue
+        const ends = busEndsOf(e)
+        if (ends.length === 2) {
+          edgePair[e.id] = keyOf(ends)
+          continue
+        }
+        if (ends.length !== 1) continue
+        const other = drawioIsBusId(e.source) ? e.target : e.source
+        const group = groupOf(other)
+        if (group === null || group === undefined) continue
+        const family = [e]
+        for (let j = 0; j < edges.length; j += 1) {
+          const c = edges[j]
+          if (c.id === e.id) continue
+          if (groupOf(c.source) === group || groupOf(c.target) === group) family.push(c)
+        }
+        const union = []
+        for (const f of family) for (const b of busEndsOf(f)) if (union.indexOf(b) === -1) union.push(b)
+        const key = keyOf(union)
+        if (key === null) continue
+        for (const f of family) edgePair[f.id] = key
+        for (const n of scene.nodes) if (n.parent === group) nodePair[n.id] = key
+      }
+      return { edgePair: edgePair, nodePair: nodePair }
+    }
+
+    // A bus label is the documented `Bus-N` text, so a label can stand in for its bar.
+    function drawioLabelBusId(lines) {
+      if (!Array.isArray(lines) || lines.length === 0) return null
+      const m = /^Bus-(\d+)$/.exec(String(lines[0]).trim())
+      return m === null ? null : 'bus' + m[1]
+    }
+
+    // What one diagram cell stands for: a bus (its bar, or the Bus-N label above it) or a
+    // branch (an edge, or a transformer symbol sitting on one). null for a cell that carries
+    // no data — the page background and the legend.
+    function drawioHoverTarget(node, pairs) {
+      if (drawioIsBusId(node.id)) return { kind: 'bus', id: node.id }
+      const fromLabel = drawioLabelBusId(node.lines)
+      if (fromLabel !== null) return { kind: 'bus', id: fromLabel }
+      if (pairs !== null && pairs.nodePair[node.id] !== undefined) {
+        return { kind: 'branch', key: pairs.nodePair[node.id] }
+      }
+      return null
+    }
+
+    // The Host matches a bus id EXACTLY against the table spelling (Bus1), while a diagram
+    // cell is bus1. The branch table names every bus it touches, so it supplies the canonical
+    // spelling; an isolated bus, which no branch mentions, falls back to capitalising the cell.
+    function drawioCanonicalBusId(canonical, nodeId) {
+      const lower = String(nodeId).toLowerCase()
+      if (canonical !== null && canonical !== undefined && canonical[lower] !== undefined) return canonical[lower]
+      return String(nodeId).replace(/^bus/i, 'Bus')
+    }
+
+    // A bus-pair key back to something a person reads: bus4|bus7 -> Bus 4 to Bus 7.
+    function drawioPairLabel(key) {
+      const parts = String(key).split('|')
+      const num = (id) => String(id).replace(/^bus/i, '')
+      return parts.length === 2 ? 'Bus ' + num(parts[0]) + ' to Bus ' + num(parts[1]) : 'Branch'
+    }
+
+    // The tooltip when there is nothing to quote: the element still identifies itself, and
+    // the second line says why there is no data rather than looking broken.
+    function drawioFallbackTip(label, hasData) {
+      return label + '\n' + (hasData ? '(not found in the case result tables)' : '(no result data — run ACLF)')
+    }
+
     function drawioDirectPath(files) {
       if (!Array.isArray(files) || files.length !== 1) return null
       const only = files[0]
@@ -975,6 +1088,9 @@ return {
     function DrawioDiagram(props) {
       const scene = props.scene
       const vb = props.view || scene.viewBox
+      // Tooltips are opt-in: with no hover prop the renderer emits exactly what it always
+      // did — no hit areas and no handlers — so a diagram still renders on its own.
+      const hover = props.hover || null
       // draw.io paints in the model's own document order, interleaving vertices and edges.
       // That order is load-bearing: this workspace's diagram declares `bg`, an opaque
       // 900x760 white rectangle, BEFORE its branches. Drawing every edge up front and every
@@ -983,14 +1099,30 @@ return {
       const painted = []
       for (let i = 0; i < scene.edges.length; i += 1) {
         const e = scene.edges[i]
-        const parts = [React.createElement('polyline', {
+        const points = e.points.map((p) => p.x + ',' + p.y).join(' ')
+        const parts = []
+        // The invisible wide-stroke twin that makes a 1.5px branch hoverable.
+        if (hover !== null && hover.pairs !== undefined && hover.pairs.edgePair[e.id] !== undefined) {
+          parts.push(React.createElement('polyline', {
+            key: 'h',
+            points: points,
+            fill: 'none',
+            stroke: 'transparent',
+            strokeWidth: DRAWIO_HIT_STROKE,
+            pointerEvents: 'stroke',
+            onMouseEnter: (ev) => hover.onBranch(hover.pairs.edgePair[e.id], ev),
+            onMouseMove: hover.onMove,
+            onMouseLeave: hover.onLeave,
+          }))
+        }
+        parts.push(React.createElement('polyline', {
           key: 'l',
-          points: e.points.map((p) => p.x + ',' + p.y).join(' '),
+          points: points,
           fill: 'none',
           stroke: drawioThemeColor(e.stroke),
           strokeWidth: e.strokeWidth,
           strokeDasharray: e.dashed ? '6 4' : undefined,
-        })]
+        }))
         if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: drawioThemeColor(e.stroke) }))
         if (e.label !== '') {
           parts.push(React.createElement('text', {
@@ -1024,6 +1156,20 @@ return {
         }
         const label = drawioLabel(n.lines, n.x + n.w / 2, n.y + n.h / 2, n, 't')
         if (label !== null) parts.push(label)
+        // A transparent padded rect, so a 6px bar or a 16px transformer ring is comfortable
+        // to hover. Added after the drawn geometry so it wins the hit test inside this group.
+        const target = hover === null ? null : drawioHoverTarget(n, hover.pairs === undefined ? null : hover.pairs)
+        if (target !== null) {
+          parts.push(React.createElement('rect', {
+            key: 'h',
+            x: n.x - DRAWIO_HIT_PAD, y: n.y - DRAWIO_HIT_PAD,
+            width: n.w + DRAWIO_HIT_PAD * 2, height: n.h + DRAWIO_HIT_PAD * 2,
+            fill: 'transparent', stroke: 'none', pointerEvents: 'all',
+            onMouseEnter: (ev) => (target.kind === 'bus' ? hover.onBus(target.id, ev) : hover.onBranch(target.key, ev)),
+            onMouseMove: hover.onMove,
+            onMouseLeave: hover.onLeave,
+          }))
+        }
         painted.push({ order: n.order === undefined ? i : n.order, el: React.createElement('g', { key: 'n' + i }, parts) })
       }
       // A stable sort, so a model with no order recorded keeps edges before vertices.
@@ -1222,6 +1368,12 @@ return {
       const [drawioDragging, setDrawioDragging] = React.useState(false)
       const drawioCanvasRef = React.useRef(null)
       const drawioDragRef = React.useRef(null)
+      // Tooltip data for the preview, all keyed to the SELECTED case: the branch table
+      // indexed by bus pair, the canonical BusN spelling the Host matches on, the bus
+      // records the connection Host method hands back (filled lazily, one call per bus
+      // actually hovered), the resolved branch pairs of the open scene, and what is under
+      // the cursor right now so a late answer can be ignored.
+      const drawioDataRef = React.useRef({ branch: null, canonical: null, busCache: {}, pairs: null, hovered: null })
       // Derived from the case's diagram list, and read by the action row far below — so it is
       // declared HERE, with its state, not next to the layout that consumes it (a const read
       // above its declaration is a TDZ ReferenceError that blanks the whole tab; 0.6.0 shipped
@@ -1502,6 +1654,8 @@ return {
       // that belongs to a case the user has already moved off.
       function refreshCaseDiagrams(input) {
         const seq = ++diagramSeq
+        // A different case means a different diagram and a different result table.
+        drawioDataRef.current = { branch: null, canonical: null, busCache: {}, pairs: null, hovered: null }
         if (typeof input !== 'string' || input === '') {
           setDrawioFiles([])
           setDrawioFilesError(null)
@@ -1543,6 +1697,111 @@ return {
         openDrawioPicker()
       }
 
+      // The result table the tooltips quote, and only when the case actually has one.
+      function drawioBranchCsvPath() {
+        if (result === null || result === undefined) return null
+        const name = (result.files || []).find((f) => String(f).indexOf('_DF_branch.csv') !== -1)
+        return name === undefined ? null : result.resultDir + '/' + name
+      }
+
+      // Index the branch table by bus pair, and record the canonical BusN spelling of every
+      // bus it names. One paged read of the file the diagram is drawn from; the LINES are
+      // split here because readCsv hands back raw CSV rows while branchTooltip wants columns.
+      function loadDrawioBranchIndex() {
+        const data = drawioDataRef.current
+        const path = drawioBranchCsvPath()
+        if (path === null) { data.branch = null; data.canonical = null; return }
+        const pair = new Map()
+        const canonical = {}
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: path, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!res || !res.ok) return
+              const rows = res.rows || []
+              for (const line of rows) {
+                const c = String(line).split(',')
+                const from = String(c[4] || '').trim()
+                const to = String(c[7] || '').trim()
+                if (from === '' || to === '') continue
+                canonical[from.toLowerCase()] = from
+                canonical[to.toLowerCase()] = to
+                const key = [from.toLowerCase(), to.toLowerCase()].sort().join('|')
+                if (!pair.has(key)) pair.set(key, [])
+                pair.get(key).push(c)
+              }
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              data.branch = pair
+              data.canonical = canonical
+            },
+            () => {},
+          )
+        }
+        page(0, 0)
+      }
+
+      // Hover a bus bar or its label. A cache hit answers instantly; otherwise the bus says
+      // who it is, one call fills the cache for it AND its branch neighbours, and the tip is
+      // rewritten only if that same bus is still under the cursor.
+      function drawioBusTip(nodeId, event) {
+        const data = drawioDataRef.current
+        const busId = drawioCanonicalBusId(data.canonical, nodeId)
+        data.hovered = { kind: 'bus', id: busId }
+        const known = data.busCache[busId]
+        if (known !== undefined) {
+          setDiagramTip({ text: busTooltip(known), x: event.clientX, y: event.clientY })
+          return
+        }
+        setDiagramTip({
+          text: drawioFallbackTip(String(busId), data.branch !== null),
+          x: event.clientX, y: event.clientY,
+        })
+        const path = drawioBranchCsvPath()
+        if (path === null) return
+        callRemote('busConnections', { busId: busId, path: path, sessionId: sessionId }).then(
+          (res) => {
+            if (!res || !res.ok) return
+            for (const rec of (res.busRecords || [])) data.busCache[rec.id] = rec
+            const now = data.hovered
+            const filled = data.busCache[busId]
+            if (filled === undefined || now === null || now.kind !== 'bus' || now.id !== busId) return
+            setDiagramTip((t) => (t === null ? t : { text: busTooltip(filled), x: t.x, y: t.y }))
+          },
+          () => {},
+        )
+      }
+
+      // Hover a branch: an edge, either half of a transformer chain, or the symbol itself.
+      // Parallel circuits between one bus pair all match and are rendered one block each.
+      function drawioBranchTip(key, event) {
+        const data = drawioDataRef.current
+        data.hovered = { kind: 'branch', key: key }
+        const rows = data.branch === null || data.branch === undefined ? undefined : data.branch.get(key)
+        const text = rows === undefined || rows.length === 0
+          ? drawioFallbackTip(drawioPairLabel(key), data.branch !== null)
+          : rows.map((r) => branchTooltip(r)).join('\n\n')
+        setDiagramTip({ text: text, x: event.clientX, y: event.clientY })
+      }
+
+      // The index belongs to one case result, so it is (re)built whenever a diagram is open
+      // and that result changes, and the bus cache is dropped with it.
+      React.useEffect(() => {
+        if (!drawioOpen || drawioPath === '') return undefined
+        drawioDataRef.current.busCache = {}
+        drawioDataRef.current.hovered = null
+        loadDrawioBranchIndex()
+        return undefined
+      }, [drawioOpen, drawioPath, result])
+
+      // A tip must not outlive its modal: closing the preview drops it, so it cannot hang
+      // over the tab if the pointer never left the SVG.
+      React.useEffect(() => {
+        if (drawioOpen) return undefined
+        setDiagramTip(null)
+        drawioDataRef.current.hovered = null
+        return undefined
+      }, [drawioOpen])
+
       // Open the preview modal straight into its picker: one surface holds the file list,
       // the rendered diagram and the raw XML, so no second popover is needed. The list is
       // re-read on open, so a diagram dropped into the folder while the tab is open shows up.
@@ -1579,6 +1838,8 @@ return {
         ).then(
           (xml) => {
             const scene = parseDrawioScene(xml)
+            // Resolve element -> branch once, here, rather than on every pan/zoom repaint.
+            drawioDataRef.current.pairs = drawioBranchPairs(scene)
             setDrawioScene(scene)
             setDrawioLoading(false)
           },
@@ -2613,7 +2874,17 @@ return {
                   onPointerCancel: drawioPointerUp,
                   onPointerLeave: drawioPointerUp,
                   style: { flex: '1 1 auto', minHeight: 0, overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: drawioDragging ? 'grabbing' : 'grab', touchAction: 'none' },
-                }, React.createElement(DrawioDiagram, { scene: drawioScene, view: drawioRect }))
+                }, React.createElement(DrawioDiagram, {
+                  scene: drawioScene,
+                  view: drawioRect,
+                  hover: {
+                    pairs: drawioDataRef.current.pairs,
+                    onBus: drawioBusTip,
+                    onBranch: drawioBranchTip,
+                    onMove: moveDiagramTip,
+                    onLeave: hideDiagramTip,
+                  },
+                }))
                 : null
 
       const drawioModal = drawioOpen ? React.createElement('div', {

@@ -24,7 +24,11 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BODY = join(ROOT, 'interpss-dynamic', 'client-body.js');
-const DIAGRAM = join(ROOT, 'wspace', 'template', 'ieee14-oneline.drawio');
+// The live per-case diagram the Diagram button loads (0.6.6 moved diagrams under the case),
+// plus the result table the tooltips quote.
+const DIAGRAM = join(ROOT, 'wspace', 'data', 'ieee', 'Ieee14Bus', 'diagram', 'ieee14-oneline.drawio');
+const TEMPLATE_DIAGRAM = join(ROOT, 'wspace', 'template', 'ieee14-oneline.drawio');
+const BRANCH_CSV = join(ROOT, 'wspace', 'data', 'ieee', 'Ieee14Bus', 'result', 'ieee14_DF_branch.csv');
 
 let failures = 0;
 function check(label, cond, detail) {
@@ -102,7 +106,13 @@ function build(overrides) {
       + ' diagramXmlFrom: diagramXmlFrom, styleMap: styleMap, labelLines: labelLines,'
       + ' drawioFitRect: drawioFitRect, drawioZoomLimits: drawioZoomLimits, drawioZoomRect: drawioZoomRect,'
       + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
-      + ' drawioThemeColor: drawioThemeColor, drawioDirectPath: drawioDirectPath };');
+      + ' drawioThemeColor: drawioThemeColor, drawioDirectPath: drawioDirectPath,'
+      + ' drawioBranchPairs: drawioBranchPairs, drawioIsBusId: drawioIsBusId, drawioLabelBusId: drawioLabelBusId,'
+      + ' drawioHoverTarget: drawioHoverTarget, drawioCanonicalBusId: drawioCanonicalBusId,'
+      + ' drawioPairLabel: drawioPairLabel, drawioFallbackTip: drawioFallbackTip,'
+      + ' busTooltip: busTooltip, branchTooltip: branchTooltip };');
+
+
   return factory(makeReact(overrides || {}), { call: () => Promise.resolve({}) }, { get: () => undefined },
     DOMParserShim, Blob, Response, DecompressionStream, atob);
 }
@@ -605,6 +615,145 @@ check('the disabled button explains itself and the one-diagram hint promises a d
   noFiles !== null && String(noFiles.props.title).indexOf('diagram folder') >= 0
   && oneFile !== null && String(oneFile.props.title).indexOf('Open the case diagram') >= 0,
   noFiles && noFiles.props.title);
+
+// --- 11. diagram bus/branch tooltips ---------------------------------------
+console.log('\n11. diagram bus/branch tooltips');
+const partsOf = (g) => (Array.isArray(g.kids[0]) ? g.kids[0] : g.kids);
+const groupsOf = (svg) => (svg.kids.length === 1 && Array.isArray(svg.kids[0]) ? svg.kids[0] : svg.kids);
+check('the template copy still matches the live case diagram',
+  readFileSync(DIAGRAM, 'utf8') === readFileSync(TEMPLATE_DIAGRAM, 'utf8'));
+
+if (scene) {
+  // the parser must keep what a tooltip needs
+  const bar = scene.nodes.find((n) => n.id === 'bus1');
+  const half = scene.nodes.find((n) => n.id === 'xf15');
+  check('vertices keep their parent cell id',
+    bar !== undefined && bar.parent === '1' && half !== undefined && half.parent === '3',
+    (bar && bar.parent) + '/' + (half && half.parent));
+  const e1 = scene.edges.find((e) => e.id === 'e1');
+  check('edges keep id/source/target',
+    e1 !== undefined && e1.source === 'bus1' && e1.target === 'bus2',
+    e1 && e1.id + ':' + e1.source + '->' + e1.target);
+
+  const pairs = api.drawioBranchPairs(scene);
+  check('every edge resolves to a branch pair',
+    scene.edges.every((e) => typeof pairs.edgePair[e.id] === 'string'),
+    scene.edges.filter((e) => typeof pairs.edgePair[e.id] !== 'string').map((e) => e.id).join(','));
+  check('a plain line resolves to its two buses', pairs.edgePair['e1'] === 'bus1|bus2', pairs.edgePair['e1']);
+  check('both halves of a transformer branch resolve to the same pair',
+    pairs.edgePair['e8a'] === 'bus4|bus7' && pairs.edgePair['e8b'] === 'bus4|bus7',
+    pairs.edgePair['e8a'] + ' / ' + pairs.edgePair['e8b']);
+  check('the transformer symbol itself resolves to its branch',
+    pairs.nodePair['xf8'] === 'bus4|bus7' && pairs.nodePair['xf8b'] === 'bus4|bus7',
+    pairs.nodePair['xf8'] + ' / ' + pairs.nodePair['xf8b']);
+  check('the page background and the legend resolve to nothing',
+    pairs.nodePair['bg'] === undefined && pairs.nodePair['legend'] === undefined);
+  check('the resolver is defensive about an absent scene',
+    api.drawioBranchPairs(null).edgePair !== undefined);
+
+  // cross-check the resolved pairs against the result table the tooltips quote
+  const csv = readFileSync(BRANCH_CSV, 'utf8').replace(/\r\n/g, '\n').split('\n').filter((l) => l.trim() !== '');
+  const head = csv[0].split(',');
+  const iFrom = head.indexOf('FromBusID');
+  const iTo = head.indexOf('ToBusID');
+  const iX = head.indexOf('IsXfmr');
+  const table = new Map();
+  for (const line of csv.slice(1)) {
+    const c = line.split(',');
+    const key = [c[iFrom].toLowerCase(), c[iTo].toLowerCase()].sort().join('|');
+    if (!table.has(key)) table.set(key, []);
+    table.get(key).push(c);
+  }
+  check('the branch table and the diagram describe the same branch pairs',
+    table.size === 20 && scene.edges.every((e) => table.has(pairs.edgePair[e.id])),
+    'table ' + table.size + ' pairs, ' + scene.edges.length + ' edges');
+  const xfRow = table.get('bus4|bus7');
+  check('a transformer pair finds its transformer row',
+    xfRow !== undefined && xfRow.length === 1 && xfRow[0][iX] === 'true',
+    xfRow && xfRow[0][iX]);
+
+  // hit areas: opt-in, invisible, and only on cells that carry data
+  const noHover = groupsOf(api.DrawioDiagram({ scene: scene })).map(partsOf);
+  check('without hover no hit area is emitted',
+    noHover.every((parts) => parts.every((p) => p.props.key !== 'h')));
+
+  const calls = [];
+  const hover = {
+    pairs: pairs,
+    onBus: (id) => calls.push(['bus', id]),
+    onBranch: (key) => calls.push(['branch', key]),
+    onMove: () => {},
+    onLeave: () => {},
+  };
+  const groups = groupsOf(api.DrawioDiagram({ scene: scene, hover: hover }));
+  const byKey = {};
+  for (const g of groups) byKey[g.props.key] = partsOf(g);
+  const hitOf = (k) => (byKey[k] || []).find((p) => p.props.key === 'h');
+
+  const i8a = scene.edges.findIndex((e) => e.id === 'e8a');
+  const edgeHit = hitOf('e' + i8a);
+  check('a branch emits a transparent wide-stroke hit line',
+    edgeHit !== undefined && edgeHit.props.stroke === 'transparent'
+    && edgeHit.props.strokeWidth >= 8 && edgeHit.props.pointerEvents === 'stroke',
+    edgeHit && String(edgeHit.props.strokeWidth));
+  edgeHit.props.onMouseEnter({ clientX: 1, clientY: 2 });
+  check('hovering a branch reports its resolved bus pair',
+    calls.length === 1 && calls[0][0] === 'branch' && calls[0][1] === 'bus4|bus7', JSON.stringify(calls));
+
+  const iBus = scene.nodes.findIndex((n) => n.id === 'bus5');
+  const busHit = hitOf('n' + iBus);
+  check('a bus emits a padded transparent hit rect',
+    busHit !== undefined && busHit.props.fill === 'transparent' && busHit.props.pointerEvents === 'all'
+    && busHit.props.width === scene.nodes[iBus].w + 8, busHit && String(busHit.props.width));
+  busHit.props.onMouseEnter({ clientX: 3, clientY: 4 });
+  check('hovering a bus reports that bus',
+    calls.length === 2 && calls[1][0] === 'bus' && calls[1][1] === 'bus5', JSON.stringify(calls));
+
+  const iLabel = scene.nodes.findIndex((n) => n.kind === 'text' && n.lines.join('') === 'Bus-5');
+  check('a Bus-N label stands in for its bar', hitOf('n' + iLabel) !== undefined);
+  check('the legend and the background emit no hit area',
+    hitOf('n' + scene.nodes.findIndex((n) => n.id === 'bg')) === undefined
+    && hitOf('n' + scene.nodes.findIndex((n) => n.id === 'legend')) === undefined);
+
+  check('a bus cell id is recognised',
+    api.drawioIsBusId('bus12') && !api.drawioIsBusId('nm1') && !api.drawioIsBusId('bg') && !api.drawioIsBusId(null));
+  check('a Bus-N label maps to its bar, other text does not',
+    api.drawioLabelBusId(['Bus-7']) === 'bus7' && api.drawioLabelBusId(['vertical bus']) === null
+    && api.drawioLabelBusId([]) === null);
+  check('the canonical BusN spelling comes from the table',
+    api.drawioCanonicalBusId({ bus3: 'Bus3' }, 'bus3') === 'Bus3');
+  check('a bus no branch mentions falls back to the cell spelling',
+    api.drawioCanonicalBusId({}, 'bus9') === 'Bus9' && api.drawioCanonicalBusId(null, 'bus9') === 'Bus9');
+  check('a pair key reads as two buses', api.drawioPairLabel('bus4|bus7') === 'Bus 4 to Bus 7', api.drawioPairLabel('bus4|bus7'));
+  check('the fallback tip distinguishes missing data from a missing row',
+    api.drawioFallbackTip('Bus 4', false).indexOf('no result data') >= 0
+    && api.drawioFallbackTip('Bus 4', true).indexOf('not found') >= 0);
+  check('a data-free cell has no hover target',
+    api.drawioHoverTarget(scene.nodes.find((n) => n.id === 'bg'), pairs) === null
+    && api.drawioHoverTarget(scene.nodes.find((n) => n.id === 'legend'), pairs) === null);
+
+  // The tooltip WORDING stays the connection diagram's, so the two cannot drift apart.
+  const busTip = api.busTooltip({
+    name: 'Bus 2     HV', baseKV: '132000.0', status: 'true', voltMag: '1.0450', voltAng: '-0.09',
+    genCount: 1, genCode: 'NonGen', genIds: ['Bus2-G1'],
+    loadCount: 1, loadCode: 'ConstP', loadIds: ['Bus2-L1'],
+    totalGenP: 0.4, totalGenQ: 0.4355,
+  });
+  check('the bus tooltip carries the reference fields',
+    ['Bus Name:', 'BaseVolt:', 'Status:', 'Voltage (pu):', 'Angle (degrees):',
+      'Bus GenCode:', 'Number of generators:', 'Gen ID: Bus2-G1',
+      'Bus LoadCode:', 'Number of loads:', 'Load ID: Bus2-L1',
+      'Total Gen P (pu):', 'Total Gen Q (pu):'].every((f) => busTip.indexOf(f) >= 0),
+    busTip.split('\n').length + ' lines');
+  const xfRow2 = table.get('bus4|bus7')[0];
+  const branchTip = api.branchTooltip(xfRow2);
+  check('the branch tooltip names the transformer and both ends',
+    branchTip.indexOf('Branch ID: Bus4->Bus7(1)') >= 0 && branchTip.indexOf('Branch Type: Transformer') >= 0
+    && branchTip.indexOf('From Bus: Bus4') >= 0 && branchTip.indexOf('To Bus: Bus7') >= 0,
+    branchTip.split('\n')[0]);
+  check('both tooltip builders survive a missing record',
+    api.busTooltip(null) === 'Bus info' && api.branchTooltip(null) === 'Branch info');
+}
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);
