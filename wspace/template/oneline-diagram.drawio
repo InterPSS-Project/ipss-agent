@@ -1,6 +1,6 @@
 <mxfile host="65bd71144e">
     <diagram id="ieee14" name="IEEE 14-Bus">
-        <mxGraphModel dx="1802" dy="501" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="760" background="#ffffff" math="0" shadow="0">
+        <mxGraphModel dx="1278" dy="606" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="760" background="#ffffff" math="0" shadow="0">
             <root>
                 <mxCell id="0"/>
                 <mxCell id="1" parent="0"/>
@@ -244,7 +244,7 @@
                         </Array>
                     </mxGeometry>
                 </mxCell>
-                <mxCell id="3" value="" style="group" vertex="1" connectable="0" parent="1">
+                <mxCell id="3" value="" style="group" parent="1" vertex="1" connectable="0">
                     <mxGeometry x="462" y="306" width="16" height="24" as="geometry"/>
                 </mxCell>
                 <mxCell id="xf15" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="3" vertex="1">
@@ -253,7 +253,7 @@
                 <mxCell id="xf15b" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="3" vertex="1">
                     <mxGeometry y="8" width="16" height="16" as="geometry"/>
                 </mxCell>
-                <mxCell id="4" value="" style="group" vertex="1" connectable="0" parent="1">
+                <mxCell id="4" value="" style="group" parent="1" vertex="1" connectable="0">
                     <mxGeometry x="352" y="286" width="16" height="24" as="geometry"/>
                 </mxCell>
                 <mxCell id="xf9" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="4" vertex="1">
@@ -262,7 +262,7 @@
                 <mxCell id="xf9b" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="4" vertex="1">
                     <mxGeometry y="8" width="16" height="16" as="geometry"/>
                 </mxCell>
-                <mxCell id="5" value="" style="group" vertex="1" connectable="0" parent="1">
+                <mxCell id="5" value="" style="group" parent="1" vertex="1" connectable="0">
                     <mxGeometry x="628" y="247" width="24" height="16" as="geometry"/>
                 </mxCell>
                 <mxCell id="xf14" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="5" vertex="1">
@@ -271,7 +271,7 @@
                 <mxCell id="xf14b" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="5" vertex="1">
                     <mxGeometry x="8" width="16" height="16" as="geometry"/>
                 </mxCell>
-                <mxCell id="6" value="" style="group" vertex="1" connectable="0" parent="1">
+                <mxCell id="6" value="" style="group" parent="1" vertex="1" connectable="0">
                     <mxGeometry x="133" y="286" width="16" height="24" as="geometry"/>
                 </mxCell>
                 <mxCell id="xf10" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="6" vertex="1">
@@ -280,7 +280,7 @@
                 <mxCell id="xf10b" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="6" vertex="1">
                     <mxGeometry y="8" width="16" height="16" as="geometry"/>
                 </mxCell>
-                <mxCell id="7" value="" style="group" vertex="1" connectable="0" parent="1">
+                <mxCell id="7" value="" style="group" parent="1" vertex="1" connectable="0">
                     <mxGeometry x="458" y="240" width="24" height="16" as="geometry"/>
                 </mxCell>
                 <mxCell id="xf8" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="7" vertex="1">
@@ -288,6 +288,9 @@
                 </mxCell>
                 <mxCell id="xf8b" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="7" vertex="1">
                     <mxGeometry x="8" width="16" height="16" as="geometry"/>
+                </mxCell>
+                <mxCell id="8" style="edgeStyle=none;html=1;exitX=1;exitY=0;exitDx=0;exitDy=0;" edge="1" parent="1" source="xf10b" target="bg">
+                    <mxGeometry relative="1" as="geometry"/>
                 </mxCell>
             </root>
         </mxGraphModel>

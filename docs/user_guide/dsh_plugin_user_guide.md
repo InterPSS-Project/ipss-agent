@@ -318,9 +318,10 @@ For the full tool contract (inputs, cards, version history), see [interpss-tools
 | Adjust load Q to a voltage band   | `Adjust Bus14 load Q to bring it into [0.89, 0.90] pu`           | `$ipss-case-aclf-adjust` / `interpss_run_gvy` + `interpss_run_aclf` |
 | Case summary / top-N              | `Summarize the current case` / `Find the lowest voltage buses`   | `$ipss-case-summary` / `interpss_case_summary` |
 | What-if scenario script           | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve`             | `$ipss-case-script` / `interpss_run_gvy`       |
+| One-line diagram for the case     | `Draw the one-line diagram for the current case`                 | `$ipss-case-diagram` (script)                  |
 
 
-Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`. Plain natural language works the same when the agent picks those tools.
+Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`, `$ipss-case-diagram`. Plain natural language works the same when the agent picks those tools.
 
 ### Case selection
 

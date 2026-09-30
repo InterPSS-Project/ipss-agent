@@ -75,5 +75,6 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 | Adjust load Q to a bus-voltage band       | [.agents/skills/ipss-case-aclf-adjust/SKILL.md](.agents/skills/ipss-case-aclf-adjust/SKILL.md) |
 | Summary report for the current case       | [.agents/skills/ipss-case-summary/SKILL.md](.agents/skills/ipss-case-summary/SKILL.md)     |
 | Run a scenario script on the current case | [.agents/skills/ipss-case-script/SKILL.md](.agents/skills/ipss-case-script/SKILL.md)       |
+| Draw a one-line diagram for the case      | [.agents/skills/ipss-case-diagram/SKILL.md](.agents/skills/ipss-case-diagram/SKILL.md)     |
 
 

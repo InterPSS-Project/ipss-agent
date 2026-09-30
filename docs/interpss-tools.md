@@ -534,6 +534,7 @@ tab's picker.
 | `ipss-case-summary` | Summarize the current case — totals or a top-N ranking (wraps `interpss_case_summary`) |
 | `ipss-case-script` | Apply a scenario edit to the current case — `.gvy` scripts and/or inline Groovy, one call or a sequence (wraps `interpss_run_gvy`) |
 | `ipss-case-ca` | DC contingency analysis for the current case, dialog-free (wraps `interpss_run_ca`) |
+| `ipss-case-diagram` | Draw the current case's one-line diagram — `.drawio` plus a PNG preview under the case's `diagram/` folder, in the template's style, from its ACLF result tables (`wspace/script/gen_oneline_diagram.py`) |
 | `ipss-sim` | Full simulation and reporting workflow through the Java CLI (`IpssCmd`) |
 | `nerc-report-html`, `nerc-report-slides` | Follow-on artifacts from a NERC report |
 
