@@ -20,6 +20,9 @@ branches):
   4. grid snap, then edge routing: straight by default, a short local "hop"
      around a bus bar only when the straight line would cut through one.
 
+`--open` hands the finished diagram to the draw.io editor through the draw.io MCP server
+(`wspace/script/drawio_mcp.py`), which also round-trips hand edits back into the file.
+
 Deliverable, plus a raster preview built from the same geometry:
 
   <stem>-oneline.drawio         the diagram (draw.io / the InterPSS preview)
@@ -38,6 +41,7 @@ import csv
 import math
 import os
 import re
+import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from collections import defaultdict, deque
@@ -585,19 +589,30 @@ def write_drawio(path, stem, title, subtitle, buses, symbols, edges, page_w, pag
     add('            <root>\n                <mxCell id="0"/>\n                <mxCell id="1" parent="0"/>\n')
     add('                <mxCell id="bg" value="" style="rounded=0;fillColor=#FFFFFF;strokeColor=none;locked=1;" parent="1" vertex="1">\n'
         '                    <mxGeometry width="%g" height="%g" as="geometry"/>\n                </mxCell>\n' % (page_w, page_h))
+    # Header: title and subtitle on the left, legend on the right -- but a narrow page has no
+    # room for the two side by side, and draw.io paints the legend box over the title text
+    # (the exporter then widens the page to fit the overflowing cells). So the legend stacks
+    # under the subtitle whenever the title column would come out too thin.
+    lw = min(360.0, page_w - 80.0)
+    lx, ly, lh = page_w - 40.0 - lw, 20.0, 66.0
+    title_w = lx - 60.0
+    if title_w < 340.0:
+        lx, ly, title_w = 40.0, 88.0, page_w - 80.0
+    sub_w = title_w
     add('                <mxCell id="title" value="%s" style="%s" parent="1" vertex="1">\n'
-        '                    <mxGeometry x="40" y="20" width="800" height="30" as="geometry"/>\n                </mxCell>\n'
-        % (esc(title), TEXT_STYLE % (20, "fontStyle=1;", "#000000", "left", "middle")))
+        '                    <mxGeometry x="40" y="20" width="%g" height="30" as="geometry"/>\n                </mxCell>\n'
+        % (esc(title), TEXT_STYLE % (20, "fontStyle=1;", "#000000", "left", "middle"), title_w))
     add('                <mxCell id="subtitle" value="%s" style="%s" parent="1" vertex="1">\n'
-        '                    <mxGeometry x="40" y="52" width="1000" height="18" as="geometry"/>\n                </mxCell>\n'
-        % (esc(subtitle), TEXT_STYLE % (11, "", "#666666", "left", "middle")))
-    lx, ly, lw, lh = page_w - 370.0, 20.0, 330.0, 66.0
+        '                    <mxGeometry x="40" y="52" width="%g" height="18" as="geometry"/>\n                </mxCell>\n'
+        % (esc(subtitle), TEXT_STYLE % (11, "", "#666666", "left", "middle"), sub_w))
     add('                <mxCell id="legend" value="" style="rounded=0;fillColor=#F7F7F7;strokeColor=#CCCCCC;" parent="1" vertex="1">\n'
         '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n' % (lx, ly, lw, lh))
     add('                <mxCell id="legendText" value="%s" style="%s" parent="1" vertex="1">\n'
         '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n'
-        % (esc("\u2503 vertical bus      \u2500 branch      \u25cb\u25cb transformer\n"
-               "Bus-N  id only (in the app, hover a bar, a label or a branch)"),
+        # draw.io collapses a literal newline in an html label, so the line break is a <br>
+        # (escaped here); the plugin preview turns the same <br> back into a newline.
+        % (esc("\u2503 vertical bus      \u2500 branch      \u25cb\u25cb transformer<br>"
+               "Bus-N  id only \u2014 hover a bar, a label or a branch"),
            TEXT_STYLE % (10, "", "#000000", "left", "top") + "spacing=6;", lx, ly, lw, lh))
     for b in buses:
         add('                <mxCell id="bus%d" value="" style="%s" parent="1" vertex="1">\n'
@@ -800,6 +815,15 @@ def main():
     ap.add_argument("--scale", type=float, default=1.0, help="preview PNG scale")
     ap.add_argument("--seed", type=int, default=11)
     ap.add_argument("--check", metavar="DRAWIO", help="only validate an existing diagram")
+    ap.add_argument("--app-export", metavar="PNG", nargs="?", const="", default=None,
+                    help="also render the diagram with the local draw.io desktop app's CLI "
+                         "(authoritative draw.io output, not the Pillow approximation); optional "
+                         "output path, default <stem>-oneline-drawio.png")
+    ap.add_argument("--app", default="/Applications/draw.io.app/Contents/MacOS/draw.io",
+                    help="draw.io desktop executable used by --app-export")
+    ap.add_argument("--open", action="store_true",
+                    help="after a passing self-check, open the diagram in the draw.io editor "
+                         "through the draw.io MCP server (wspace/script/drawio_mcp.py)")
     args = ap.parse_args()
 
     stem, buses, branches, anchor = read_case(args.case_dir)
@@ -827,6 +851,24 @@ def main():
         png = args.png or os.path.splitext(out)[0] + "-preview.png"
         write_png(png, title, subtitle, buses, symbols, edges, page_w, page_h, args.scale)
         print("wrote %s" % png)
+    if args.app_export is not None and ok:
+        target = args.app_export or os.path.splitext(out)[0] + "-drawio.png"
+        if not os.path.exists(args.app):
+            print("note: no draw.io desktop app at %s -- skipping --app-export" % args.app, file=sys.stderr)
+        else:
+            # --no-sandbox because the export runs inside this harness's own file sandbox, which
+            # blocks the Electron/Chromium one; the input path must be absolute.
+            rc = subprocess.call([args.app, "--no-sandbox", "--export", "--format", "png",
+                                  "--scale", "2", "--output", os.path.abspath(target),
+                                  os.path.abspath(out)])
+            print(("wrote %s (draw.io desktop render)" % target) if rc == 0 and os.path.exists(target)
+                  else "note: the draw.io desktop export failed (exit %d)" % rc)
+    if args.open and ok:
+        helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "drawio_mcp.py")
+        print("handing %s to the draw.io editor through the draw.io MCP ..." % os.path.basename(out))
+        if subprocess.call([sys.executable, helper, "open", out]) != 0:
+            print("note: the draw.io MCP could not open the editor -- is the server installed at "
+                  "$DSH_HOME/mcp-servers/drawio? see docs/oneline-diagram-process.md", file=sys.stderr)
     sys.exit(0 if ok else 1)
 
 

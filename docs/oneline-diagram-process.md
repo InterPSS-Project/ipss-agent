@@ -34,8 +34,8 @@ The two CSVs are written by an AC load flow, so run `$ipss-case-aclf` on the cas
 2. **Emit** `mxGraphModel` XML: vertical bus bars, branches, transformer symbols.
 3. **Preview** in draw.io; export a PNG for review when geometry matters.
 4. **Iterate** on layout, labels and overlaps from review feedback.
-5. **Author/repair** with the official draw.io MCP (`@drawio/mcp` — `list_pages` / `get_page` /
-   `set_page`); the community `next-ai-draw-io` connector was dropped early on.
+5. **Author/repair** with the official draw.io MCP (`@drawio/mcp` 1.6.1 — `open_drawio_xml` plus `list_pages` / `get_page` /
+   `set_page`, and `wspace/script/drawio_mcp.py` drives the same server from a shell); the community `next-ai-draw-io` connector was dropped early on.
 6. **Deliver** the `.drawio` into the case's `diagram/` folder.
 
 This path is cell-by-cell XML editing with the draw.io MCP as the editor. It is how the template's
@@ -62,12 +62,88 @@ than reinventing.
 | Annotations | none: no bus data, no branch P/Q, no voltage colours |
 | Outputs | `<case>/diagram/<stem>-oneline.drawio` and `<stem>-oneline-preview.png` (a Pillow re-render of the same geometry) |
 | Self-check | the run reads the file back and checks `busN` ids, `Bus-N` labels, no arrowheads, one ring pair per transformer clear of every bar and label, the first bus at the upper-left corner, and that every branch resolves to a hover pair — the way the plugin's preview reads it |
-| Flags | `--out`, `--title`, `--png` / `--no-png`, `--scale`, `--seed`; `--check FILE` re-runs just the self-check |
+| Flags | `--out`, `--title`, `--png` / `--no-png`, `--scale`, `--seed`, `--open` (hand the result to the draw.io editor); `--check FILE` re-runs just the self-check |
 
 Result for the reference case: `wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio` —
 1900 x 1700, 465 cells, 118 bus bars, 186 branches (177 lines + 9 transformer symbols), 195 edges,
 no overlapping footprints. The generator is case-agnostic and was also exercised on
 `wspace/data/ieee/Ieee14Bus`.
+
+### Native draw.io desktop app
+
+The desktop app (`/Applications/draw.io.app`, 31.5.3) renders these files natively — the authoritative
+picture, unlike the Pillow preview. Open one by hand, or headless-export it:
+
+```bash
+open -a draw.io wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio        # GUI
+
+/Applications/draw.io.app/Contents/MacOS/draw.io --no-sandbox \
+    --export --format png --scale 2 --output /tmp/ieee118.png \
+    "$PWD/wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio"             # headless
+```
+
+`--no-sandbox` is required when the export runs inside this harness: the harness's own file sandbox
+otherwise blocks the Electron/Chromium sandbox ("Failed to initialize sandbox. Operation not
+permitted") and the renderer dies. The input path should be absolute. `--format svg|pdf` works too
+(`--crop` trims to the drawing). `gen_oneline_diagram.py <case> --app-export [PNG]` runs that export
+for you after the self-check (default `<stem>-oneline-drawio.png`; `--app PATH` if the install lives
+elsewhere).
+
+Rendering the real app is worth it: it immediately showed two defects the Pillow preview cannot —
+the legend's line break disappeared (draw.io collapses a literal newline in an `html=1` label, so the
+break must be an escaped `<br>`), and on a narrow page the legend box painted over the title while
+the overflowing header cells made the exporter widen the page (600 -> 1041 units). Both are fixed:
+header cells are now sized to the page, and the legend stacks under the subtitle when the title
+column would be thinner than 340 units.
+
+### Hand-off and round-trip through the draw.io MCP
+
+The generated file can be opened in — and edited back from — the draw.io editor through the official
+draw.io MCP server. `@drawio/mcp` 1.6.1 is pinned at `$DSH_HOME/mcp-servers/drawio`, and DSH mounts it
+from the profile's `mcp-drawio` row (`@deepseek-ai/dsh-mcp-client`, stdio, `/opt/homebrew/bin/node`),
+where its tools appear as `mcp__drawio__<tool>` (tools only — the server declares no MCP resources).
+Profile rows are composed when the app starts, so a session that began before the row was added has
+none of them until DSH restarts.
+
+**Wiring, and the trap it hides.** In `~/.dsh/profiles/desktop/cordis.patch.yml` a *new* row must be
+inserted — a bare `- id:` patch targets an existing row, and a target that matches no row is warned
+about and skipped, silently, restart after restart:
+
+```yaml
+- insert:
+    - id: mcp-drawio
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: drawio
+        transport: stdio
+        command: /opt/homebrew/bin/node
+        args:
+          - /Users/mzhou/.dsh/mcp-servers/drawio/node_modules/@drawio/mcp/src/index.js
+```
+
+Two read-only checks confirm it, both available to an agent through `cordis_inspect_query`:
+`Config.listConfigs` with `{name: "@deepseek-ai/dsh-mcp-client"}` should return one entry — its id is
+`include:mcp-drawio`, not `mcp-drawio`, so querying the bare patch id reports "unknown entry id" even
+when the row is healthy — and `Tool.listTools` should list the seven `mcp__drawio__*` tools.
+
+| Tool | Role |
+|------|------|
+| `open_drawio_xml` | Open a diagram in the browser editor — also what `--open` calls |
+| `list_pages` / `get_page` / `set_page` | Read or replace one page of a local `.drawio` file |
+| `open_drawio_csv` / `open_drawio_mermaid` | draw.io's importers, which auto-lay generic diagrams |
+| `search_shapes` | draw.io shape-library search (it does include `mxgraph.electrical.*`) |
+
+`wspace/script/drawio_mcp.py` speaks the same stdio protocol, so the round-trip also works from a host
+without the MCP tools (Codex, Claude Code, a plain shell): `list`, `get [--out PATH]`,
+`set --page N --content FILE|-`, `open`, `shapes`. Measured on a generated 14-bus diagram:
+`get_page` leaves the file byte-identical, a `set_page` of the same page returns identical page XML,
+and `--check` still passes on the MCP-written file (75 cells, 25 edges, 5 transformer groups).
+`set_page` re-serialises the file, so its byte length changes even when the diagram does not.
+
+`gen_oneline_diagram.py <case> --open` does generate -> self-check -> open in one step. Keep the
+CSV/Mermaid importers and the ELK `postLayout` out of this path: they auto-place generic shapes and
+drop the bus bars, the transformer `group` cells and the `busN` / `Bus-N` ids that the app's
+bus/branch tooltips resolve against.
 
 ## Diagram rules (final)
 
@@ -114,6 +190,8 @@ no overlapping footprints. The generator is case-agnostic and was also exercised
 | Force-directed spreading flattened the topology into a hairball | Layout is stress majorization on hop distances; force spreading is only used to compact it |
 | Transformer symbols floated up to ~160 px off their branch | Each symbol is placed on the branch trunk and slid along that line when the spot is taken; both stubs stay straight and collinear |
 | Voltage colours (tried, then removed on request) | Every bar uses the template grey; the name suffix only feeds the subtitle |
+| Legend collapsed to one long line in draw.io | The legend used a literal newline in an `html=1` label; draw.io treats that as a space, so the two lines merged. The break is now an escaped `<br>`, which both draw.io and the plugin preview render as a line break |
+| Legend painted over the title, page widened by 441 units | On the 600-unit pages the legend sat at `page_w - 370` and the title/subtitle cells were a fixed 800/1000 wide, so they ran under the legend and past the page edge; the exporter then widened the page to fit. Header cells are now measured against the page and the legend stacks under the subtitle when the title column would be under 340 units |
 | Transformer symbol clipped by a bus label | Labels paint last, so a symbol that overlapped one lost part of a ring (the Bus-7 cluster in the 14-bus cases). Placement now searches outward from the branch trunk -- along it, then stepping aside, avoiding bars **and** labels -- and the self-check fails on any overlap that remains |
 | Bus 1 landed wherever the layout put it (middle-right on the 14-bus cases) | The finished layout is rotated rigidly -- a sweep picks the angle that brings Bus 1 closest to the corner, which costs no distance -- and a pinned pass then eases any bus still above or left of it into its lower-right quadrant, so Bus 1 is the clear top-left-most bus. The self-check fails if it is not |
 | Subtitle claimed a voltage the case does not have | The `Vn` suffix convention is IEEE-118-specific; cases without it (the 14-bus CDF files) fell back to a made-up `138 kV`. The subtitle now uses the suffix, else `NomVolt` when it is a real voltage, else nothing |

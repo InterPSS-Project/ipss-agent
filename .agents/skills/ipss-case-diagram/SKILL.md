@@ -102,6 +102,8 @@ failed.
 | `--scale N` | preview scale factor (default 1.0; use 2 for a closer look) |
 | `--seed N` | layout seed (default 11) |
 | `--check FILE` | validate an existing diagram against the same case, writing nothing |
+| `--open` | after a passing self-check, hand the diagram to the draw.io editor through the draw.io MCP server |
+| `--app-export [PNG]` | render it with the local draw.io **desktop app** (authoritative output; default `<stem>-oneline-drawio.png`). `--app PATH` points at another install |
 
 ## Self-check
 
@@ -112,6 +114,40 @@ renders as a clipped ring), **the first bus at the upper-left corner**, every br
 bus pair, and a sane cell count and page. It
 prints `PASS` or the failing lines and sets the exit code. `--check FILE` re-runs exactly that
 against an existing file.
+
+## Hand-off and round-trip with the draw.io MCP
+
+The same diagram can be opened in — and pulled back from — the draw.io editor through the official
+draw.io MCP server (`@drawio/mcp` 1.6.1, pinned at `$DSH_HOME/mcp-servers/drawio`):
+
+| Route | When |
+|---|---|
+| `mcp__drawio__*` tools | Preferred. DSH mounts the server from the profile's `mcp-drawio` row (`@deepseek-ai/dsh-mcp-client`, stdio), which must be written with `insert:` — a bare `- id:` patch targets an existing row and a target that matches no row is **skipped silently**, restart after restart. Profile rows are composed when the app starts, so a session that began before the row was added has none of them |
+| `python3 wspace/script/drawio_mcp.py …` | A host without the MCP tools (Codex, Claude Code, a plain shell). Same server, same tools: `list`, `get`, `set`, `open`, `shapes` |
+| `gen_oneline_diagram.py <case> --open` | Generate, self-check and open the editor in one step |
+
+The **desktop app** is a separate route, no MCP involved: `open -a draw.io <file>` to look at it, or
+headless `/Applications/draw.io.app/Contents/MacOS/draw.io --no-sandbox --export --format png` — the
+`--no-sandbox` is required inside this harness, whose own sandbox otherwise kills the renderer. Its
+output is authoritative where the Pillow preview is an approximation, and it is what caught the
+legend's collapsed line break and its overlap with the title on narrow pages.
+
+Diagnostics when the tools are missing, both read-only via `cordis_inspect_query`: `Config.listConfigs`
+with `{name: "@deepseek-ai/dsh-mcp-client"}` returns one entry when the row is live — note its id is
+`include:mcp-drawio`, so querying the bare patch id says "unknown entry id" even on a healthy row —
+and `Tool.listTools` lists the seven `mcp__drawio__*` tools. The server exposes tools only, no MCP
+resources.
+
+- `open` (`open_drawio_xml`) shows the page in the browser editor. It is the interactive step, never
+  a substitute for the layout work.
+- `get` / `set` (`get_page` / `set_page`) round-trip **one page of a local `.drawio`**. `get` is a
+  pure read; `set` re-serialises the file, so its bytes change while ids, parents and geometry do
+  not. **After a `set`, re-run the self-check** (`--check FILE`).
+- Never route these diagrams through `open_drawio_csv`, `open_drawio_mermaid` or `postLayout: elk`:
+  they auto-place generic shapes, which drops the bus bars, the transformer `group` cells and the
+  `busN` / `Bus-N` ids the preview's tooltips resolve against.
+- `shapes` searches the draw.io library — it does carry electrical stencils (`mxgraph.electrical.*`)
+  if a symbol ever needs replacing.
 
 ## Troubleshooting
 
