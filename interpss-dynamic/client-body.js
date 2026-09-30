@@ -199,6 +199,14 @@ return {
       React.createElement('circle', { cx: 12, cy: 12, r: 3 }),
       React.createElement('path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' }),
     )
+    // The draw.io app mark, drawn inline: the toolbar must work offline and the app page CSP
+    // cannot be assumed, so there is no remote image here. Orange tile, white two-node flow.
+    const drawioAppIcon = React.createElement('svg',
+      { width: 16, height: 16, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+      React.createElement('rect', { x: 0.75, y: 0.75, width: 14.5, height: 14.5, rx: 3.5, fill: '#F08705' }),
+      React.createElement('path', { d: 'M4.3 4.3h3v3h-3z M8.7 8.7h3v3h-3z', fill: '#FFFFFF' }),
+      React.createElement('path', { d: 'M7.3 5.8h2.9v2.9', fill: 'none', stroke: '#FFFFFF', strokeWidth: 1.2 }),
+    )
     const thStyle = { position: 'sticky', top: 0, zIndex: 1, padding: '4px 8px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-overlay)', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }
     const tdStyle = { padding: '3px 8px', border: '1px solid var(--dsw-alias-border-l1)', whiteSpace: 'nowrap' }
     const tableStyle = { borderCollapse: 'collapse', fontSize: '12px', marginTop: '8px', width: '100%' }
@@ -2626,6 +2634,11 @@ return {
       const [rect, setRect] = React.useState(null)
       const [dragging, setDragging] = React.useState(false)
       const [tip, setTip] = React.useState(null)
+      // The "edit in the local draw.io app" button: in flight while the Host launches, and the
+      // one-line outcome under the toolbar. Neither belongs to a case, so they are cleared when
+      // a different diagram is opened.
+      const [editBusy, setEditBusy] = React.useState(false)
+      const [editMsg, setEditMsg] = React.useState(null)
       const canvasRef = React.useRef(null)
       const dragRef = React.useRef(null)
       // Tooltip data keyed to the SELECTED case: the branch
@@ -2763,6 +2776,7 @@ return {
         setError(null)
         setView('rendered')
         setRect(null)
+        setEditMsg(null)
         setLoading(true)
         callRemote('readDrawio', { path: next, sessionId }).then(
           (res) => {
@@ -2802,6 +2816,31 @@ return {
       }
       function hideTip() {
         setTip(null)
+      }
+
+      // Hand the open diagram to the local draw.io app. The browser cannot start a process, so
+      // the Host does it — and `open` reports success as soon as the OS has the file, so a
+      // success here means "launched", never "saved". A failure prints the Host's own reason
+      // (which launcher it tried, and what that launcher said) instead of a bare error.
+      function openInDrawio() {
+        if (path === '' || editBusy) return
+        setEditBusy(true)
+        setEditMsg(null)
+        const target = path
+        callRemote('openDrawio', { path: target, sessionId }).then(
+          (res) => {
+            setEditBusy(false)
+            if (res !== null && res !== undefined && res.ok === true) {
+              setEditMsg({ ok: true, text: 'Launched draw.io' + (res.launcher ? ' (' + res.launcher + ')' : '') })
+              return
+            }
+            setEditMsg({ ok: false, text: 'Could not launch draw.io: ' + (res && res.error ? res.error : 'unknown error') })
+          },
+          (err) => {
+            setEditBusy(false)
+            setEditMsg({ ok: false, text: 'Could not launch draw.io: ' + String(err && err.message ? err.message : err) })
+          },
+        )
       }
 
       // A cache hit answers instantly; otherwise the bus says who it is, one call fills the
@@ -2966,6 +3005,18 @@ return {
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(scene, rect) + '%') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: fit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
+          // The one control that leaves the app: hand the file to the local draw.io desktop
+          // editor. The Host launches it (`openDrawio`), so this stays a plain button.
+          path !== '' ? React.createElement('button', {
+            onClick: openInDrawio,
+            disabled: editBusy,
+            title: 'Edit this diagram in the local draw.io app',
+            'aria-label': 'Edit this diagram in the local draw.io app',
+            style: { ...btn, padding: '4px 7px', display: 'inline-flex', alignItems: 'center', marginLeft: '4px', opacity: editBusy ? 0.6 : 1, cursor: editBusy ? 'progress' : 'pointer' },
+          }, drawioAppIcon) : null,
+          editMsg !== null ? React.createElement('span', {
+            style: { fontSize: '12px', color: editMsg.ok ? 'var(--dsw-alias-label-secondary)' : 'var(--dsw-alias-state-error-primary)' },
+          }, editMsg.text) : null,
         )
         : null
 

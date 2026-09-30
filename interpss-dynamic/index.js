@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio', 'openDrawio']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -92,6 +92,84 @@ async function scanCases(fs, dirTarget, relDir, out) {
 
 // The preview reads one diagram at a time, so this bounds what it accepts as text.
 const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
+
+// --- Launch the local draw.io app (shared, byte-identical in both hosts) -----
+// The browser cannot start a process, so the Diagram tab's edit button asks the Host — and the
+// Host goes through the `subprocess` service rather than `node:child_process`, because the
+// dynamic half is an injected body with no imports and the service is the sandbox-aware
+// execution world the harness already manages. The rungs are tried in order: the draw.io
+// desktop app (macOS), the OS default handler, then `xdg-open` (Linux) / `cmd /c start`
+// (Windows). Each rung resolves its executable FIRST, so a command that is not installed comes
+// back as a message instead of a spawn failure, and the failures are all reported together.
+const DRAWIO_LAUNCH_RUNGS = [
+  { exe: 'open', args: ['-a', 'draw.io'], label: 'open -a draw.io' },
+  { exe: 'open', args: [], label: 'open' },
+  { exe: 'xdg-open', args: [], label: 'xdg-open' },
+]
+const DRAWIO_WINDOWS_RUNG = { exe: 'cmd', args: ['/c', 'start', ''], label: 'cmd /c start' }
+
+function drawioLaunchRungs(platform) {
+  return platform === 'windows' ? [DRAWIO_WINDOWS_RUNG] : DRAWIO_LAUNCH_RUNGS
+}
+
+// A failing rung is worth quoting only if it said something: `open: no such file` is the useful
+// half of a failure, the empty string is not.
+function drawioLaunchStderr(handle) {
+  const collected = handle === null || handle === undefined ? null : handle.collected
+  const reader = collected === null || collected === undefined ? null : collected.stderr
+  if (reader === null || reader === undefined || typeof reader.readFrom !== 'function') return ''
+  try {
+    return String(reader.readFrom(0).text || '').trim().slice(0, 300)
+  } catch (e) {
+    return ''
+  }
+}
+
+// One rung: resolve, spawn, wait for the exit fact. `open` returns as soon as the app is
+// launched, so a zero exit means "handed to the OS", not "draw.io has drawn it".
+async function drawioLaunchOnce(sp, rung, absPath, cwd, signal) {
+  let exe
+  try {
+    exe = await sp.resolveExecutable(rung.exe, undefined, signal)
+  } catch (e) {
+    return { ok: false, why: rung.label + ' is not available here' }
+  }
+  let handle
+  try {
+    handle = sp.spawn({
+      argv: [exe].concat(rung.args, [absPath]),
+      cwd: cwd,
+      stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } },
+      graceMs: 10000,
+      signal: signal,
+    })
+  } catch (e) {
+    return { ok: false, why: rung.label + ' could not start' }
+  }
+  let outcome = null
+  try {
+    outcome = await handle.done
+  } catch (e) {
+    return { ok: false, why: rung.label + ' failed to run' }
+  }
+  if (outcome !== null && outcome !== undefined && outcome.exitCode === 0) {
+    return { ok: true, launcher: rung.label }
+  }
+  const code = outcome === null || outcome === undefined ? '?' : String(outcome.exitCode)
+  const detail = drawioLaunchStderr(handle)
+  return { ok: false, why: rung.label + ' exited ' + code + (detail === '' ? '' : ': ' + detail) }
+}
+
+async function drawioLaunch(sp, platform, absPath, cwd, signal) {
+  const tried = []
+  for (const rung of drawioLaunchRungs(platform)) {
+    const result = await drawioLaunchOnce(sp, rung, absPath, cwd, signal)
+    if (result.ok === true) return { ok: true, launcher: result.launcher }
+    tried.push(result.why)
+  }
+  return { ok: false, error: 'could not launch the local draw.io app (' + tried.join('; ') + ')' }
+}
+// --- end draw.io launcher ---------------------------------------------------
 
 // Sort CSV data rows by one header column. Numeric when every non-empty value in that
 // column parses as a finite number (LoadingPercent, flows, ratings), lexicographic
@@ -571,6 +649,39 @@ export default {
           return { ok: false, error: 'cannot read diagram: ' + path }
         }
         return { ok: true, path: path, xml: String(xml), size: size }
+      },
+
+      // Hand one diagram to the local draw.io desktop app (the Diagram tab's edit button).
+      // The path validation is readDrawio's, the launch itself is the shared helper above, and
+      // the answer names the rung that worked — `open` reports success once the OS has the
+      // file, so this says "launched", not "edited".
+      async openDrawio(args) {
+        const sp = ctx.get('subprocess')
+        if (sp === undefined) return { ok: false, error: 'subprocess service unavailable' }
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const path = args && typeof args.path === 'string' ? args.path : ''
+        if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-\/]*\.drawio$/i.test(path) || path.indexOf('..') !== -1) {
+          return { ok: false, error: 'Invalid diagram path: ' + path }
+        }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        let target
+        try {
+          target = await fs.resolve(root + '/' + path)
+        } catch (e) {
+          return { ok: false, error: 'cannot resolve diagram: ' + path }
+        }
+        const abs = typeof fs.processPath === 'function' ? fs.processPath(target) : ''
+        if (typeof abs !== 'string' || abs === '') {
+          return { ok: false, error: 'this filesystem exposes no host path for ' + path }
+        }
+        let platform = 'posix'
+        try {
+          const env = await sp.terminalEnvironment()
+          if (env !== null && env !== undefined && env.platform === 'windows') platform = 'windows'
+        } catch (e) {}
+        return drawioLaunch(sp, platform, abs, root, undefined)
       },
 
       async readCsv(args) {

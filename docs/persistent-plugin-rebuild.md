@@ -110,11 +110,11 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
 
 - `inject: ['typert']` on the default export (else `apply()` runs before the
   typert registry and `/api` endpoints silently 404)
-- `METHODS` matches the dynamic list (20): `isActivated, checkResult,
+- `METHODS` matches the dynamic list (21): `isActivated, checkResult,
   checkResultFiles, listCases, readCsv, busConnections, runAclf, runCa,
   runReport, getAclfOptions, saveAclfOptions, listCaFiles, getCaOptions,
   saveCaOptions, loadCase, summarizeResult, getNetworkInfo, getBridgeCase,
-  listDrawioFiles, readDrawio`
+  listDrawioFiles, readDrawio, openDrawio`
 - `readCsv` whitelist includes `contingency`: `_DF_(bus|branch|gen|load|contingency)\.csv`
 - **Shared Host features (both halves, since 0.6.3)**: `applyCsvSort(rows, header, column,
   desc)` — byte-identical in both hosts, so the sorted order cannot drift; `readCsv` applies
@@ -148,6 +148,25 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   `..`, any non-`.drawio` name and anything over `MAX_DRAWIO_BYTES` (2 MiB) *before* reading,
   so an oversized file never reaches the RPC payload. `MAX_DRAWIO_BYTES` and `readDrawio` are
   byte-identical in the persistent Host and the two dynamic ones.
+- **Edit in the local draw.io app (Host half, since 0.6.12)**: `openDrawio` takes the same
+  workspace-relative `.drawio` path and the same validation as `readDrawio`, turns it into a
+  host path with `fs.processPath`, and launches it. The browser cannot start a process, so this
+  has to be Host work — and the launch goes through the **`subprocess` service**, not
+  `node:child_process`: the dynamic half is an injected body with **no imports**, and `subprocess`
+  is the sandbox-aware execution world the harness already manages. A shared block between the
+  `// --- Launch the local draw.io app` and `// --- end draw.io launcher` markers is
+  **byte-identical in both hosts** (the guard slices exactly those markers and compares), so the
+  two halves cannot answer differently:
+  - The rungs are `open -a draw.io <file>`, then `open <file>` (the OS default handler), then
+    `xdg-open <file>`; on Windows a single `cmd /c start "" <file>`. `sp.terminalEnvironment()`
+    picks the platform — not `process.platform`, which the dynamic half cannot read.
+  - Each rung calls `resolveExecutable` **before** `sp.spawn`, so a command that is not installed
+    comes back as a message rather than a spawn failure, and every failure is reported together
+    with that launcher's own stderr. `open` exits 0 once the OS has the file, so a success means
+    "launched", never "saved".
+  - `openDrawio` is the 21st `METHODS` entry; adding it to one half only is what §9.4 catches,
+    and §13 drives the ladder itself (the only executable check of it, since the real
+    `subprocess` service exists only inside the Host).
 - **`getBridgeCase`**: the persistent Host answers from its module-level
   `lastLoadedAbs` / `lastLoadedBusCount` / `lastLoadedBranchCount` mirror. A
   dynamic Host has no such mirror, so it delegates to
@@ -327,14 +346,18 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   Trajectory (10) — showing the preview full-size. It has **no heading and no subtitle** (0.6.10):
   the tab bar names the view and the first row (`Simu Case <path>`) says what is drawn, so a
   title block only pushed the diagram down. Its toolbar is controls only — the picker (when the
-  case has several files), `Rendered` / `Source`, `−` / percent / `+`, and `Fit`; the
-  `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped in 0.6.11, because the
-  gestures are discoverable without a sentence in the control row. It reuses
+  case has several files), `Rendered` / `Source`, `−` / percent / `+`, `Fit`, and (since 0.6.12)
+  a **draw.io-marked edit button** that hands the open file to the local desktop app over
+  `interpss/openDrawio`; the `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped
+  in 0.6.11, because the gestures are discoverable without a sentence in the control row. The
+  edit button is in flight (`disabled`, `cursor: progress`) while the Host launches, and its
+  one-line outcome — `Launched draw.io (open -a draw.io)` or the Host's own reason — sits beside
+  it rather than replacing the preview. It reuses
   every renderer piece (`diagramXmlFrom`, `parseDrawioScene`, `drawioBranchPairs`,
-  `DrawioDiagram`, the pan/zoom math, `busTooltip`/`branchTooltip`) and adds **no Host
+  `DrawioDiagram`, the pan/zoom math, `busTooltip`/`branchTooltip`) and adds **no new preview
   endpoint**: `listDrawioFiles` finds the case's diagrams, `readDrawio` reads one,
-  `checkResult` supplies the result dir the tooltips page `<stem>_DF_branch.csv` from, and
-  `busConnections` fills a hovered bus.
+  `checkResult` supplies the result dir the tooltips page `<stem>_DF_branch.csv` from,
+  `busConnections` fills a hovered bus, and `openDrawio` is the launcher above.
   - **The case is not chosen here.** The InterPSS tab owns "the current simulation case",
     so `onCaseChanged` publishes its selection to the module-level `selectedCaseInput` and
     the Diagram tab seeds from it on mount. That is sound because the conversation view
@@ -459,7 +482,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 138 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 154 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -500,6 +523,13 @@ mechanism caught the 0.6.0 modal defect as
   Report, it has **no** Diagram button, and `drawioFiles` / `drawioOpen` /
   `drawioDirectPath` are absent from the body — so re-adding a second preview surface is a
   deliberate act rather than a merge artifact.
+- §13 (since 0.6.12) drives the **draw.io launcher ladder**, the one new behaviour with no
+  client-side surface to render: it slices the shared block out of the persistent Host, compiles
+  it, and runs it against a fake `subprocess` provider. It asserts the argv
+  (`open -a draw.io <file>` first), the fall-through when a rung exits non-zero or does not
+  resolve, that nothing is spawned for an unavailable command, that every failure is reported
+  with its own stderr, and the Windows `cmd /c start "" <file>` rung. The real service exists
+  only inside the Host, so this is as close as a dependency-free suite gets to the button.
 
 Since 0.6.3 **§9 asserts the two plugins are in sync**, which is what makes this rebuild
 guide trustworthy: the suite reads only the dynamic body, so silent drift had made it
@@ -575,7 +605,13 @@ Client-half change is served with the plugin bundle, so the reload is what picks
   branch shows the connection diagram's tooltip (without a result table it says
   `no result data — run ACLF`), the wheel zooms about the cursor, dragging pans, **Fit**
   resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
-  the regression symptom is a Diagram tab that keeps drawing the previous case
+  the regression symptom is a Diagram tab that keeps drawing the previous case.
+  **Since 0.6.12 the draw.io-marked button at the end of the toolbar opens the same file in the
+  local draw.io desktop app** (`open -a draw.io` on macOS): a second or two later the app shows
+  the diagram, the tab prints `Launched draw.io (open -a draw.io)`, and a failure prints the
+  Host's reason (`Could not launch draw.io: could not launch the local draw.io app (… exited 1:
+  …)`) instead of an empty pane. This is the only part of the plugin that needs a **Host**
+  restart to appear — every other change in this guide is Client-half and reloads
 - **CA dialog** (since 0.3.16): with the Texas 2K case selected and no
   `config/ca_run.json`, pressing **CA** opens *Run Contingency Analysis* pre-filled with
   `2k_contingencies_115kVAbove.json` (2359) and `2k_monitored_branches.json`

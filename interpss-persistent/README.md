@@ -47,8 +47,11 @@ parameters and results, no build-time Typert compiler required.
   `diagram/*.drawio` full-size. It follows the InterPSS tab's *Simu Case* selection (and a case
   loaded from chat), offers a picker when the folder holds several files — reopening the one
   last viewed — and gives the diagram pan / zoom / fit, a Rendered / Source toggle and
-  bus/branch tooltips. No new Host endpoint: it reuses `listDrawioFiles`, `readDrawio`,
-  `checkResult` and `busConnections`. 0.6.9 removed the **Diagram** button (and the modal it
+  bus/branch tooltips, and (0.6.12) a draw.io button that opens the file in the **local draw.io
+  desktop app** to edit it. It reuses `listDrawioFiles`, `readDrawio`, `checkResult` and
+  `busConnections`, and the launcher is the one new endpoint (`openDrawio`, over the sandbox-aware
+  `subprocess` service — no `node:child_process`, since the dynamic half has no imports). 0.6.9
+  removed the **Diagram** button (and the modal it
   opened) from the InterPSS tab's action row: the tab is the preview now, so the two surfaces
   cannot drift apart.
 - Remembers the last selected case across tab switches.
@@ -62,7 +65,7 @@ parameters and results, no build-time Typert compiler required.
 `busConnections`, `runAclf`, `runCa`, `runReport`, `getAclfOptions`,
 `saveAclfOptions`, `listCaFiles`, `getCaOptions`, `saveCaOptions`, `loadCase`,
 `summarizeResult`, `getNetworkInfo`, `getBridgeCase`, `listDrawioFiles`,
-`readDrawio`.
+`readDrawio`, `openDrawio`.
 
 ## Chat tools
 

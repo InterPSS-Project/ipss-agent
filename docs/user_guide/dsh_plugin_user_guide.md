@@ -67,7 +67,7 @@ the tab; 0.6.9 removed the InterPSS tab's **Diagram** button, which used to open
 in a dialog — the InterPSS action row is now **ACLF · ⚙ · CA · Report**; 0.6.10 dropped the tab's
 own heading and subtitle, so it opens straight onto the **Simu Case** row and the drawing gets the
 space; 0.6.11 dropped the `Scroll to zoom · drag to pan` hint, leaving the toolbar as controls:
-**Rendered · Source · − · 100% · + · Fit**.)
+**Rendered · Source · − · 100% · + · Fit**; 0.6.12 added the draw.io button at its end.)
 
 1. Select a case in the **InterPSS** tab (a preset or a custom path); the Diagram tab follows.
 2. Switch to **Diagram**. It reads that case's `diagram/` folder:
@@ -80,7 +80,11 @@ space; 0.6.11 dropped the `Scroll to zoom · drag to pan` hint, leaving the tool
     connection diagram shows; without a converged result it says `no result data — run ACLF`;
   - **scroll** to zoom about the cursor, **drag** to pan, **Fit** to reset;
   - **Source** shows the raw draw.io XML.
-4. Loading another case from chat (`interpss_case_load`) moves the Diagram tab with it — it
+4. To change the diagram itself, click the **draw.io button** at the end of the toolbar: it opens
+   the file in the local draw.io desktop app (`open -a draw.io` on macOS), so you can edit and
+   save it there. The tab prints `Launched draw.io (open -a draw.io)`, or the Host's reason if it
+   could not. (0.6.12+; a Host change like this one takes effect only after the app is restarted.)
+5. Loading another case from chat (`interpss_case_load`) moves the Diagram tab with it — it
    always draws the current simulation case, so the two tabs cannot disagree.
 
 ---

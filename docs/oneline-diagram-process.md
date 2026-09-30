@@ -72,7 +72,9 @@ no overlapping footprints. The generator is case-agnostic and was also exercised
 ### Native draw.io desktop app
 
 The desktop app (`/Applications/draw.io.app`, 31.5.3) renders these files natively — the authoritative
-picture, unlike the Pillow preview. Open one by hand, or headless-export it:
+picture, unlike the Pillow preview. Open one by hand, from the plugin (0.6.12+: the draw.io button at
+the end of the **Diagram** tab's toolbar runs the `open -a draw.io` line below on the diagram on
+screen), or headless-export it:
 
 ```bash
 open -a draw.io wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio        # GUI

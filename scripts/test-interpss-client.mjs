@@ -522,6 +522,29 @@ function applyCsvSortOf(src) {
 check('applyCsvSort is byte-identical in both hosts',
   applyCsvSortOf(rd(DYN_HOST)).length > 100 && applyCsvSortOf(rd(DYN_HOST)) === applyCsvSortOf(rd(LIB_HOST)));
 
+// The draw.io launcher is shared by both hosts too: the Diagram tab's edit button asks the
+// Host, and the Host must answer the same way whichever half is loaded. The dynamic half is an
+// injected body with no imports, so neither copy may reach for node:child_process — the launch
+// goes through the sandbox-aware `subprocess` service.
+const SPAWN_MARK = '// --- Launch the local draw.io app';
+const SPAWN_END = '// --- end draw.io launcher';
+function drawioLauncherOf(src) {
+  const a = src.indexOf(SPAWN_MARK);
+  const b = src.indexOf(SPAWN_END);
+  return a < 0 || b < 0 ? '' : src.slice(a, b);
+}
+check('the draw.io launcher is present in both hosts and byte-identical',
+  drawioLauncherOf(rd(DYN_HOST)).length > 1000
+  && drawioLauncherOf(rd(DYN_HOST)) === drawioLauncherOf(rd(LIB_HOST)),
+  drawioLauncherOf(rd(DYN_HOST)).length + ' chars');
+check('both hosts declare the openDrawio endpoint and launch through the subprocess service',
+  dynMethods !== null && dynMethods.split(',').indexOf('openDrawio') >= 0
+  && rd(LIB_HOST).indexOf('async openDrawio(') >= 0 && rd(DYN_HOST).indexOf('async openDrawio(') >= 0
+  && rd(LIB_HOST).indexOf("get('subprocess')") >= 0 && rd(DYN_HOST).indexOf("get('subprocess')") >= 0
+  // the comment above the launcher names node:child_process to say why it is NOT used, so look
+  // for an actual import of it rather than for the word
+  && rd(DYN_HOST).indexOf("'node:child_process'") < 0 && rd(LIB_HOST).indexOf("'node:child_process'") < 0);
+
 // 9.6 the accepted divergences stay put: the chat tools are persistent-only (the dynamic
 // host is an injected body with no imports, so it cannot carry node:fs helpers either)
 check('the chat tools remain persistent-only',
@@ -816,6 +839,45 @@ check('the zoom toolbar and readout are present',
 // ends at Fit.
 check('the toolbar carries no scroll/drag hint text',
   drawnFlat.indexOf('Scroll to zoom') < 0 && body.indexOf('Scroll to zoom') < 0);
+// The edit button is the one control that leaves the app: the Host launches the local draw.io
+// desktop app, so the click must reach `openDrawio` with the diagram actually on screen.
+const editCalls = [];
+const editApi = build(drawn);
+let editTree = null;
+try {
+  editTree = editApi.DiagramView({
+    sessionId: 'test-session',
+    callRemote: (method, input) => { editCalls.push([method, input]); return Promise.resolve({ ok: true, launcher: 'open -a draw.io' }); },
+  });
+  check('rendering the edit button does not throw', editTree !== null && editTree !== undefined);
+} catch (e) {
+  check('rendering the edit button does not throw', false, e.constructor.name + ': ' + e.message);
+}
+const findInTree = (node, want) => {
+  let hit = null;
+  const walk = (n) => {
+    if (hit !== null || n === null || typeof n !== 'object') return;
+    if (Array.isArray(n)) { for (const k of n) walk(k); return; }
+    if (want(n)) { hit = n; return; }
+    if (n.kids) walk(n.kids);
+  };
+  walk(node);
+  return hit;
+};
+const editButton = findInTree(editTree, (n) => n.type === 'button'
+  && String(n.props.title || '').indexOf('local draw.io app') >= 0);
+check('the toolbar carries the local-draw.io edit button with its tooltip',
+  editButton !== null && String(editButton.props['aria-label']).indexOf('local draw.io app') >= 0
+  && editButton.props.disabled === false, editButton === null ? 'no button' : String(editButton.props.title));
+if (editButton !== null) {
+  editButton.props.onClick();
+  check('the edit button asks the Host to launch draw.io for the open diagram',
+    editCalls.length === 1 && editCalls[0][0] === 'openDrawio'
+    && editCalls[0][1].path === 'wspace/data/c/diagram/d0.drawio'
+    && editCalls[0][1].sessionId === 'test-session', JSON.stringify(editCalls));
+}
+check('the edit button wears the draw.io mark, not a text label',
+  JSON.stringify(editTree).indexOf('F08705') >= 0);
 check('the tooltip element renders the hovered record', drawnFlat.indexOf('Voltage (pu): 1.0200') >= 0);
 if (scene) {
   const dgmApi = build(drawn);
@@ -856,6 +918,87 @@ check('the Source view shows the raw file', sourceTab.indexOf('<mxfile><diagram/
 check('the preview has exactly one entry point left, and it is this view',
   (slice.match(/callRemote\('readDrawio'/g) || []).length === 1
   && slice.indexOf('drawioDirectPath') < 0 && slice.indexOf('drawioModal') < 0);
+
+// --- 13. the draw.io launcher ladder ---------------------------------------
+console.log('\n13. the local draw.io launcher (edit button)');
+// The edit button cannot be exercised end to end here — the real `subprocess` service only
+// exists inside the harness Host — so this drives the SHARED helper out of the installed host
+// file against a fake provider. It is the only executable check of what the button actually
+// runs, and the argv is the part a person would notice: `open -a draw.io <file>`.
+const spawnBlock = (() => {
+  const src = rd(LIB_HOST);
+  const a = src.indexOf('// --- Launch the local draw.io app');
+  const b = src.indexOf('// --- end draw.io launcher');
+  return a < 0 || b < 0 ? '' : src.slice(a, b);
+})();
+check('the launcher block is extractable from the persistent host', spawnBlock.length > 1000, spawnBlock.length + ' chars');
+let launchApi = null;
+try {
+  launchApi = new Function(spawnBlock + '\nreturn { drawioLaunch: drawioLaunch };')();
+} catch (e) {
+  launchApi = null;
+}
+check('the launcher block evaluates on its own', launchApi !== null && typeof launchApi.drawioLaunch === 'function');
+
+if (launchApi !== null) {
+  const ABS = '/ws/wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio';
+  const fakeSubprocess = (options) => {
+    const o = options || {};
+    const spawned = [];
+    return {
+      spawned,
+      async terminalEnvironment() { return { platform: o.platform === 'windows' ? 'windows' : 'posix' }; },
+      async resolveExecutable(command) {
+        if ((o.available || []).indexOf(command) < 0) throw new Error('not found: ' + command);
+        return '/resolved/' + command;
+      },
+      spawn(spec) {
+        spawned.push(spec.argv);
+        const rung = spec.argv.slice(1).join(' ');
+        const code = Object.prototype.hasOwnProperty.call(o.exits || {}, rung) ? o.exits[rung] : 0;
+        return {
+          collected: { stderr: { readFrom: () => ({ text: code === 0 ? '' : 'boom from ' + rung }) } },
+          done: Promise.resolve({ exitCode: code, signal: null }),
+        };
+      },
+    };
+  };
+
+  const appRung = fakeSubprocess({ available: ['open', 'xdg-open'] });
+  const launched = await launchApi.drawioLaunch(appRung, 'posix', ABS, '/ws', undefined);
+  check('the draw.io app is the first rung on posix and the argv is open -a draw.io <file>',
+    launched.ok === true && launched.launcher === 'open -a draw.io'
+    && JSON.stringify(appRung.spawned) === JSON.stringify([['/resolved/open', '-a', 'draw.io', ABS]]),
+    JSON.stringify(appRung.spawned));
+
+  const fallback = fakeSubprocess({ available: ['open', 'xdg-open'], exits: { ['-a draw.io ' + ABS]: 1 } });
+  const second = await launchApi.drawioLaunch(fallback, 'posix', ABS, '/ws', undefined);
+  check('a failing app rung falls through to the OS default handler',
+    second.ok === true && second.launcher === 'open' && fallback.spawned.length === 2, JSON.stringify(second));
+
+  const linux = fakeSubprocess({ available: ['xdg-open'] });
+  check('a missing open falls through to xdg-open and spawns nothing else',
+    (await launchApi.drawioLaunch(linux, 'posix', ABS, '/ws', undefined)).launcher === 'xdg-open'
+    && linux.spawned.length === 1 && linux.spawned[0][0] === '/resolved/xdg-open');
+
+  const nothing = fakeSubprocess({ available: [] });
+  const none = await launchApi.drawioLaunch(nothing, 'posix', ABS, '/ws', undefined);
+  check('with no launcher installed the error names every rung and starts no process',
+    none.ok === false && none.error.indexOf('open -a draw.io') >= 0 && none.error.indexOf('xdg-open') >= 0
+    && nothing.spawned.length === 0, none.error);
+
+  const allFail = fakeSubprocess({ available: ['open', 'xdg-open'], exits: { ['-a draw.io ' + ABS]: 1, [ABS]: 1 } });
+  const failed = await launchApi.drawioLaunch(allFail, 'posix', ABS, '/ws', undefined);
+  check('every rung failing quotes each launcher and its stderr',
+    failed.ok === false && failed.error.indexOf('boom from') >= 0 && failed.error.indexOf('xdg-open exited') >= 0);
+
+  const windows = fakeSubprocess({ available: ['cmd'], platform: 'windows' });
+  const win = await launchApi.drawioLaunch(windows, 'windows', ABS, '/ws', undefined);
+  check('windows uses cmd /c start "" <file> and skips the posix rungs',
+    win.ok === true && win.launcher === 'cmd /c start'
+    && JSON.stringify(windows.spawned) === JSON.stringify([['/resolved/cmd', '/c', 'start', '', ABS]]),
+    JSON.stringify(windows.spawned));
+}
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);
