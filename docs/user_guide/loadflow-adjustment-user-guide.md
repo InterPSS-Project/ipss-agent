@@ -6,10 +6,12 @@ sensitivity to size the step and AC load flow to confirm it.
 This guide is the practical how-to for InterPSS DSH Chat. For the engineering detail
 behind the method (B″ vs AC sensitivity, Jacobian convention, Newton loop), see
 [load-q-adjustment.md](../load-q-adjustment.md). The whole sequence below is packaged as the
-**`$ipss-case-aclf-adjust`** skill, so "adjust load Q to bring Bus N into [0.89, 0.90] pu" can be
+`$ipss-case-aclf-adjust` skill, so "adjust load Q to bring Bus N into [0.89, 0.90] pu" can be
 handed to the agent as one request.
 
 ---
+
+
 
 ## When to use this
 
@@ -80,7 +82,7 @@ Natural-language prompts the agent can map to tools:
 | Load the large-load-Q IEEE14 case | `$ipss-case-load` / `interpss_case_load`           |
 | Run ACLF                          | `$ipss-case-aclf` / `interpss_run_aclf`            |
 | Run the dV/dQ script              | `$ipss-case-script` / `interpss_run_gvy`           |
-| Adjust load Q to a target band    | `$ipss-case-aclf-adjust` (this whole workflow)      |
+| Adjust load Q to a target band    | `$ipss-case-aclf-adjust` (this whole workflow)     |
 | Summarize lowest voltages         | `$ipss-case-summary` / `interpss_summarize_result` |
 
 
@@ -97,7 +99,7 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 
 |                |                                                                  |
 | -------------- | ---------------------------------------------------------------- |
-| Case           | `wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee`               |
+| Case           | `wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee`              |
 | Starting point | Bus14 = 14.9 MW + j50.0 MVAr, V ≈ 0.871 pu (only bus below 0.90) |
 | Applied result | Q 50.0 → **46.0 MVAr**, V(Bus14) = **0.895** pu                  |
 
@@ -172,7 +174,7 @@ values together.
 
 |                |                                                                                      |
 | -------------- | ------------------------------------------------------------------------------------ |
-| Case           | `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee`                                  |
+| Case           | `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee`                                 |
 | Starting point | Both buses at j50.0 MVAr — past the nose point; ACLF does **not** converge as stored |
 | Applied result | Q13 → **45.505**, Q14 → **21.320** MVAr; V13 = **0.899**, V14 = **0.891** pu         |
 
@@ -183,18 +185,15 @@ self terms, so each Q move strongly affects the other voltage.
 ### Scripts
 
 
-| Script                              | What it does                                                                              |
-| ----------------------------------- | ----------------------------------------------------------------------------------------- |
-| `ieee14_dvdq_matrix.gvy`            | Read-only. Prints the 2×2 B″ matrix and, when solved, the AC finite-difference matrix      |
-| `ieee14_qv_adjust.gvy`              | Starts from a solvable anchor and walks both Q values into the band (damped Newton)        |
-| `ieee14_adjBus1314Q_0p89to0p90.gvy` | Sets Bus13 to 13.5 MW + j45.5053 MVAr and Bus14 to 14.9 MW + j21.3202 MVAr (one shot)      |
+| Script                              | What it does                                                                          |
+| ----------------------------------- | ------------------------------------------------------------------------------------- |
+| `ieee14_dvdq_matrix.gvy`            | Read-only. Prints the 2×2 B″ matrix and, when solved, the AC finite-difference matrix |
+| `ieee14_qv_adjust.gvy`              | Starts from a solvable anchor and walks both Q values into the band (damped Newton)   |
+| `ieee14_adjBus1314Q_0p89to0p90.gvy` | Sets Bus13 to 13.5 MW + j45.5053 MVAr and Bus14 to 14.9 MW + j21.3202 MVAr (one shot) |
 
 
 As in Example A, the adjuster **derives** the two Q values and the setter **applies** them; once the
 values are known, the setter alone reproduces the state.
-
-
-
 
 ### Steps in Chat
 
@@ -228,6 +227,8 @@ than from whatever state the held model is in (see **Common pitfalls**).
 stay strictly inside [0.89, 0.90] while maximising load Q).
 - Generators may be at Q limits (`GenPQ`); that is why B″ alone is a poor guide on this case.
 
+
+
 ### Apply your own Q (template)
 
 ```groovy
@@ -253,7 +254,7 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 3. Copy or adapt the Example A / B scripts: change `busId`, `loadId`, voltage band, and
   (for multi-bus) the bus list and anchor Q values.
 4. Keep the three roles in separate files: a **read-only** sensitivity script, a **mutating**
-   adjuster that derives the Q values, and a small **mutating setter** that applies them.
+  adjuster that derives the Q values, and a small **mutating setter** that applies them.
 5. Solve → measure → size → apply → solve → verify from `result/*_DF_bus.csv`.
 6. If the case does not converge as stored, give the adjuster a **solvable anchor** (known good
   Q values + flat start) before the first Newton pass.
@@ -267,15 +268,15 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 ## Common pitfalls
 
 
-| Symptom                                          | Likely cause                       | What to do                                              |
-| ------------------------------------------------ | ---------------------------------- | ------------------------------------------------------- |
-| Voltage moves the wrong way after raising load Q | Injection/load convention mixed up | Reduce load Q to raise V; use `J = −M` for Newton       |
-| B″ window looks good but ACLF misses the band    | Stressed bus / Q-limited gens      | Size from AC secants or re-measure `J` each pass        |
-| Numbers drift between identical Q values         | Held-model control adjustments     | Use `reload: true` before each comparative solve        |
+| Symptom                                          | Likely cause                                                          | What to do                                                                       |
+| ------------------------------------------------ | --------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| Voltage moves the wrong way after raising load Q | Injection/load convention mixed up                                    | Reduce load Q to raise V; use `J = −M` for Newton                                |
+| B″ window looks good but ACLF misses the band    | Stressed bus / Q-limited gens                                         | Size from AC secants or re-measure `J` each pass                                 |
+| Numbers drift between identical Q values         | Held-model control adjustments                                        | Use `reload: true` before each comparative solve                                 |
 | Same Q values now give a lower voltage           | A diverged ACLF left the generators switched to `GenPQ` at constant Q | Re-parse (`reload: true`) before applying — a load-only script cannot restore PV |
-| Aggregate `bus.loadQ` change has no effect       | Contribute gen/load model          | Edit `getContributeLoad(loadId).loadCP`                 |
-| Next load restores old Q                         | Edit never written to disk         | Update the case file or re-run the adjuster script      |
-| Result CSVs look “old” after another ACLF        | Each ACLF overwrites `result/`     | Re-read CSVs / regenerate reports after the final solve |
+| Aggregate `bus.loadQ` change has no effect       | Contribute gen/load model                                             | Edit `getContributeLoad(loadId).loadCP`                                          |
+| Next load restores old Q                         | Edit never written to disk                                            | Update the case file or re-run the adjuster script                               |
+| Result CSVs look “old” after another ACLF        | Each ACLF overwrites `result/`                                        | Re-read CSVs / regenerate reports after the final solve                          |
 
 
 ---
