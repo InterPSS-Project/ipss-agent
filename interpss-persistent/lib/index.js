@@ -833,41 +833,8 @@ async function scanCases(fs, dirTarget, relDir, out) {
   }
 }
 
-// Recursive `.drawio` discovery for the tab's Diagram picker. Unlike scanCases —
-// which only walks wspace/data — this walks the whole workspace, so it skips the
-// heavy or irrelevant trees and caps both recursion depth and result count.
-const DRAWIO_SKIP_DIRS = new Set([
-  'node_modules', '.git', 'target', 'build', 'logs', 'temp', '.venv', '.mvn',
-  '.npm-cache-local', 'interpss-persistent.local-backup',
-])
-const MAX_DRAWIO_FILES = 200
-const MAX_DRAWIO_DEPTH = 6
+// The preview reads one diagram at a time, so this bounds what it accepts as text.
 const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
-
-async function scanDrawio(fs, dirTarget, relDir, out, depth) {
-  if (depth > MAX_DRAWIO_DEPTH || out.length >= MAX_DRAWIO_FILES) return
-  let entries
-  try {
-    entries = await fs.listDir(dirTarget)
-  } catch (e) {
-    return
-  }
-  for (const entry of entries) {
-    if (out.length >= MAX_DRAWIO_FILES) return
-    const rel = relDir === '' ? entry.name : relDir + '/' + entry.name
-    if (entry.type === 'directory') {
-      if (entry.name.charAt(0) === '.' || DRAWIO_SKIP_DIRS.has(entry.name)) continue
-      await scanDrawio(fs, entry.target, rel, out, depth + 1)
-    } else if (entry.type === 'file' && /\.drawio$/i.test(entry.name)) {
-      let size = null
-      try {
-        const info = await fs.stat(entry.target)
-        size = info && typeof info.size === 'number' ? info.size : null
-      } catch (e) {}
-      out.push({ path: rel, size: size })
-    }
-  }
-}
 
 // One in-process JVM per Host process, started lazily on first bridge use.
 // `java-bridge` is loaded with a dynamic import so the plugin still loads (and
@@ -1150,24 +1117,38 @@ class InterpssService extends TypertRemoteService {
     return { ok: true, cases: out }
   }
 
-  // The tab's Diagram picker: every .drawio in the workspace, as workspace-relative
-  // paths, so `readDrawio` can take one straight back. A missing or unreadable root
-  // is an empty list, not an error.
+  // The tab's Diagram source: the .drawio files DIRECTLY inside the selected case's
+  // `diagram/` folder, as workspace-relative paths so `readDrawio` can take one straight
+  // back. A diagram belongs to a case, and the tab's Diagram button is enabled by this
+  // answer, so an absent case or folder is an EMPTY LIST and not an error — "this case has
+  // no diagram yet" is a state the tab renders. A malformed case path is a real error.
   async listDrawioFiles(input) {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+    const caseInput = input && typeof input.case === 'string' ? input.case : ''
+    if (caseInput === '' || caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+      return { ok: false, error: 'Invalid case path: ' + caseInput }
+    }
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
     if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
-    let target
+    const relDir = 'wspace/' + wspaceJoin(casePartsOf(caseInput).parent, 'diagram')
+    let entries
     try {
-      target = await fs.resolve(root)
+      entries = await fs.listDir(await fs.resolve(root + '/' + relDir))
     } catch (e) {
-      return { ok: false, error: 'cannot resolve the workspace root' }
+      return { ok: true, files: [], dir: relDir }
     }
-    const out = []
-    await scanDrawio(fs, target, '', out, 0)
-    out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
-    return { ok: true, files: out }
+    const files = []
+    for (const entry of entries.slice().sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      if (entry.type !== 'file' || !/\.drawio$/i.test(entry.name)) continue
+      let size = null
+      try {
+        const info = await fs.stat(entry.target)
+        size = info && typeof info.size === 'number' ? info.size : null
+      } catch (e) {}
+      files.push({ path: relDir + '/' + entry.name, size: size })
+    }
+    return { ok: true, files: files, dir: relDir }
   }
 
   // Read one .drawio as text for the client-side renderer. The whitelist is the same

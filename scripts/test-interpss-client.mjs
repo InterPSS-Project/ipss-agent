@@ -102,7 +102,7 @@ function build(overrides) {
       + ' diagramXmlFrom: diagramXmlFrom, styleMap: styleMap, labelLines: labelLines,'
       + ' drawioFitRect: drawioFitRect, drawioZoomLimits: drawioZoomLimits, drawioZoomRect: drawioZoomRect,'
       + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
-      + ' drawioThemeColor: drawioThemeColor };');
+      + ' drawioThemeColor: drawioThemeColor, drawioDirectPath: drawioDirectPath };');
   return factory(makeReact(overrides || {}), { call: () => Promise.resolve({}) }, { get: () => undefined },
     DOMParserShim, Blob, Response, DecompressionStream, atob);
 }
@@ -555,6 +555,56 @@ check('applyCsvSort is byte-identical in both hosts',
 // host is an injected body with no imports, so it cannot carry node:fs helpers either)
 check('the chat tools remain persistent-only',
   rd(LIB_HOST).indexOf('interpss_run_ca') >= 0 && rd(DYN_HOST).indexOf('interpss_run_ca') < 0);
+
+// --- 10. the Diagram button is gated by the case's diagram folder ------------
+console.log('\n10. Diagram button gating and the single-diagram shortcut');
+// A diagram belongs to a case, so the Host lists <case>/diagram and the tab enables its
+// button from that answer alone. Both hosts must scope it there, and neither keeps the
+// workspace-wide scanner the first version used.
+check('both hosts scope the listing to the case diagram folder and dropped the workspace scan',
+  rd(DYN_HOST).indexOf("'diagram'") >= 0 && rd(LIB_HOST).indexOf("'diagram'") >= 0
+  && rd(DYN_HOST).indexOf('scanDrawio') < 0 && rd(LIB_HOST).indexOf('scanDrawio') < 0);
+check('both hosts require a case argument for the listing',
+  rd(DYN_HOST).indexOf('args.case') >= 0 && rd(LIB_HOST).indexOf('input.case') >= 0);
+
+const diagramFiles = (n) => Array.from({ length: n }, (_, i) => ({ path: 'wspace/data/c/diagram/d' + i + '.drawio', size: 10 }));
+check('exactly one diagram opens directly, skipping the picker',
+  api.drawioDirectPath(diagramFiles(1)) === 'wspace/data/c/diagram/d0.drawio', api.drawioDirectPath(diagramFiles(1)));
+check('no diagram opens nothing directly',
+  api.drawioDirectPath([]) === null && api.drawioDirectPath(null) === null && api.drawioDirectPath(undefined) === null);
+check('several diagrams need the picker',
+  api.drawioDirectPath(diagramFiles(2)) === null && api.drawioDirectPath(diagramFiles(5)) === null);
+check('a malformed entry is never opened directly',
+  api.drawioDirectPath([{ size: 1 }]) === null && api.drawioDirectPath([{ path: '' }]) === null && api.drawioDirectPath([null]) === null);
+
+// the button's own enabled state, read off the rendered action row
+const findButton = (node, label) => {
+  let hit = null;
+  const walk = (n) => {
+    if (hit !== null || n === null || typeof n !== 'object') return;
+    if (Array.isArray(n)) { for (const k of n) walk(k); return; }
+    if (n.type === 'button' && (n.kids || []).indexOf(label) >= 0) { hit = n; return; }
+    if (n.kids) walk(n.kids);
+  };
+  walk(node);
+  return hit;
+};
+const buttonWith = (files) => findButton(
+  build(Object.assign({ 0: true }, idxOf('drawioFiles') >= 0 ? { [idxOf('drawioFiles')]: files } : {})).InterPssView(props),
+  'Diagram');
+const noFiles = buttonWith([]);
+const oneFile = buttonWith(diagramFiles(1));
+const twoFiles = buttonWith(diagramFiles(2));
+check('the Diagram button is disabled when the case has no diagram',
+  noFiles !== null && noFiles.props.disabled === true, noFiles && String(noFiles.props.disabled));
+check('the Diagram button is enabled when the case has one diagram',
+  oneFile !== null && oneFile.props.disabled === false, oneFile && String(oneFile.props.disabled));
+check('the Diagram button stays enabled with several diagrams',
+  twoFiles !== null && twoFiles.props.disabled === false, twoFiles && String(twoFiles.props.disabled));
+check('the disabled button explains itself and the one-diagram hint promises a direct open',
+  noFiles !== null && String(noFiles.props.title).indexOf('diagram folder') >= 0
+  && oneFile !== null && String(oneFile.props.title).indexOf('Open the case diagram') >= 0,
+  noFiles && noFiles.props.title);
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

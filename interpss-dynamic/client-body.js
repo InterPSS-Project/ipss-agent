@@ -11,6 +11,7 @@ return {
     let lastSelection = { mode: '0', customFormat: 'ieee', customInput: '' }
     let checkSeq = 0
     let reportSeq = 0
+    let diagramSeq = 0
     // The bridge-held case this tab has already mirrored into its picker. A chat tool
     // can load another case while the tab shows one the user picked, so the picker
     // follows the bridge — but only when the bridge case *changes*, which leaves a
@@ -954,6 +955,17 @@ return {
       return d < 0 ? 1.15 : 1 / 1.15
     }
 
+    // A case with exactly ONE diagram skips the picker: there is nothing to choose. Any
+    // other count (including none) returns null, so the caller decides what to do. Pure and
+    // module-level, beside the other drawio helpers, so the guard can exercise it directly.
+    function drawioDirectPath(files) {
+      if (!Array.isArray(files) || files.length !== 1) return null
+      const only = files[0]
+      return only !== null && typeof only === 'object' && typeof only.path === 'string' && only.path !== ''
+        ? only.path
+        : null
+    }
+
     function drawioZoomPercent(scene, rect) {
       if (scene === null || rect === null || !Number.isFinite(rect.w) || rect.w <= 0) return 100
       const pct = Math.round((scene.viewBox.w / rect.w) * 100)
@@ -1189,6 +1201,9 @@ return {
       const [reportView, setReportView] = React.useState('rendered')
       const [reportAvailable, setReportAvailable] = React.useState(false)
       // draw.io preview: the picker and the rendered/source views share one modal.
+      // `drawioFiles` is the SELECTED case's `diagram/` folder as the Host reports it, so
+      // the Diagram button's enabled state and the picker's list are one fact and cannot
+      // disagree. null = no case selected, or not answered yet.
       const [drawioOpen, setDrawioOpen] = React.useState(false)
       const [drawioFiles, setDrawioFiles] = React.useState(null)
       const [drawioFilesLoading, setDrawioFilesLoading] = React.useState(false)
@@ -1207,6 +1222,11 @@ return {
       const [drawioDragging, setDrawioDragging] = React.useState(false)
       const drawioCanvasRef = React.useRef(null)
       const drawioDragRef = React.useRef(null)
+      // Derived from the case's diagram list, and read by the action row far below — so it is
+      // declared HERE, with its state, not next to the layout that consumes it (a const read
+      // above its declaration is a TDZ ReferenceError that blanks the whole tab; 0.6.0 shipped
+      // exactly that, and this guard caught the same mistake again).
+      const diagramCount = drawioFiles === null ? 0 : drawioFiles.length
       // Focus the preview overlay when it opens so Escape reaches its own onKeyDown.
       // Deliberately no window listener: the dynamic Client half is given no `window`
       // (see docs/persistent-plugin-rebuild.md), so the two tab bodies stay identical.
@@ -1266,6 +1286,7 @@ return {
 
       function onCaseChanged(input) {
         const seq = ++checkSeq
+        refreshCaseDiagrams(input)
         clearResults()
         setCaseLoaded(false)
         setCaseLoadError(null)
@@ -1476,27 +1497,65 @@ return {
         )
       }
 
+      // The selected case's `diagram/` folder, straight from the Host. One fetch feeds both
+      // the Diagram button's enabled state and the picker list. `diagramSeq` drops an answer
+      // that belongs to a case the user has already moved off.
+      function refreshCaseDiagrams(input) {
+        const seq = ++diagramSeq
+        if (typeof input !== 'string' || input === '') {
+          setDrawioFiles([])
+          setDrawioFilesError(null)
+          setDrawioFilesLoading(false)
+          return
+        }
+        setDrawioFilesLoading(true)
+        setDrawioFilesError(null)
+        callRemote('listDrawioFiles', { case: input, sessionId }).then(
+          (res) => {
+            if (seq !== diagramSeq) return
+            setDrawioFilesLoading(false)
+            if (res && res.ok) setDrawioFiles(res.files || [])
+            else {
+              setDrawioFiles([])
+              setDrawioFilesError(res && res.error ? res.error : 'failed to list the case diagrams')
+            }
+          },
+          (err) => {
+            if (seq !== diagramSeq) return
+            setDrawioFilesLoading(false)
+            setDrawioFiles([])
+            setDrawioFilesError(String(err && err.message ? err.message : err))
+          },
+        )
+      }
+
+      // The Diagram button's handler: one diagram opens straight away, several need the
+      // picker. The button is disabled with none, so an empty list here is unreachable —
+      // guard anyway rather than open a modal showing nothing.
+      function openDiagram() {
+        const files = drawioFiles === null ? [] : drawioFiles
+        const only = drawioDirectPath(files)
+        if (only !== null) {
+          openDrawio(only)
+          return
+        }
+        if (files.length === 0) return
+        openDrawioPicker()
+      }
+
       // Open the preview modal straight into its picker: one surface holds the file list,
-      // the rendered diagram and the raw XML, so no second popover is needed.
+      // the rendered diagram and the raw XML, so no second popover is needed. The list is
+      // re-read on open, so a diagram dropped into the folder while the tab is open shows up.
       function openDrawioPicker() {
+        const c = resolveCase()
+        refreshCaseDiagrams(c === null ? '' : c.input)
         setDrawioOpen(true)
         setDrawioPath('')
         setDrawioXml('')
         setDrawioScene(null)
         setDrawioError(null)
         setDrawioView('rendered')
-        setDrawioFiles(null)
-        setDrawioFilesError(null)
         setDrawioRect(null)
-        setDrawioFilesLoading(true)
-        callRemote('listDrawioFiles', { sessionId }).then(
-          (res) => {
-            setDrawioFilesLoading(false)
-            if (res && res.ok) setDrawioFiles(res.files || [])
-            else setDrawioFilesError(res && res.error ? res.error : 'failed to list .drawio files')
-          },
-          (err) => { setDrawioFilesLoading(false); setDrawioFilesError(String(err && err.message ? err.message : err)) },
-        )
       }
 
       // The function the Diagram feature is built on: read a workspace-relative .drawio
@@ -2046,7 +2105,16 @@ return {
           React.createElement('button', { onClick: openCaDialog, disabled: running || caRunning || !caseLoaded, title: 'Run DC contingency analysis', style: { ...btn, marginLeft: '12px', opacity: (running || caRunning || !caseLoaded) ? 0.6 : 1 } }, caRunning ? 'Running…' : 'CA'),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
           // Not gated on caseLoaded: a .drawio preview is independent of the simulation case.
-          React.createElement('button', { onClick: openDrawioPicker, title: 'Open a draw.io diagram', style: { ...btn, marginLeft: '12px' } }, 'Diagram'),
+          // Enabled by the case's diagram folder alone, so the click can promise an open or a
+          // choice rather than an empty modal.
+          React.createElement('button', {
+            onClick: openDiagram,
+            disabled: diagramCount === 0,
+            title: diagramCount === 0
+              ? 'No .drawio file in this case\'s diagram folder'
+              : (diagramCount === 1 ? 'Open the case diagram' : 'Choose from ' + diagramCount + ' diagrams'),
+            style: { ...btn, marginLeft: '12px', opacity: diagramCount === 0 ? 0.5 : 1, cursor: diagramCount === 0 ? 'not-allowed' : 'pointer' },
+          }, 'Diagram'),
         ),
         caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
         optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Options saved') : null,
@@ -2533,7 +2601,7 @@ return {
                       onClick: () => openDrawio(f.path),
                       style: { display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: 'none', borderBottom: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' },
                     }, f.path + (typeof f.size === 'number' ? '  (' + Math.max(1, Math.round(f.size / 1024)) + ' KB)' : ''))))
-                  : React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No .drawio files found under this workspace.')))
+                  : React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No .drawio file in this case\'s diagram folder.')))
             : drawioView === 'source'
               ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, drawioXml || '')
               : drawioScene !== null

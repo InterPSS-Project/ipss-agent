@@ -129,15 +129,20 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     dynamic host writes config with the `fs` service alone.
   - `getBridgeCase`: the persistent Host answers from its module-level `lastLoadedAbs`
     mirror; the dynamic Host delegates to `javaBridge.caseInfo`.
-- **Diagram preview (Host half, since 0.6.1)**: `listDrawioFiles` walks the whole
-  workspace (not just `wspace/data`) through `scanDrawio`, skipping dot-directories and
-  the heavy trees (`node_modules`, `.git`, `target`, `build`, `logs`, `temp`, `.venv`,
-  `.mvn`, `.npm-cache-local`, the local backup) and capping depth (6) and result count
-  (200). `readDrawio` takes a **workspace-relative** `.drawio` path
-  (`wspace/template/x.drawio`) — not the `data/…` form `readCsv` uses — and rejects
-  `..`, any non-`.drawio` name and anything over `MAX_DRAWIO_BYTES` (2 MiB) *before*
-  reading, so an oversized file never reaches the RPC payload. Both constants and the
-  scanner are byte-identical in the persistent Host and the two dynamic ones.
+- **Diagram source (Host half, since 0.6.6)**: `listDrawioFiles` takes the **selected case**
+  and lists the `.drawio` files *directly inside* `<case folder>/diagram/` —
+  `wspace/data/ieee/Ieee14Bus/diagram/*.drawio` — as workspace-relative paths, sorted by
+  name. A diagram belongs to a case and the tab's Diagram button is enabled by this answer
+  alone, so an **absent case or folder is an empty list, not an error** ("this case has no
+  diagram yet" is a state the tab renders); a malformed case path *is* an error. 0.6.1–0.6.5
+  instead walked the whole workspace through `scanDrawio` (skipping `node_modules`, `.git`,
+  `target`, `build`, `logs`, `temp`, `.venv`, `.mvn`, `.npm-cache-local` and the local
+  backup, capped at depth 6 and 200 files); that scanner and its constants are **gone**, and
+  the guard asserts neither host still carries them. `readDrawio` is unchanged: it takes a
+  **workspace-relative** `.drawio` path — not the `data/…` form `readCsv` uses — and rejects
+  `..`, any non-`.drawio` name and anything over `MAX_DRAWIO_BYTES` (2 MiB) *before* reading,
+  so an oversized file never reaches the RPC payload. `MAX_DRAWIO_BYTES` and `readDrawio` are
+  byte-identical in the persistent Host and the two dynamic ones.
 - **`getBridgeCase`**: the persistent Host answers from its module-level
   `lastLoadedAbs` / `lastLoadedBusCount` / `lastLoadedBranchCount` mirror. A
   dynamic Host has no such mirror, so it delegates to
@@ -198,10 +203,20 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   and only falls back to the contingency-CSV auto rule when it is absent or
   unrecognized, so the tab's own Report button is unchanged. `METHODS` still has
   no new endpoint — `reportType` is an added optional input field
-- **Diagram preview** (Client half, since 0.6.1): the **Diagram** button in the action
-  row (not gated on `caseLoaded` — a diagram is independent of the simulation case) opens
-  one modal that hosts both the `.drawio` picker and the preview, so no second popover is
-  needed. `openDrawio(path)` reads the file through `interpss/readDrawio`, decodes it with
+- **Diagram preview** (Client half, since 0.6.1): the **Diagram** button in the action row
+  opens one modal that hosts both the `.drawio` picker and the preview, so no second popover
+  is needed. **Since 0.6.6 the button is gated by the selected case's `diagram/` folder and
+  nothing else**: `refreshCaseDiagrams` re-reads `listDrawioFiles` on every case-selection
+  change (it rides `onCaseChanged`, which already runs on mount and on each picker/select
+  edit), stores the answer in `drawioFiles`, and the button derives both its `disabled` state
+  and its tooltip from that one fact — so the button and the picker list cannot disagree, and
+  `diagramSeq` drops an answer that belongs to a case the user has already moved off. A case
+  with **exactly one** diagram opens it directly, skipping the picker entirely
+  (`drawioDirectPath`, a pure module-level helper the guard exercises); several open the
+  picker, which re-reads the folder on open so a diagram dropped in while the tab is open
+  shows up. It is deliberately *not* gated on `caseLoaded`: the diagrams exist per case, not
+  per solved case.
+  `openDrawio(path)` reads the file through `interpss/readDrawio`, decodes it with
   `diagramXmlFrom`, and renders it with `parseDrawioScene` + `DrawioDiagram` as inline SVG
   with a Rendered / Source toggle. The renderer is **self-contained and offline on purpose**:
   the harness forbids frames (`frame-src 'none'` in the preview CSP) and the app page CSP
@@ -369,7 +384,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 86 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 96 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js` and `wspace/template/ieee14-oneline.drawio`
