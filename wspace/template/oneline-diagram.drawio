@@ -289,9 +289,6 @@
                 <mxCell id="xf8b" value="" style="ellipse;fillColor=none;strokeColor=#000000;strokeWidth=1.5;aspect=fixed;" parent="7" vertex="1">
                     <mxGeometry x="8" width="16" height="16" as="geometry"/>
                 </mxCell>
-                <mxCell id="8" style="edgeStyle=none;html=1;exitX=1;exitY=0;exitDx=0;exitDy=0;" edge="1" parent="1" source="xf10b" target="bg">
-                    <mxGeometry relative="1" as="geometry"/>
-                </mxCell>
             </root>
         </mxGraphModel>
     </diagram>

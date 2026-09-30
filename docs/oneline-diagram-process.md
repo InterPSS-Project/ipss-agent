@@ -4,7 +4,7 @@
 
 Produce a power-grid **one-line diagram** in draw.io for an InterPSS case — vertical bus bars,
 undirected branches, two-ring transformer symbols, `Bus-N` labels — and save it as a `.drawio`
-under the case's `diagram/` folder, where the InterPSS tab's **Diagram** button previews it.
+under the case's `diagram/` folder, where the **Diagram** tab previews it.
 
 ## Where the diagrams live
 
@@ -167,12 +167,17 @@ bus/branch tooltips resolve against.
   hovering any part of a transformer gives one tooltip.
 - **Hit areas**: the drawn geometry is far too thin to hover (a 6 px bar, a 1.5 px line), so the
   preview adds a padded transparent rect or a wide invisible stroke twin per interactive cell.
-- **Preview** (InterPSS tab, plugin 0.6.1–0.6.7): lists the selected case's `diagram/*.drawio`,
-  renders inline SVG with a **Source** toggle, pans/zooms/fits, follows the app theme (near-grey
-  colours are re-expressed as theme tokens; a deliberately coloured element keeps its colour), and
+- **Preview** (the **Diagram** tab, plugin 0.6.8+; 0.6.1–0.6.8 also had a **Diagram** button
+  on the InterPSS tab that opened the same preview in a modal — 0.6.9 removed button and modal,
+  so the tab is the only surface): lists the selected case's `diagram/*.drawio`, renders inline
+  SVG with a **Source** toggle, pans/zooms/fits, follows the app theme (near-grey colours are
+  re-expressed as theme tokens; a deliberately coloured element keeps its colour), and
   shows bus/branch tooltips built from the case's result tables. It renders the subset these
-  diagrams use — rounded rects, ellipses, text, groups, polylines through waypoints — and caps a
-  scene at 2000 cells. Implementation notes: [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md).
+  diagrams use — rounded rects, ellipses, text, groups, polylines through waypoints — and
+  caps a scene at 2000 cells. The **Diagram** tab (order 2, beside InterPSS) draws it full-size
+  and follows whichever case
+  the InterPSS tab has selected. Implementation notes:
+  [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md).
 
 ## Issues found and fixed
 
@@ -185,7 +190,7 @@ bus/branch tooltips resolve against.
 | Malformed XML (extra `</mxCell>` on labels) | Repaired tags; whole file wrapped as `<mxfile>` with a named page |
 | Bus size | Scaled to ~75% -> 6 x 52 |
 | Transformer rings drawn as a broken open arc | The second ring's opaque `fillColor=#FFFFFF` painted over the first ring's inner arc. Both rings are `fillColor=none`, so they interlock with complete outlines |
-| Two stray edges from a transformer to the page background | An edge wired `xf10b -> bg` with `edgeStyle=none` and no `endArrow=none` draws a diagonal across the drawing ending in an arrowhead — a one-line diagram is undirected. The IEEE 14-bus working copies carry none; the template in `wspace/template/` still carries one (`id="8"`), the only edge of its 26 that sets neither `endArrow=none` nor `strokeColor`. Drop it when the template is next touched |
+| Two stray edges from a transformer to the page background | An edge wired `xf10b -> bg` with `edgeStyle=none` and no `endArrow=none` draws a diagonal across the drawing ending in an arrowhead — a one-line diagram is undirected. The IEEE 14-bus working copies carry none; the template in `wspace/template/` carried one (`id="8"`), the only edge of its 26 that set neither `endArrow=none` nor `strokeColor`. **Dropped from `oneline-diagram.drawio`** (0.6.8), so the template and the 14-bus case diagram now parse to the same 25 edges — which is the guard's §11 check |
 | Collision repair left pairs exactly at the threshold, so grid snapping broke them again | Split the comfort target used by the relaxation from the hard no-overlap test used for snapping and validation |
 | Force-directed spreading flattened the topology into a hairball | Layout is stress majorization on hop distances; force spreading is only used to compact it |
 | Transformer symbols floated up to ~160 px off their branch | Each symbol is placed on the branch trunk and slid along that line when the spot is taken; both stubs stay straight and collinear |
@@ -213,5 +218,6 @@ bus/branch tooltips resolve against.
   small until you zoom in.
 - **The preview PNG is not a diagrams.net export** — it is a Pillow re-render of the same geometry,
   for a quick look and for review before opening draw.io.
-- **One diagram opens without the picker** (plugin 0.6.6+); extra `.drawio` files in `diagram/` add a
-  picker entry. The preview PNG does not, since the button lists `.drawio` files only.
+- **The Diagram tab shows one diagram at a time** (plugin 0.6.6+); extra `.drawio` files in
+  `diagram/` add a picker entry, and the one last viewed is reopened. The preview PNG never
+  appears, since the tab lists `.drawio` files only.

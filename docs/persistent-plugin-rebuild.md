@@ -52,10 +52,15 @@ Mechanically, only the **tab body** changes between rebuilds: splice the dynamic
 file's region from `    const PRESETS = [` up to (excluding) its
 `    const slots = ctx.get('slots')` into the persistent file between the
 transport block and the `    // --- ACLF tool-card result explorer` section. That
-keeps the persistent-only tool-card section, all five `slots.inject`
+keeps the persistent-only tool-card section, all six `slots.inject`
 registrations, and the module footer intact — copying only up to
 `const slots` drops the tool cards, and diffing the result against the previous
 `lib/client.js` should show your UI change alone.
+
+`node scripts/sync-persistent-client.mjs` performs that splice for you — it also rewrites
+`interpss-dynamic/client.js` as a byte copy of the body, and it refuses to run when the
+markers or the timer form have drifted, so a half-splice cannot be written silently. The
+manual procedure below is what it automates, and §9 asserts the same invariants.
 
 **Since 0.6.3 the two bodies differ only by that timer swap**, so the splice is safe again
 — with one mandatory correction. Baseline the change first:
@@ -132,7 +137,7 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
 - **Diagram source (Host half, since 0.6.6)**: `listDrawioFiles` takes the **selected case**
   and lists the `.drawio` files *directly inside* `<case folder>/diagram/` —
   `wspace/data/ieee/Ieee14Bus/diagram/*.drawio` — as workspace-relative paths, sorted by
-  name. A diagram belongs to a case and the tab's Diagram button is enabled by this answer
+  name. A diagram belongs to a case and the Diagram tab draws this answer
   alone, so an **absent case or folder is an empty list, not an error** ("this case has no
   diagram yet" is a state the tab renders); a malformed case path *is* an error. 0.6.1–0.6.5
   instead walked the whole workspace through `scanDrawio` (skipping `node_modules`, `.git`,
@@ -203,22 +208,20 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   and only falls back to the contingency-CSV auto rule when it is absent or
   unrecognized, so the tab's own Report button is unchanged. `METHODS` still has
   no new endpoint — `reportType` is an added optional input field
-- **Diagram preview** (Client half, since 0.6.1): the **Diagram** button in the action row
-  opens one modal that hosts both the `.drawio` picker and the preview, so no second popover
-  is needed. **Since 0.6.6 the button is gated by the selected case's `diagram/` folder and
-  nothing else**: `refreshCaseDiagrams` re-reads `listDrawioFiles` on every case-selection
-  change (it rides `onCaseChanged`, which already runs on mount and on each picker/select
-  edit), stores the answer in `drawioFiles`, and the button derives both its `disabled` state
-  and its tooltip from that one fact — so the button and the picker list cannot disagree, and
-  `diagramSeq` drops an answer that belongs to a case the user has already moved off. A case
-  with **exactly one** diagram opens it directly, skipping the picker entirely
-  (`drawioDirectPath`, a pure module-level helper the guard exercises); several open the
-  picker, which re-reads the folder on open so a diagram dropped in while the tab is open
-  shows up. It is deliberately *not* gated on `caseLoaded`: the diagrams exist per case, not
-  per solved case.
-  `openDrawio(path)` reads the file through `interpss/readDrawio`, decodes it with
-  `diagramXmlFrom`, and renders it with `parseDrawioScene` + `DrawioDiagram` as inline SVG
-  with a Rendered / Source toggle. The renderer is **self-contained and offline on purpose**:
+- **Diagram preview** (Client half, since 0.6.1): a `.drawio` file is read through
+  `interpss/readDrawio`, decoded with `diagramXmlFrom`, and rendered with `parseDrawioScene` +
+  `DrawioDiagram` as inline SVG with a Rendered / Source toggle. Since 0.6.9 that preview has
+  exactly **one** surface — the **Diagram tab** below — and `readDrawio` has exactly one
+  caller. 0.6.1–0.6.8 the InterPSS action row also carried a **Diagram** button that opened the
+  same preview in a modal, gated by the selected case's `diagram/` folder and nothing else
+  (`refreshCaseDiagrams` re-read `listDrawioFiles` on every case-selection change — it rode
+  `onCaseChanged` — stored the answer in `drawioFiles`, and the button took both its `disabled`
+  state and its tooltip from that one fact; `drawioDirectPath` was the pure "exactly one
+  diagram opens directly, skipping the picker" rule). 0.6.9 deleted the button, the modal and
+  those helpers rather than leave a second, unmounted copy of the preview to drift: guard §10
+  asserts the absence of `drawioFiles`/`drawioOpen`/`drawioDirectPath` and §12 that one caller
+  of `readDrawio` remains.
+  The renderer is **self-contained and offline on purpose**:
   the harness forbids frames (`frame-src 'none'` in the preview CSP) and the app page CSP
   cannot be assumed, so an embedded draw.io viewer or `embed.diagrams.net` iframe is not an
   option. It draws the subset these workspaces produce — rounded rectangles, ellipses, text
@@ -230,17 +233,17 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     **skips `group` cells entirely** — a group is a container that draws nothing, while its
     children carry geometry relative to it (this workspace's transformer symbols are five
     groups of two ellipses each; drawing the groups adds five spurious boxes)
-  Escape is handled by the focused overlay's own `onKeyDown`, not a `window` listener, so
-  this adds **no** second divergence between the two tab bodies (see §1.3)
+  The view registers no `window` listener of its own (see §1.3), which is why the modal this
+  replaced needed no second divergence either.
 - **Diagram pan / zoom / fit** (Client half, since 0.6.2): the rendered pane is one SVG
-  whose `viewBox` moves, so a zoom step re-parses nothing. `drawioRect` is the visible
+  whose `viewBox` moves, so a zoom step re-parses nothing. The view's `rect` is the visible
   rectangle in scene coordinates (`null` = fit, which is simply the scene's own viewBox);
   the wheel zooms about the cursor and dragging pans. The cursor anchor is computed through
   the box `preserveAspectRatio="xMidYMid meet"` actually draws — the smaller of the two
   ratios, centred — because using the element's own box would let the anchor drift as the
   pointer moves off centre. The wheel listener is registered natively with
   `{ passive: false }` rather than through `onWheel`: React delegates wheel passively, so
-  `preventDefault` would be ignored and the page behind the modal would scroll while
+  `preventDefault` would be ignored and the page behind the pointer would scroll while
   zooming. `drawioZoomRect` clamps to 0.1x–12x and always derives height from width, so the
   aspect ratio cannot drift. All of it is client-only: `METHODS` and the Host half are
   unchanged.
@@ -314,10 +317,44 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   - **Degradation.** With no result table the tooltip names the element and adds
     `no result data — run ACLF` and fires **no** call; with a table but no matching row it says
     `not found in the case result tables`. Fetch failures are swallowed: a tooltip is an
-    enhancement and must never error or block the preview. The tip is dropped when the modal
-    closes, and a late `busConnections` answer is applied only if that bus is still under the
+    enhancement and must never error or block the preview. The tip is dropped when the diagram
+    is switched, and a late `busConnections` answer is applied only if that bus is still under the
     cursor. Guard §11 covers the pairing (all 25 edges resolve, and the 20 resolved pairs agree
     with the result table), the hit areas, the wiring and the tooltip wording.
+- **Diagram tab** (Client half, since 0.6.8; the only preview surface since 0.6.9): a
+  **second `conversation.view`** entry —
+  `{ id: 'diagram', order: 2, label: 'Diagram' }`, which lands between InterPSS (1) and
+  Trajectory (10) — showing the preview full-size. It has **no heading and no subtitle** (0.6.10):
+  the tab bar names the view and the first row (`Simu Case <path>`) says what is drawn, so a
+  title block only pushed the diagram down. Its toolbar is controls only — the picker (when the
+  case has several files), `Rendered` / `Source`, `−` / percent / `+`, and `Fit`; the
+  `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped in 0.6.11, because the
+  gestures are discoverable without a sentence in the control row. It reuses
+  every renderer piece (`diagramXmlFrom`, `parseDrawioScene`, `drawioBranchPairs`,
+  `DrawioDiagram`, the pan/zoom math, `busTooltip`/`branchTooltip`) and adds **no Host
+  endpoint**: `listDrawioFiles` finds the case's diagrams, `readDrawio` reads one,
+  `checkResult` supplies the result dir the tooltips page `<stem>_DF_branch.csv` from, and
+  `busConnections` fills a hovered bus.
+  - **The case is not chosen here.** The InterPSS tab owns "the current simulation case",
+    so `onCaseChanged` publishes its selection to the module-level `selectedCaseInput` and
+    the Diagram tab seeds from it on mount. That is sound because the conversation view
+    mounts **one view at a time** — there is never a second mounted view to miss a change —
+    and it keeps the two tabs from ever disagreeing. `adoptSelectedCase()` is the mirror's
+    counterpart: a one-shot `getBridgeCase` on mount (not a poll, since a tool can only run
+    while the Chat view is mounted) adopts a case the Host loaded, and so does the
+    InterPSS tab's own mirror. The tab therefore needs **no timer**, which keeps §1.3's one
+    timer swap the tab body's only dynamic/persistent divergence.
+  - **`drawioTabChoice(files, remembered)`** is the pure picker rule: reopen the diagram the
+    user last chose when it is still in the folder (the module-level `diagramChoice`
+    survives a tab switch), else the first, and `null` for an empty folder — the tab renders
+    "no diagram yet" rather than an empty pane. The wheel/pan handlers keep the geometry the
+    modal used, on this view's own state, and the wheel listener is still registered natively
+    so `preventDefault` is permitted.
+  - Guard §12 renders the view — idle, no case, no diagram, a listing failure, an open
+    diagram with a live scene, the tooltip element and the Source view — because a
+    reference error anywhere in it unmounts the tab. It also asserts the registration, the
+    `selectedCaseInput` wiring, the picker rule and that §7's regex parses **every** effect
+    of the new view. It is the replacement for the retired §8, which rendered the modal.
 - **`interpss_case_summary`** ports `IpssAgentBridge.summarize()`. Java always returns
   every result section in full (only the requested one is ranked/limited) and
   `text` is a JSON string inside the envelope, so the tool does a second parse and
@@ -368,7 +405,11 @@ disk.
 cd interpss-persistent
 # bump version first, e.g. 0.6.2 → 0.6.3
 node --check lib/index.js && node --check lib/client.js
-pnpm pack --pack-destination .     # npm pack where npm is on PATH; sole distributable (no zip)
+# corepack refuses to run without a packageManager field and tries to ADD one to the
+# nearest package.json it can write — under this harness that is $HOME, which the file
+# sandbox denies (EPERM: open '/Users/<you>/package.json'). Disable that lookup instead of
+# granting it write access to your home directory.
+COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
 tar -xzf deepseek-ai-dsh-interpss-0.6.3.tgz -C /tmp/pkgv
@@ -418,27 +459,47 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 124 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 138 checks; non-zero exit on failure
 ```
 
-It reads `interpss-dynamic/client-body.js` and `wspace/template/ieee14-oneline.drawio`
-directly, so it needs no build, no browser and no dependencies. It has been verified to fail
+It reads `interpss-dynamic/client-body.js`,
+`wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio` and the style reference
+`wspace/template/oneline-diagram.drawio` directly, so it needs no build, no browser and no
+dependencies. It has been verified to fail
 — with `ReferenceError: Cannot access 'drawioOpen' before initialization` — when the 0.6.0
 ordering defect is re-introduced, so a green run is meaningful.
 
-Since 0.6.2 §7 checks that ordering **statically** and §8 renders the modal *open*:
-- §7 parses every `React.useEffect` dependency array out of the body and asserts each name
-  it lists is declared textually above that effect — the one thing the render checks cannot
-  see, because the throwing path needs an effect to actually run. Verified against a mutated
-  body with the 0.6.2 wheel effect moved above `drawioRect`: §7 reports
-  `drawioRect is declared 833 chars after the effect`, and the §1 render checks reproduce the
-  `ReferenceError` and blank tab.
-- §8 overrides state **by name** (parsed out of the body, not by call index) to render
-  `drawioOpen: true` with a real parsed scene and asserts the zoom toolbar, the 100% readout
-  and a `DrawioDiagram` child carrying that scene and a `view` prop. Without it the modal
-  body is never rendered by any check — `drawioOpen` starts `false` — so a reference error in
-  the toolbar would ship as another blank tab. Verified against a body whose toolbar calls an
-  undefined helper: §8 fails with `ReferenceError: drawioZoomPercentTYPO is not defined`.
+Two fixture notes, both from the same rename (commit e1075429 moved the reference to
+`wspace/template/oneline-diagram.drawio`, and a stray `xf10b -> bg` edge — the only one of
+its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
+- §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
+  draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
+  was never going to survive a round trip through the editor.
+- the case diagram must stay the reference's copy, which is what that check now says.
+
+Since 0.6.2 §7 checks effect ordering **statically**. It parses every `React.useEffect`
+dependency array out of the body and asserts each name it lists is declared textually above
+that effect — the one thing the render checks cannot see, because the throwing path needs an
+effect to actually run. The section numbers were **not** renumbered when 0.6.9 removed the
+modal, so there is no §8 any more: it rendered that modal *open*, and §12 does the same job for
+the view that replaced it. §7's mutation case now lives in the Diagram tab (a dep declared
+below its effect makes it report `fileCount is declared 936 chars after the effect`); the same
+mechanism caught the 0.6.0 modal defect as
+`drawioRect is declared 833 chars after the effect`.
+- §12 (since 0.6.8) is the render-time coverage now: it renders the **Diagram tab** idle, with
+  no case, with no diagram, with a failed listing, with an open diagram and a live scene, with
+  a tooltip on screen and in its Source view. Overrides are addressed
+  by the view's **own** `useState` order (a fresh harness renders `DiagramView` alone, so the
+  call counter starts at zero), and it proves §7 inspects the new view by requiring that
+  regex to parse every one of its effects. Verified by mutation: adding a dep declared below
+  its effect makes §7 report `fileCount is declared 936 chars after the effect` and §12's
+  renders throw `Cannot access 'fileCount' before initialization` — the blank-tab defect,
+  twice over.
+- §10 asserts the shape of the tab bar's data instead of the button it lost: the host listing
+  stays scoped to the case's `diagram/` folder, the action row still carries ACLF / CA /
+  Report, it has **no** Diagram button, and `drawioFiles` / `drawioOpen` /
+  `drawioDirectPath` are absent from the body — so re-adding a second preview surface is a
+  deliberate act rather than a merge artifact.
 
 Since 0.6.3 **§9 asserts the two plugins are in sync**, which is what makes this rebuild
 guide trustworthy: the suite reads only the dynamic body, so silent drift had made it
@@ -503,6 +564,18 @@ Client-half change is served with the plugin bundle, so the reload is what picks
   A deliberate, not-yet-loaded picker choice survives a tab switch — the
   regression symptom is a picker that silently reverts or a "✓ Loaded" line that
   disappears every time the view remounts
+- **Diagram tab** (since 0.6.8): the tab bar reads **Chat · InterPSS · Diagram · Trajectory**,
+  and the InterPSS action row reads **ACLF · ⚙ · CA · Report** (the 0.6.9 change). The tab opens
+  straight onto its **Simu Case** row — no heading, no subtitle (0.6.10) — with a toolbar of
+  controls that ends at **Fit** (0.6.11). Selecting a
+  case in the InterPSS tab (preset or custom row) and switching to *Diagram*
+  draws that case's `<case>/diagram/*.drawio` full-size; with several files the picker lists
+  them and reopens the one last viewed; a case with none says so instead of drawing an empty
+  pane, and a case never touched shows the InterPSS preset's diagram. Hovering a bar or a
+  branch shows the connection diagram's tooltip (without a result table it says
+  `no result data — run ACLF`), the wheel zooms about the cursor, dragging pans, **Fit**
+  resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
+  the regression symptom is a Diagram tab that keeps drawing the previous case
 - **CA dialog** (since 0.3.16): with the Texas 2K case selected and no
   `config/ca_run.json`, pressing **CA** opens *Run Contingency Analysis* pre-filled with
   `2k_contingencies_115kVAbove.json` (2359) and `2k_monitored_branches.json`

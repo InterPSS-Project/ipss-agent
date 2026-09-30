@@ -12,6 +12,11 @@ return {
     let checkSeq = 0
     let reportSeq = 0
     let diagramSeq = 0
+    let diagramLoadSeq = 0
+    // The diagram the Diagram tab last opened. Kept beside `lastSelection` because it has
+    // to outlive the view: switching to another conversation view unmounts this one, and
+    // coming back should land on the same diagram rather than the folder's first.
+    let diagramChoice = ''
     // The bridge-held case this tab has already mirrored into its picker. A chat tool
     // can load another case while the tab shows one the user picked, so the picker
     // follows the bridge — but only when the bridge case *changes*, which leaves a
@@ -30,6 +35,43 @@ return {
         customInput: input,
         customFormat: /\.raw$/i.test(input) ? 'psse' : 'ieee',
       }
+    }
+
+    // The case the InterPSS tab has selected, derived from its picker state. The InterPSS
+    // tab owns "the current simulation case"; the Diagram tab only follows it, so the
+    // selection is shared here rather than being asked of the Host. One conversation view
+    // is mounted at a time, so a plain module-level value is enough: the Diagram tab seeds
+    // from it when it mounts, and every `onCaseChanged` keeps it current.
+    function selectionCaseInput() {
+      if (lastSelection.mode === 'custom') return lastSelection.customInput.trim()
+      const p = PRESETS[Number(lastSelection.mode)]
+      return p ? p.input : ''
+    }
+    let selectedCaseInput = selectionCaseInput()
+
+    // Adopt a case the Host holds into the shared selection. The InterPSS picker does this
+    // with its own UI bookkeeping (`adoptBridgeCase`); the Diagram tab needs only the
+    // picker state to follow, so that opening the InterPSS tab lands on the same case.
+    function adoptSelectedCase(input) {
+      const selection = bridgeCaseSelection(input)
+      lastSelection.mode = selection.mode
+      lastSelection.customInput = selection.customInput === '' ? lastSelection.customInput : selection.customInput
+      lastSelection.customFormat = selection.customFormat
+      selectedCaseInput = input
+    }
+
+    // Which diagram the Diagram tab shows for a case: the one the user last opened
+    // (`remembered`) while it is still in the folder, else the first. An empty folder is
+    // null, which the tab renders as "no diagram yet" rather than as an empty preview.
+    // Pure — the remembered path is passed in — so the guard can exercise it directly.
+    function drawioTabChoice(files, remembered) {
+      if (!Array.isArray(files) || files.length === 0) return null
+      const kept = files.find((f) => f !== null && typeof f === 'object' && f.path === remembered)
+      if (kept !== undefined) return kept.path
+      const first = files[0]
+      return first !== null && typeof first === 'object' && typeof first.path === 'string' && first.path !== ''
+        ? first.path
+        : null
     }
 
     // Editable fields of the AC Loadflow Option dialog, keyed by the real
@@ -577,8 +619,8 @@ return {
     }
 
     // --- draw.io preview -------------------------------------------------------
-    // The Diagram button reads a .drawio file over `interpss/readDrawio` and renders it
-    // as inline SVG in a modal. The renderer is deliberately self-contained and offline:
+    // The Diagram tab reads a .drawio file over `interpss/readDrawio` and renders it as
+    // inline SVG. The renderer is deliberately self-contained and offline:
     // the harness forbids frames (`frame-src 'none'` in the preview CSP) and the app
     // page CSP cannot be assumed, so an embedded draw.io viewer is not an option. It
     // covers the subset these workspaces' diagrams use — rounded rectangles, ellipses,
@@ -966,10 +1008,7 @@ return {
       return d < 0 ? 1.15 : 1 / 1.15
     }
 
-    // A case with exactly ONE diagram skips the picker: there is nothing to choose. Any
-    // other count (including none) returns null, so the caller decides what to do. Pure and
-    // module-level, beside the other drawio helpers, so the guard can exercise it directly.
-    // A bus bar's cell id is \`busN\` in the exported diagrams.
+    // A bus bar's cell id is `busN` in the exported diagrams.
     function drawioIsBusId(id) {
       return typeof id === 'string' && /^bus\d+$/i.test(id)
     }
@@ -1069,14 +1108,6 @@ return {
     // the second line says why there is no data rather than looking broken.
     function drawioFallbackTip(label, hasData) {
       return label + '\n' + (hasData ? '(not found in the case result tables)' : '(no result data — run ACLF)')
-    }
-
-    function drawioDirectPath(files) {
-      if (!Array.isArray(files) || files.length !== 1) return null
-      const only = files[0]
-      return only !== null && typeof only === 'object' && typeof only.path === 'string' && only.path !== ''
-        ? only.path
-        : null
     }
 
     function drawioZoomPercent(scene, rect) {
@@ -1346,51 +1377,6 @@ return {
       const [reportType, setReportType] = React.useState('nerc')
       const [reportView, setReportView] = React.useState('rendered')
       const [reportAvailable, setReportAvailable] = React.useState(false)
-      // draw.io preview: the picker and the rendered/source views share one modal.
-      // `drawioFiles` is the SELECTED case's `diagram/` folder as the Host reports it, so
-      // the Diagram button's enabled state and the picker's list are one fact and cannot
-      // disagree. null = no case selected, or not answered yet.
-      const [drawioOpen, setDrawioOpen] = React.useState(false)
-      const [drawioFiles, setDrawioFiles] = React.useState(null)
-      const [drawioFilesLoading, setDrawioFilesLoading] = React.useState(false)
-      const [drawioFilesError, setDrawioFilesError] = React.useState(null)
-      const [drawioPath, setDrawioPath] = React.useState('')
-      const [drawioXml, setDrawioXml] = React.useState('')
-      const [drawioScene, setDrawioScene] = React.useState(null)
-      const [drawioLoading, setDrawioLoading] = React.useState(false)
-      const [drawioError, setDrawioError] = React.useState(null)
-      const [drawioView, setDrawioView] = React.useState('rendered')
-      const drawioOverlayRef = React.useRef(null)
-      // Pan/zoom of the rendered pane: the visible rectangle in scene coordinates, or
-      // null for "fit the whole diagram". Declared here, above every reader, because a
-      // dependency array is evaluated during render (see the focus effect's note).
-      const [drawioRect, setDrawioRect] = React.useState(null)
-      const [drawioDragging, setDrawioDragging] = React.useState(false)
-      const drawioCanvasRef = React.useRef(null)
-      const drawioDragRef = React.useRef(null)
-      // Tooltip data for the preview, all keyed to the SELECTED case: the branch table
-      // indexed by bus pair, the canonical BusN spelling the Host matches on, the bus
-      // records the connection Host method hands back (filled lazily, one call per bus
-      // actually hovered), the resolved branch pairs of the open scene, and what is under
-      // the cursor right now so a late answer can be ignored.
-      const drawioDataRef = React.useRef({ branch: null, canonical: null, busCache: {}, pairs: null, hovered: null })
-      // Derived from the case's diagram list, and read by the action row far below — so it is
-      // declared HERE, with its state, not next to the layout that consumes it (a const read
-      // above its declaration is a TDZ ReferenceError that blanks the whole tab; 0.6.0 shipped
-      // exactly that, and this guard caught the same mistake again).
-      const diagramCount = drawioFiles === null ? 0 : drawioFiles.length
-      // Focus the preview overlay when it opens so Escape reaches its own onKeyDown.
-      // Deliberately no window listener: the dynamic Client half is given no `window`
-      // (see docs/persistent-plugin-rebuild.md), so the two tab bodies stay identical.
-      // This effect must sit BELOW the state it reads: a dependency array is evaluated
-      // during render, so referencing `drawioOpen` above its `const` is a TDZ
-      // ReferenceError that blanks the whole tab.
-      React.useEffect(() => {
-        if (!drawioOpen) return undefined
-        const el = drawioOverlayRef.current
-        if (el !== null && typeof el.focus === 'function') el.focus()
-        return undefined
-      }, [drawioOpen])
       const [caseLoaded, setCaseLoaded] = React.useState(false)
       const [caseLoading, setCaseLoading] = React.useState(false)
       const [caseLoadError, setCaseLoadError] = React.useState(null)
@@ -1438,7 +1424,9 @@ return {
 
       function onCaseChanged(input) {
         const seq = ++checkSeq
-        refreshCaseDiagrams(input)
+        // This tab owns the current case; the Diagram tab reads the shared value when it
+        // mounts, so selecting a case here is what decides what that tab draws.
+        selectedCaseInput = input
         clearResults()
         setCaseLoaded(false)
         setCaseLoadError(null)
@@ -1647,292 +1635,6 @@ return {
           (res) => { setCaFilesLoading(false); setCaFiles(res && res.ok ? res.files : []) },
           () => { setCaFilesLoading(false); setCaFiles([]) },
         )
-      }
-
-      // The selected case's `diagram/` folder, straight from the Host. One fetch feeds both
-      // the Diagram button's enabled state and the picker list. `diagramSeq` drops an answer
-      // that belongs to a case the user has already moved off.
-      function refreshCaseDiagrams(input) {
-        const seq = ++diagramSeq
-        // A different case means a different diagram and a different result table.
-        drawioDataRef.current = { branch: null, canonical: null, busCache: {}, pairs: null, hovered: null }
-        if (typeof input !== 'string' || input === '') {
-          setDrawioFiles([])
-          setDrawioFilesError(null)
-          setDrawioFilesLoading(false)
-          return
-        }
-        setDrawioFilesLoading(true)
-        setDrawioFilesError(null)
-        callRemote('listDrawioFiles', { case: input, sessionId }).then(
-          (res) => {
-            if (seq !== diagramSeq) return
-            setDrawioFilesLoading(false)
-            if (res && res.ok) setDrawioFiles(res.files || [])
-            else {
-              setDrawioFiles([])
-              setDrawioFilesError(res && res.error ? res.error : 'failed to list the case diagrams')
-            }
-          },
-          (err) => {
-            if (seq !== diagramSeq) return
-            setDrawioFilesLoading(false)
-            setDrawioFiles([])
-            setDrawioFilesError(String(err && err.message ? err.message : err))
-          },
-        )
-      }
-
-      // The Diagram button's handler: one diagram opens straight away, several need the
-      // picker. The button is disabled with none, so an empty list here is unreachable —
-      // guard anyway rather than open a modal showing nothing.
-      function openDiagram() {
-        const files = drawioFiles === null ? [] : drawioFiles
-        const only = drawioDirectPath(files)
-        if (only !== null) {
-          openDrawio(only)
-          return
-        }
-        if (files.length === 0) return
-        openDrawioPicker()
-      }
-
-      // The result table the tooltips quote, and only when the case actually has one.
-      function drawioBranchCsvPath() {
-        if (result === null || result === undefined) return null
-        const name = (result.files || []).find((f) => String(f).indexOf('_DF_branch.csv') !== -1)
-        return name === undefined ? null : result.resultDir + '/' + name
-      }
-
-      // Index the branch table by bus pair, and record the canonical BusN spelling of every
-      // bus it names. One paged read of the file the diagram is drawn from; the LINES are
-      // split here because readCsv hands back raw CSV rows while branchTooltip wants columns.
-      function loadDrawioBranchIndex() {
-        const data = drawioDataRef.current
-        const path = drawioBranchCsvPath()
-        if (path === null) { data.branch = null; data.canonical = null; return }
-        const pair = new Map()
-        const canonical = {}
-        const page = (start, guard) => {
-          if (guard > 20) return
-          callRemote('readCsv', { path: path, sessionId: sessionId, start: start, limit: 5000 }).then(
-            (res) => {
-              if (!res || !res.ok) return
-              const rows = res.rows || []
-              for (const line of rows) {
-                const c = String(line).split(',')
-                const from = String(c[4] || '').trim()
-                const to = String(c[7] || '').trim()
-                if (from === '' || to === '') continue
-                canonical[from.toLowerCase()] = from
-                canonical[to.toLowerCase()] = to
-                const key = [from.toLowerCase(), to.toLowerCase()].sort().join('|')
-                if (!pair.has(key)) pair.set(key, [])
-                pair.get(key).push(c)
-              }
-              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
-              data.branch = pair
-              data.canonical = canonical
-            },
-            () => {},
-          )
-        }
-        page(0, 0)
-      }
-
-      // Hover a bus bar or its label. A cache hit answers instantly; otherwise the bus says
-      // who it is, one call fills the cache for it AND its branch neighbours, and the tip is
-      // rewritten only if that same bus is still under the cursor.
-      function drawioBusTip(nodeId, event) {
-        const data = drawioDataRef.current
-        const busId = drawioCanonicalBusId(data.canonical, nodeId)
-        data.hovered = { kind: 'bus', id: busId }
-        const known = data.busCache[busId]
-        if (known !== undefined) {
-          setDiagramTip({ text: busTooltip(known), x: event.clientX, y: event.clientY })
-          return
-        }
-        setDiagramTip({
-          text: drawioFallbackTip(String(busId), data.branch !== null),
-          x: event.clientX, y: event.clientY,
-        })
-        const path = drawioBranchCsvPath()
-        if (path === null) return
-        callRemote('busConnections', { busId: busId, path: path, sessionId: sessionId }).then(
-          (res) => {
-            if (!res || !res.ok) return
-            for (const rec of (res.busRecords || [])) data.busCache[rec.id] = rec
-            const now = data.hovered
-            const filled = data.busCache[busId]
-            if (filled === undefined || now === null || now.kind !== 'bus' || now.id !== busId) return
-            setDiagramTip((t) => (t === null ? t : { text: busTooltip(filled), x: t.x, y: t.y }))
-          },
-          () => {},
-        )
-      }
-
-      // Hover a branch: an edge, either half of a transformer chain, or the symbol itself.
-      // Parallel circuits between one bus pair all match and are rendered one block each.
-      function drawioBranchTip(key, event) {
-        const data = drawioDataRef.current
-        data.hovered = { kind: 'branch', key: key }
-        const rows = data.branch === null || data.branch === undefined ? undefined : data.branch.get(key)
-        const text = rows === undefined || rows.length === 0
-          ? drawioFallbackTip(drawioPairLabel(key), data.branch !== null)
-          : rows.map((r) => branchTooltip(r)).join('\n\n')
-        setDiagramTip({ text: text, x: event.clientX, y: event.clientY })
-      }
-
-      // The index belongs to one case result, so it is (re)built whenever a diagram is open
-      // and that result changes, and the bus cache is dropped with it.
-      React.useEffect(() => {
-        if (!drawioOpen || drawioPath === '') return undefined
-        drawioDataRef.current.busCache = {}
-        drawioDataRef.current.hovered = null
-        loadDrawioBranchIndex()
-        return undefined
-      }, [drawioOpen, drawioPath, result])
-
-      // A tip must not outlive its modal: closing the preview drops it, so it cannot hang
-      // over the tab if the pointer never left the SVG.
-      React.useEffect(() => {
-        if (drawioOpen) return undefined
-        setDiagramTip(null)
-        drawioDataRef.current.hovered = null
-        return undefined
-      }, [drawioOpen])
-
-      // Open the preview modal straight into its picker: one surface holds the file list,
-      // the rendered diagram and the raw XML, so no second popover is needed. The list is
-      // re-read on open, so a diagram dropped into the folder while the tab is open shows up.
-      function openDrawioPicker() {
-        const c = resolveCase()
-        refreshCaseDiagrams(c === null ? '' : c.input)
-        setDrawioOpen(true)
-        setDrawioPath('')
-        setDrawioXml('')
-        setDrawioScene(null)
-        setDrawioError(null)
-        setDrawioView('rendered')
-        setDrawioRect(null)
-      }
-
-      // The function the Diagram feature is built on: read a workspace-relative .drawio
-      // over the Host, decode it (plain or compressed), and render it in the modal.
-      function openDrawio(path) {
-        if (typeof path !== 'string' || path === '') return
-        setDrawioOpen(true)
-        setDrawioPath(path)
-        setDrawioXml('')
-        setDrawioScene(null)
-        setDrawioError(null)
-        setDrawioView('rendered')
-        setDrawioRect(null)
-        setDrawioLoading(true)
-        callRemote('readDrawio', { path: path, sessionId }).then(
-          (res) => {
-            if (!res || !res.ok) throw new Error(res && res.error ? res.error : 'failed to read the diagram')
-            setDrawioXml(res.xml)
-            return diagramXmlFrom(res.xml)
-          },
-        ).then(
-          (xml) => {
-            const scene = parseDrawioScene(xml)
-            // Resolve element -> branch once, here, rather than on every pan/zoom repaint.
-            drawioDataRef.current.pairs = drawioBranchPairs(scene)
-            setDrawioScene(scene)
-            setDrawioLoading(false)
-          },
-          (err) => {
-            setDrawioLoading(false)
-            setDrawioError(String(err && err.message ? err.message : err))
-          },
-        )
-      }
-
-      // --- Diagram pan/zoom ---------------------------------------------------
-      // One SVG with a moving viewBox: the wheel zooms about the cursor, dragging pans,
-      // and Fit returns to the scene's own viewBox.
-      function drawioCurrentRect() {
-        if (drawioScene === null) return null
-        return drawioRect === null ? drawioFitRect(drawioScene.viewBox) : drawioRect
-      }
-
-      // Screen -> scene mapping for the rendered box. preserveAspectRatio="xMidYMid meet"
-      // letterboxes the scene inside the element, so the scale is the smaller of the two
-      // ratios and the slack is centred; ignoring that would let the zoom anchor drift
-      // away from the cursor.
-      function drawioMetrics(rect) {
-        const el = drawioCanvasRef.current
-        if (el === null || typeof el.getBoundingClientRect !== 'function') return null
-        const box = el.getBoundingClientRect()
-        if (!(box.width > 0) || !(box.height > 0)) return null
-        const scale = Math.min(box.width / rect.w, box.height / rect.h)
-        if (!Number.isFinite(scale) || scale <= 0) return null
-        return { box: box, scale: scale, offX: (box.width - rect.w * scale) / 2, offY: (box.height - rect.h * scale) / 2 }
-      }
-
-      function drawioApplyZoom(factor, clientX, clientY) {
-        const rect = drawioCurrentRect()
-        if (rect === null) return
-        const limits = drawioZoomLimits(drawioScene.viewBox)
-        const m = drawioMetrics(rect)
-        if (m === null) { setDrawioRect(drawioZoomRect(rect, factor, 0.5, 0.5, limits)); return }
-        const sx = rect.x + (clientX - m.box.left - m.offX) / m.scale
-        const sy = rect.y + (clientY - m.box.top - m.offY) / m.scale
-        setDrawioRect(drawioZoomRect(rect, factor, (sx - rect.x) / rect.w, (sy - rect.y) / rect.h, limits))
-      }
-
-      function drawioStepZoom(factor) {
-        const rect = drawioCurrentRect()
-        if (rect === null) return
-        setDrawioRect(drawioZoomRect(rect, factor, 0.5, 0.5, drawioZoomLimits(drawioScene.viewBox)))
-      }
-
-      function drawioFit() {
-        setDrawioRect(null)
-        drawioDragRef.current = null
-        setDrawioDragging(false)
-      }
-
-      // Registered natively rather than as onWheel so preventDefault is permitted: React
-      // delegates wheel passively, which would let the page behind the modal scroll while
-      // the pointer is over the diagram.
-      React.useEffect(() => {
-        if (!drawioOpen || drawioScene === null) return undefined
-        const el = drawioCanvasRef.current
-        if (el === null || typeof el.addEventListener !== 'function') return undefined
-        const onWheel = (e) => {
-          if (e.preventDefault) e.preventDefault()
-          drawioApplyZoom(drawioWheelFactor(e.deltaY), e.clientX, e.clientY)
-        }
-        el.addEventListener('wheel', onWheel, { passive: false })
-        return () => el.removeEventListener('wheel', onWheel)
-      }, [drawioOpen, drawioScene, drawioRect])
-
-      function drawioPointerDown(e) {
-        const rect = drawioCurrentRect()
-        if (rect === null) return
-        const m = drawioMetrics(rect)
-        if (m === null) return
-        drawioDragRef.current = { x: e.clientX, y: e.clientY, scale: m.scale }
-        setDrawioDragging(true)
-        if (e.preventDefault) e.preventDefault()
-      }
-
-      function drawioPointerMove(e) {
-        const rect = drawioCurrentRect()
-        const drag = drawioDragRef.current
-        if (rect === null || drag === null) return
-        const dx = (e.clientX - drag.x) / drag.scale
-        const dy = (e.clientY - drag.y) / drag.scale
-        drawioDragRef.current = { x: e.clientX, y: e.clientY, scale: drag.scale }
-        setDrawioRect(drawioPanRect(rect, -dx, -dy))
-      }
-
-      function drawioPointerUp() {
-        drawioDragRef.current = null
-        setDrawioDragging(false)
       }
 
       function openCaDialog() {
@@ -2365,17 +2067,6 @@ return {
           }, gearIcon),
           React.createElement('button', { onClick: openCaDialog, disabled: running || caRunning || !caseLoaded, title: 'Run DC contingency analysis', style: { ...btn, marginLeft: '12px', opacity: (running || caRunning || !caseLoaded) ? 0.6 : 1 } }, caRunning ? 'Running…' : 'CA'),
           React.createElement('button', { onClick: runReport, disabled: running || reportLoading || !reportAvailable, style: { ...btn, marginLeft: '12px', opacity: (running || reportLoading || !reportAvailable) ? 0.6 : 1 } }, reportLoading ? 'Generating…' : 'Report'),
-          // Not gated on caseLoaded: a .drawio preview is independent of the simulation case.
-          // Enabled by the case's diagram folder alone, so the click can promise an open or a
-          // choice rather than an empty modal.
-          React.createElement('button', {
-            onClick: openDiagram,
-            disabled: diagramCount === 0,
-            title: diagramCount === 0
-              ? 'No .drawio file in this case\'s diagram folder'
-              : (diagramCount === 1 ? 'Open the case diagram' : 'Choose from ' + diagramCount + ' diagrams'),
-            style: { ...btn, marginLeft: '12px', opacity: diagramCount === 0 ? 0.5 : 1, cursor: diagramCount === 0 ? 'not-allowed' : 'pointer' },
-          }, 'Diagram'),
         ),
         caseLoadError ? React.createElement('span', { key: 'caseloaderr', style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caseLoadError) : null,
         optSaved ? React.createElement('span', { key: 'optsaved', style: { fontSize: '12px', color: 'var(--dsw-alias-state-success-primary)' } }, '✓ Options saved') : null,
@@ -2843,79 +2534,6 @@ return {
         ),
       ) : null
 
-      // The draw.io preview body: picker -> rendered diagram / raw XML. The rendered
-      // pane gets a white surface because a draw.io model carries its own light
-      // background, which would otherwise be unreadable in the dark theme.
-      const drawioBody = drawioLoading
-        ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading diagram…')
-        : drawioError !== null
-          ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, drawioError)
-          : drawioPath === ''
-            ? (drawioFilesLoading
-              ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Looking for .drawio files…')
-              : drawioFilesError !== null
-                ? React.createElement('pre', { style: { ...mono, margin: 0 } }, drawioFilesError)
-                : (drawioFiles !== null && drawioFiles.length > 0
-                  ? React.createElement('div', { style: { flex: '1 1 auto', minHeight: 0, overflowY: 'auto' } },
-                    drawioFiles.map((f) => React.createElement('button', {
-                      key: f.path,
-                      onClick: () => openDrawio(f.path),
-                      style: { display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: 'none', borderBottom: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' },
-                    }, f.path + (typeof f.size === 'number' ? '  (' + Math.max(1, Math.round(f.size / 1024)) + ' KB)' : ''))))
-                  : React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No .drawio file in this case\'s diagram folder.')))
-            : drawioView === 'source'
-              ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, drawioXml || '')
-              : drawioScene !== null
-                ? React.createElement('div', {
-                  ref: drawioCanvasRef,
-                  onPointerDown: drawioPointerDown,
-                  onPointerMove: drawioPointerMove,
-                  onPointerUp: drawioPointerUp,
-                  onPointerCancel: drawioPointerUp,
-                  onPointerLeave: drawioPointerUp,
-                  style: { flex: '1 1 auto', minHeight: 0, overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: drawioDragging ? 'grabbing' : 'grab', touchAction: 'none' },
-                }, React.createElement(DrawioDiagram, {
-                  scene: drawioScene,
-                  view: drawioRect,
-                  hover: {
-                    pairs: drawioDataRef.current.pairs,
-                    onBus: drawioBusTip,
-                    onBranch: drawioBranchTip,
-                    onMove: moveDiagramTip,
-                    onLeave: hideDiagramTip,
-                  },
-                }))
-                : null
-
-      const drawioModal = drawioOpen ? React.createElement('div', {
-        ref: drawioOverlayRef,
-        tabIndex: -1,
-        onKeyDown: (e) => { if (e.key === 'Escape') setDrawioOpen(false) },
-        style: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.55)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', outline: 'none' },
-        onClick: () => { if (!drawioLoading) setDrawioOpen(false) },
-      },
-        React.createElement('div', {
-          onClick: (e) => e.stopPropagation(),
-          style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '1100px', height: '86vh', display: 'flex', flexDirection: 'column' },
-        },
-          React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', marginBottom: '10px' } },
-            React.createElement('div', { style: { fontWeight: 600, fontSize: '15px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-              drawioPath === '' ? 'Open draw.io diagram' : drawioPath),
-            React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
-              drawioPath !== '' ? React.createElement('button', { onClick: openDrawioPicker, style: { ...btn, padding: '4px 10px' } }, 'Back') : null,
-              drawioPath !== '' ? React.createElement('button', { onClick: () => setDrawioView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: drawioView === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered') : null,
-              drawioPath !== '' ? React.createElement('button', { onClick: () => setDrawioView('source'), style: { ...btn, padding: '4px 10px', borderColor: drawioView === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source') : null,
-              drawioPath !== '' && drawioView === 'rendered' && drawioScene !== null ? React.createElement('button', { onClick: () => drawioStepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
-              drawioPath !== '' && drawioView === 'rendered' && drawioScene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(drawioScene, drawioRect) + '%') : null,
-              drawioPath !== '' && drawioView === 'rendered' && drawioScene !== null ? React.createElement('button', { onClick: () => drawioStepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
-              drawioPath !== '' && drawioView === 'rendered' && drawioScene !== null ? React.createElement('button', { onClick: drawioFit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
-              React.createElement('button', { onClick: () => setDrawioOpen(false), style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
-            ),
-          ),
-          drawioBody,
-        ),
-      ) : null
-
       if (activated === null) {
         return React.createElement('div', { style: { padding: '20px', color: 'var(--dsw-alias-label-secondary)' } }, 'Checking workspace…')
       }
@@ -2976,8 +2594,438 @@ return {
         caModal,
         optModal,
         reportModal,
-        drawioModal,
         diagramTipEl,
+      )
+    }
+
+    // --- Diagram tab --------------------------------------------------------
+    // The one-line diagram of the case selected in the InterPSS tab, as its own
+    // conversation view (order 2, between InterPSS and Trajectory) — one `readDrawio` RPC,
+    // the self-contained SVG renderer, pan/zoom and the bus/branch tooltips, laid out
+    // full-size. Since 0.6.9 it is the ONLY preview surface: the InterPSS tab's action row
+    // no longer carries a **Diagram** button, and the modal that button opened is gone.
+    // The case is deliberately NOT chosen here: the view follows the shared selection, so
+    // the two tabs cannot disagree about the current case, and it adds no Host endpoint.
+    function DiagramView(props) {
+      const sessionId = props && props.sessionId
+      const callRemote = props && props.callRemote
+      const [caseInput, setCaseInput] = React.useState(selectedCaseInput)
+      const [files, setFiles] = React.useState(null)
+      const [filesLoading, setFilesLoading] = React.useState(false)
+      const [filesError, setFilesError] = React.useState(null)
+      const [path, setPath] = React.useState('')
+      const [xml, setXml] = React.useState('')
+      const [scene, setScene] = React.useState(null)
+      const [loading, setLoading] = React.useState(false)
+      const [error, setError] = React.useState(null)
+      const [view, setView] = React.useState('rendered')
+      const [resultDir, setResultDir] = React.useState(null)
+      const [branchFile, setBranchFile] = React.useState(null)
+      // Pan/zoom of the rendered pane: the visible rectangle in scene coordinates, or null
+      // for "fit the whole diagram". Declared with the other state, above every reader.
+      const [rect, setRect] = React.useState(null)
+      const [dragging, setDragging] = React.useState(false)
+      const [tip, setTip] = React.useState(null)
+      const canvasRef = React.useRef(null)
+      const dragRef = React.useRef(null)
+      // Tooltip data keyed to the SELECTED case: the branch
+      // table indexed by bus pair, the canonical BusN spelling the Host matches on, the bus
+      // records `busConnections` hands back (filled lazily, one call per bus hovered), the
+      // open scene's resolved branch pairs, and what is under the cursor right now so a
+      // late answer can be dropped.
+      const dataRef = React.useRef({ branch: null, canonical: null, busCache: {}, pairs: null, hovered: null })
+
+      // Follow a case the Host loaded from chat. One shot rather than a poll: this view is
+      // unmounted while the Chat view runs a tool, so a fresh mount is exactly the moment
+      // the bridge answer can have changed, and the tab needs no timer of its own.
+      React.useEffect(() => {
+        let alive = true
+        callRemote('getBridgeCase', { sessionId }).then(
+          (res) => {
+            if (!alive || res === null || res === undefined || res.ok !== true) return
+            const input = typeof res.case === 'string' ? res.case : ''
+            if (input === '' || input === bridgeCaseSeen) return
+            bridgeCaseSeen = input
+            if (input === selectedCaseInput) return
+            adoptSelectedCase(input)
+            setCaseInput(input)
+          },
+          () => {},
+        )
+        return () => { alive = false }
+      }, [])
+
+      // Everything the tab shows is keyed to the selected case: its `diagram/` folder for
+      // the picker, and the result tables the tooltips quote. `diagramSeq` drops an answer
+      // that arrives after the user has already moved off the case it belongs to.
+      React.useEffect(() => {
+        const seq = ++diagramSeq
+        dataRef.current = { branch: null, canonical: null, busCache: {}, pairs: null, hovered: null }
+        setFiles(null)
+        setFilesError(null)
+        setResultDir(null)
+        setBranchFile(null)
+        setTip(null)
+        setPath('')
+        setXml('')
+        setScene(null)
+        setError(null)
+        setRect(null)
+        if (typeof caseInput !== 'string' || caseInput === '') {
+          setFiles([])
+          setFilesLoading(false)
+          return undefined
+        }
+        setFilesLoading(true)
+        callRemote('listDrawioFiles', { case: caseInput, sessionId }).then(
+          (res) => {
+            if (seq !== diagramSeq) return
+            setFilesLoading(false)
+            if (res === null || res === undefined || res.ok !== true) {
+              setFiles([])
+              setFilesError(res && res.error ? res.error : 'failed to list the case diagrams')
+              return
+            }
+            const list = res.files || []
+            setFiles(list)
+            const next = drawioTabChoice(list, diagramChoice)
+            if (next !== null) openDiagram(next)
+          },
+          (err) => {
+            if (seq !== diagramSeq) return
+            setFilesLoading(false)
+            setFiles([])
+            setFilesError(String(err && err.message ? err.message : err))
+          },
+        )
+        callRemote('checkResult', { input: caseInput, sessionId }).then(
+          (res) => {
+            if (seq !== diagramSeq) return
+            if (res === null || res === undefined || res.ok !== true || res.exists !== true) return
+            setResultDir(typeof res.resultDir === 'string' ? res.resultDir : null)
+            const name = (res.files || []).find((f) => String(f).indexOf('_DF_branch.csv') !== -1)
+            setBranchFile(name === undefined ? null : name)
+          },
+          () => {},
+        )
+        return undefined
+      }, [caseInput])
+
+      // The tooltips quote `<case>/result/<stem>_DF_branch.csv`; index it by bus pair once
+      // per result. Read in pages, and the LINES are split here because `readCsv` hands back
+      // raw CSV rows while `branchTooltip` wants columns.
+      React.useEffect(() => {
+        dataRef.current.busCache = {}
+        dataRef.current.hovered = null
+        dataRef.current.branch = null
+        dataRef.current.canonical = null
+        if (branchFile === null || resultDir === null) return undefined
+        const pair = new Map()
+        const canonical = {}
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + branchFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (res === null || res === undefined || res.ok !== true) return
+              const rows = res.rows || []
+              for (const line of rows) {
+                const c = String(line).split(',')
+                const from = String(c[4] || '').trim()
+                const to = String(c[7] || '').trim()
+                if (from === '' || to === '') continue
+                canonical[from.toLowerCase()] = from
+                canonical[to.toLowerCase()] = to
+                const key = [from.toLowerCase(), to.toLowerCase()].sort().join('|')
+                if (!pair.has(key)) pair.set(key, [])
+                pair.get(key).push(c)
+              }
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              dataRef.current.branch = pair
+              dataRef.current.canonical = canonical
+            },
+            () => {},
+          )
+        }
+        page(0, 0)
+        return undefined
+      }, [branchFile, resultDir])
+
+      // The preview's read: fetch the .drawio, decode it
+      // (plain or compressed) and resolve element -> branch once, not on every repaint.
+      // `diagramLoadSeq` drops a diagram the user has already switched away from.
+      function openDiagram(next) {
+        if (typeof next !== 'string' || next === '') return
+        diagramChoice = next
+        const seq = ++diagramLoadSeq
+        setPath(next)
+        setXml('')
+        setScene(null)
+        setError(null)
+        setView('rendered')
+        setRect(null)
+        setLoading(true)
+        callRemote('readDrawio', { path: next, sessionId }).then(
+          (res) => {
+            if (res === null || res === undefined || res.ok !== true) {
+              throw new Error(res && res.error ? res.error : 'failed to read the diagram')
+            }
+            if (seq !== diagramLoadSeq) return null
+            setXml(res.xml)
+            return diagramXmlFrom(res.xml)
+          },
+        ).then(
+          (text) => {
+            if (text === null || seq !== diagramLoadSeq) return
+            const parsed = parseDrawioScene(text)
+            dataRef.current.pairs = drawioBranchPairs(parsed)
+            setScene(parsed)
+            setLoading(false)
+          },
+          (err) => {
+            if (seq !== diagramLoadSeq) return
+            setLoading(false)
+            setError(String(err && err.message ? err.message : err))
+          },
+        )
+      }
+
+      // --- Tooltips -----------------------------------------------------------
+      function branchPath() {
+        return branchFile === null || resultDir === null ? null : resultDir + '/' + branchFile
+      }
+
+      function showTip(text, e) {
+        setTip({ text: text, x: e.clientX, y: e.clientY })
+      }
+      function moveTip(e) {
+        setTip((t) => (t ? { text: t.text, x: e.clientX, y: e.clientY } : t))
+      }
+      function hideTip() {
+        setTip(null)
+      }
+
+      // A cache hit answers instantly; otherwise the bus says who it is, one call fills the
+      // cache for it AND its branch neighbours, and the tip is rewritten only if that same
+      // bus is still under the cursor.
+      function diagramBusTip(nodeId, event) {
+        const data = dataRef.current
+        const busId = drawioCanonicalBusId(data.canonical, nodeId)
+        data.hovered = { kind: 'bus', id: busId }
+        const known = data.busCache[busId]
+        if (known !== undefined) {
+          showTip(busTooltip(known), event)
+          return
+        }
+        showTip(drawioFallbackTip(String(busId), data.branch !== null), event)
+        const target = branchPath()
+        if (target === null) return
+        callRemote('busConnections', { busId: busId, path: target, sessionId: sessionId }).then(
+          (res) => {
+            if (res === null || res === undefined || res.ok !== true) return
+            for (const rec of (res.busRecords || [])) data.busCache[rec.id] = rec
+            const now = data.hovered
+            const filled = data.busCache[busId]
+            if (filled === undefined || now === null || now.kind !== 'bus' || now.id !== busId) return
+            setTip((t) => (t === null ? t : { text: busTooltip(filled), x: t.x, y: t.y }))
+          },
+          () => {},
+        )
+      }
+
+      // An edge, either half of a transformer chain, or the symbol itself. Parallel circuits
+      // between one bus pair all match and are rendered one block each.
+      function diagramBranchTip(key, event) {
+        const data = dataRef.current
+        data.hovered = { kind: 'branch', key: key }
+        const rows = data.branch === null || data.branch === undefined ? undefined : data.branch.get(key)
+        showTip(rows === undefined || rows.length === 0
+          ? drawioFallbackTip(drawioPairLabel(key), data.branch !== null)
+          : rows.map((r) => branchTooltip(r)).join('\n\n'), event)
+      }
+
+      // --- Pan / zoom ---------------------------------------------------------
+      // One SVG with a moving viewBox: the wheel zooms about the
+      // cursor, dragging pans, and Fit returns to the scene's own viewBox.
+      function currentRect() {
+        if (scene === null) return null
+        return rect === null ? drawioFitRect(scene.viewBox) : rect
+      }
+
+      function metrics(r) {
+        const el = canvasRef.current
+        if (el === null || typeof el.getBoundingClientRect !== 'function') return null
+        const box = el.getBoundingClientRect()
+        if (!(box.width > 0) || !(box.height > 0)) return null
+        const scale = Math.min(box.width / r.w, box.height / r.h)
+        if (!Number.isFinite(scale) || scale <= 0) return null
+        return { box: box, scale: scale, offX: (box.width - r.w * scale) / 2, offY: (box.height - r.h * scale) / 2 }
+      }
+
+      // `preserveAspectRatio="xMidYMid meet"` letterboxes the scene inside the element, so
+      // the anchor is computed through the box actually drawn — the smaller of the two
+      // ratios, centred — not the element's own box.
+      function applyZoom(factor, clientX, clientY) {
+        const r = currentRect()
+        if (r === null) return
+        const limits = drawioZoomLimits(scene.viewBox)
+        const m = metrics(r)
+        if (m === null) { setRect(drawioZoomRect(r, factor, 0.5, 0.5, limits)); return }
+        const sx = r.x + (clientX - m.box.left - m.offX) / m.scale
+        const sy = r.y + (clientY - m.box.top - m.offY) / m.scale
+        setRect(drawioZoomRect(r, factor, (sx - r.x) / r.w, (sy - r.y) / r.h, limits))
+      }
+
+      function stepZoom(factor) {
+        const r = currentRect()
+        if (r === null) return
+        setRect(drawioZoomRect(r, factor, 0.5, 0.5, drawioZoomLimits(scene.viewBox)))
+      }
+
+      function fit() {
+        setRect(null)
+        dragRef.current = null
+        setDragging(false)
+      }
+
+      // Registered natively rather than as onWheel so preventDefault is permitted: React
+      // delegates wheel passively, which would scroll the panel while zooming.
+      React.useEffect(() => {
+        if (scene === null) return undefined
+        const el = canvasRef.current
+        if (el === null || typeof el.addEventListener !== 'function') return undefined
+        const onWheel = (e) => {
+          if (e.preventDefault) e.preventDefault()
+          applyZoom(drawioWheelFactor(e.deltaY), e.clientX, e.clientY)
+        }
+        el.addEventListener('wheel', onWheel, { passive: false })
+        return () => el.removeEventListener('wheel', onWheel)
+      }, [scene, rect])
+
+      // A tip must not outlive the diagram it describes.
+      React.useEffect(() => {
+        setTip(null)
+        dataRef.current.hovered = null
+        return undefined
+      }, [path])
+
+      function pointerDown(e) {
+        const r = currentRect()
+        if (r === null) return
+        const m = metrics(r)
+        if (m === null) return
+        dragRef.current = { x: e.clientX, y: e.clientY, scale: m.scale }
+        setDragging(true)
+        if (e.preventDefault) e.preventDefault()
+      }
+
+      function pointerMove(e) {
+        const r = currentRect()
+        const drag = dragRef.current
+        if (r === null || drag === null) return
+        const dx = (e.clientX - drag.x) / drag.scale
+        const dy = (e.clientY - drag.y) / drag.scale
+        dragRef.current = { x: e.clientX, y: e.clientY, scale: drag.scale }
+        setRect(drawioPanRect(r, -dx, -dy))
+      }
+
+      function pointerUp() {
+        dragRef.current = null
+        setDragging(false)
+      }
+
+      const fileCount = files === null ? 0 : files.length
+      const selectStyle = { padding: '0 10px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', height: '30px', boxSizing: 'border-box', maxWidth: '420px' }
+
+      const caseRow = React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
+        React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' } }, 'Simu Case'),
+        React.createElement('span', { style: { fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' } },
+          caseInput === '' ? '(none selected)' : caseInput),
+        caseInput === ''
+          ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } },
+            'Select a case in the InterPSS tab and this view follows it.')
+          : null,
+      )
+
+      // The picker only exists when there is something to pick: one diagram is already
+      // open, and none is a state the body explains.
+      const picker = fileCount > 1
+        ? React.createElement('select', {
+          value: path,
+          onChange: (e) => openDiagram(e.target.value),
+          style: selectStyle,
+        }, files.map((f) => React.createElement('option', { key: f.path, value: f.path },
+          f.path.slice(f.path.lastIndexOf('/') + 1) + (typeof f.size === 'number' ? '  (' + Math.max(1, Math.round(f.size / 1024)) + ' KB)' : ''))))
+        : null
+
+      const toolbar = (path !== '' || picker !== null)
+        ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
+          picker,
+          path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered') : null,
+          path !== '' ? React.createElement('button', { onClick: () => setView('source'), style: { ...btn, padding: '4px 10px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source') : null,
+          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
+          path !== '' && view === 'rendered' && scene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(scene, rect) + '%') : null,
+          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
+          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: fit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
+        )
+        : null
+
+      const body = caseInput === ''
+        ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } },
+          'No simulation case selected. Pick one in the InterPSS tab — its diagram folder is listed here automatically.')
+        : filesError !== null
+          ? React.createElement('pre', { style: { ...mono, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, filesError)
+          // `files === null` is "the listing has not answered yet", so the first paint of a
+          // selected case reads as a lookup rather than as a blank tab.
+          : (filesLoading || files === null)
+            ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Looking for .drawio files…')
+            : files.length === 0
+              ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } },
+                'No .drawio file in this case\'s diagram folder yet.')
+              : loading
+                ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading diagram…')
+                : error !== null
+                  ? React.createElement('pre', { style: { ...mono, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, error)
+                  : view === 'source'
+                    ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, xml || '')
+                    : scene !== null
+                      ? React.createElement('div', {
+                        ref: canvasRef,
+                        onPointerDown: pointerDown,
+                        onPointerMove: pointerMove,
+                        onPointerUp: pointerUp,
+                        onPointerCancel: pointerUp,
+                        onPointerLeave: pointerUp,
+                        style: { height: '70vh', minHeight: '320px', overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' },
+                      }, React.createElement(DrawioDiagram, {
+                        scene: scene,
+                        view: rect,
+                        hover: {
+                          pairs: dataRef.current.pairs,
+                          onBus: diagramBusTip,
+                          onBranch: diagramBranchTip,
+                          onMove: moveTip,
+                          onLeave: hideTip,
+                        },
+                      }))
+                      : null
+
+      const tipEl = tip ? React.createElement('div', {
+        style: {
+          position: 'fixed', left: tip.x + 12, top: tip.y + 12,
+          background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '6px',
+          padding: '8px 10px', fontSize: '11px', lineHeight: '1.5', whiteSpace: 'pre',
+          color: 'var(--dsw-alias-label-primary)', zIndex: 10000, pointerEvents: 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)', maxWidth: '320px',
+        },
+      }, tip.text) : null
+
+      // No title and no subtitle: the tab bar already names this view, and the first row
+      // ("Simu Case <path>") says what is drawn. A heading here only pushed the diagram down.
+      return React.createElement('div', { style: { padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' } },
+        caseRow,
+        toolbar,
+        body,
+        tipEl,
       )
     }
 
@@ -2986,6 +3034,11 @@ return {
     slots.inject('conversation.view', () => slots.register(
       { name: 'conversation.view', id: 'interpss', order: 1, label: 'InterPSS' },
       (props) => React.createElement(InterPssView, { sessionId: props && props.sessionId, callRemote: callRemote }),
+    ))
+    // Order 2 puts the Diagram tab between InterPSS (1) and Trajectory (10).
+    slots.inject('conversation.view', () => slots.register(
+      { name: 'conversation.view', id: 'diagram', order: 2, label: 'Diagram' },
+      (props) => React.createElement(DiagramView, { sessionId: props && props.sessionId, callRemote: callRemote }),
     ))
   },
 }

@@ -9,7 +9,7 @@ metadata:
 
 Draw the **one-line diagram** for a simulation case — vertical bus bars, undirected branches,
 two-ring transformer symbols and `Bus-N` labels — and write it into the case's own `diagram/` folder,
-where the InterPSS tab's **Diagram** button previews it.
+where the **Diagram** tab previews it.
 
 The diagram is **generated, never hand-placed**. `wspace/script/gen_oneline_diagram.py` lays the
 network out from the case's result tables, routes every branch and writes both the `.drawio` and a

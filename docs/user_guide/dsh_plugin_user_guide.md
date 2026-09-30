@@ -59,6 +59,32 @@ You can then run the power system simulation workflow or chat following the proc
 
 ---
 
+### Open the Diagram tab
+
+The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
+one-line diagram of whichever case the InterPSS tab has selected, full-size. (Plugin 0.6.8 added
+the tab; 0.6.9 removed the InterPSS tab's **Diagram** button, which used to open the same picture
+in a dialog — the InterPSS action row is now **ACLF · ⚙ · CA · Report**; 0.6.10 dropped the tab's
+own heading and subtitle, so it opens straight onto the **Simu Case** row and the drawing gets the
+space; 0.6.11 dropped the `Scroll to zoom · drag to pan` hint, leaving the toolbar as controls:
+**Rendered · Source · − · 100% · + · Fit**.)
+
+1. Select a case in the **InterPSS** tab (a preset or a custom path); the Diagram tab follows.
+2. Switch to **Diagram**. It reads that case's `diagram/` folder:
+  - one `.drawio` file — opened straight away;
+  - several — a picker to switch between them, reopening the one you last viewed;
+  - none — it says so; a case gets a diagram when you run the one-line diagram skill
+    (/ipss-case-diagram), which writes `<case>/diagram/`.
+3. Interact with the drawing:
+  - **hover** a bus bar (or its `Bus-N` label) or a branch for the same tooltip the InterPSS
+    connection diagram shows; without a converged result it says `no result data — run ACLF`;
+  - **scroll** to zoom about the cursor, **drag** to pan, **Fit** to reset;
+  - **Source** shows the raw draw.io XML.
+4. Loading another case from chat (`interpss_case_load`) moves the Diagram tab with it — it
+   always draws the current simulation case, so the two tabs cannot disagree.
+
+---
+
 
 
 ### Load a simulation case

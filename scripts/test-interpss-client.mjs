@@ -27,7 +27,10 @@ const BODY = join(ROOT, 'interpss-dynamic', 'client-body.js');
 // The live per-case diagram the Diagram button loads (0.6.6 moved diagrams under the case),
 // plus the result table the tooltips quote.
 const DIAGRAM = join(ROOT, 'wspace', 'data', 'ieee', 'Ieee14Bus', 'diagram', 'ieee14-oneline.drawio');
-const TEMPLATE_DIAGRAM = join(ROOT, 'wspace', 'template', 'ieee14-oneline.drawio');
+// The style reference the case diagrams are copies of. It was renamed from
+// `ieee14-oneline.drawio` (commit e1075429), and draw.io re-serialises a file it touches,
+// so the two are no longer byte-identical — §11 compares what they PARSE to instead.
+const TEMPLATE_DIAGRAM = join(ROOT, 'wspace', 'template', 'oneline-diagram.drawio');
 const BRANCH_CSV = join(ROOT, 'wspace', 'data', 'ieee', 'Ieee14Bus', 'result', 'ieee14_DF_branch.csv');
 
 let failures = 0;
@@ -106,10 +109,11 @@ function build(overrides) {
       + ' diagramXmlFrom: diagramXmlFrom, styleMap: styleMap, labelLines: labelLines,'
       + ' drawioFitRect: drawioFitRect, drawioZoomLimits: drawioZoomLimits, drawioZoomRect: drawioZoomRect,'
       + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
-      + ' drawioThemeColor: drawioThemeColor, drawioDirectPath: drawioDirectPath,'
+      + ' drawioThemeColor: drawioThemeColor,'
       + ' drawioBranchPairs: drawioBranchPairs, drawioIsBusId: drawioIsBusId, drawioLabelBusId: drawioLabelBusId,'
       + ' drawioHoverTarget: drawioHoverTarget, drawioCanonicalBusId: drawioCanonicalBusId,'
       + ' drawioPairLabel: drawioPairLabel, drawioFallbackTip: drawioFallbackTip,'
+      + ' drawioTabChoice: drawioTabChoice, DiagramView: DiagramView,'
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip };');
 
 
@@ -135,7 +139,10 @@ try {
   const full = build({ 0: true }).InterPssView(props);
   const flat = JSON.stringify(full, (k, v) => (typeof v === 'function' ? '[fn]' : v));
   check('full render tree (activated=true) does not throw', full !== null && full !== undefined);
-  check('the action row carries the Diagram button', flat.indexOf('"Diagram"') >= 0);
+  check('the action row carries the run, options, CA and Report buttons',
+    ['ACLF', 'CA', 'Report'].every((label) => flat.indexOf('"' + label + '"') >= 0));
+  check('the action row no longer carries a Diagram button (the Diagram tab replaced it)',
+    flat.indexOf('"Diagram"') < 0);
 } catch (e) {
   check('full render tree (activated=true) does not throw', false, e.constructor.name + ': ' + e.message);
 }
@@ -149,7 +156,7 @@ check('labelLines turns <br> into a line break', JSON.stringify(api.labelLines('
 check('labelLines strips markup and entities', JSON.stringify(api.labelLines('<b>x</b>&amp;y')) === '["x&y"]');
 
 // --- 3. the real diagram ---------------------------------------------------
-console.log('\n3. parseDrawioScene on wspace/template/ieee14-oneline.drawio');
+console.log('\n3. parseDrawioScene on wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio');
 const xml = readFileSync(DIAGRAM, 'utf8');
 let scene = null;
 try {
@@ -413,56 +420,10 @@ check('every effect was inspected, not silently skipped', effectsSeen >= 5, effe
 check('every effect dependency is declared above its own effect',
   orderBad.length === 0, orderBad.slice(0, 4).join('; '));
 
-// --- 8. the diagram modal actually renders ---------------------------------
-console.log('\n8. the diagram modal renders with a live scene');
-// The §1 checks only ever see drawioOpen=false, so a reference error inside the modal —
-// the same blank-tab class — would slip through. Override state *by name* rather than by
-// call index, so adding a useState anywhere cannot silently retarget this to another one.
-const stateNames = [];
-const stateRe = /const \[([A-Za-z0-9_]+), set[A-Za-z0-9_]+\] = React\.useState/g;
-let sm;
-while ((sm = stateRe.exec(slice)) !== null) stateNames.push(sm[1]);
-const idxOf = (n) => stateNames.indexOf(n);
-check('the state list parsed by name', stateNames.length >= 60 && idxOf('drawioOpen') >= 0 && idxOf('drawioScene') >= 0,
-  stateNames.length + ' states');
-
-if (scene && idxOf('drawioOpen') >= 0) {
-  const over = {};
-  over[idxOf('activated')] = true;
-  over[idxOf('drawioOpen')] = true;
-  over[idxOf('drawioPath')] = 'wspace/template/ieee14-oneline.drawio';
-  over[idxOf('drawioScene')] = scene;
-  over[idxOf('drawioLoading')] = false;
-  over[idxOf('drawioError')] = null;
-  over[idxOf('drawioView')] = 'rendered';
-  try {
-    // build() compiles a fresh Function, so its function identities differ from `api`'s;
-    // compare against this instance's own DrawioDiagram, not the earlier one.
-    const modalApi = build(over);
-    const tree = modalApi.InterPssView(props);
-    check('rendering the open modal does not throw', tree !== null && tree !== undefined);
-    const flat = JSON.stringify(tree, (k, v) => (typeof v === 'function' ? '[fn]' : v));
-    check('the zoom toolbar is present', flat.indexOf('"Fit"') >= 0 && flat.indexOf('"+"') >= 0
-      && flat.indexOf('"' + String.fromCharCode(0x2212) + '"') >= 0);
-    check('the zoom readout starts at 100%', flat.indexOf('"100%"') >= 0);
-    // find the embedded renderer and prove it got the live scene and the pan/zoom view
-    const found = [];
-    const walk = (n) => {
-      if (n === null || typeof n !== 'object') return;
-      if (Array.isArray(n)) { for (const k of n) walk(k); return; }
-      if (n.type === modalApi.DrawioDiagram) found.push(n);
-      if (n.kids) walk(n.kids);
-    };
-    walk(tree);
-    check('the modal embeds DrawioDiagram with the live scene',
-      found.length === 1 && found[0].props.scene === scene, found.length + ' instance(s)');
-    check('the modal passes the pan/zoom view through',
-      found.length === 1 && Object.prototype.hasOwnProperty.call(found[0].props, 'view'),
-      found.length === 1 ? String(found[0].props.view) : '');
-  } catch (e) {
-    check('rendering the open modal does not throw', false, e.constructor.name + ': ' + e.message);
-  }
-}
+// 8 retired (0.6.9). It rendered the InterPSS tab's diagram modal, and that modal is gone:
+// the preview is the Diagram tab now, so section 12 carries the same render-time coverage
+// for the view that replaced it. Nothing was renumbered — docs/persistent-plugin-rebuild.md
+// and docs/oneline-diagram-process.md reference these sections by number.
 
 // --- 9. the dynamic and persistent plugins are in sync ---------------------
 console.log('\n9. the dynamic and persistent plugins are in sync');
@@ -566,28 +527,20 @@ check('applyCsvSort is byte-identical in both hosts',
 check('the chat tools remain persistent-only',
   rd(LIB_HOST).indexOf('interpss_run_ca') >= 0 && rd(DYN_HOST).indexOf('interpss_run_ca') < 0);
 
-// --- 10. the Diagram button is gated by the case's diagram folder ------------
-console.log('\n10. Diagram button gating and the single-diagram shortcut');
-// A diagram belongs to a case, so the Host lists <case>/diagram and the tab enables its
-// button from that answer alone. Both hosts must scope it there, and neither keeps the
-// workspace-wide scanner the first version used.
+// --- 10. the diagram listing, and no Diagram button on the InterPSS tab ---
+console.log('\n10. the case diagram listing, and the InterPSS action row without a Diagram button');
+// A diagram belongs to a case, so the Host lists <case>/diagram and the Diagram tab shows
+// that answer. Both hosts must scope it there, and neither keeps the workspace-wide scanner
+// the first version used.
 check('both hosts scope the listing to the case diagram folder and dropped the workspace scan',
   rd(DYN_HOST).indexOf("'diagram'") >= 0 && rd(LIB_HOST).indexOf("'diagram'") >= 0
   && rd(DYN_HOST).indexOf('scanDrawio') < 0 && rd(LIB_HOST).indexOf('scanDrawio') < 0);
 check('both hosts require a case argument for the listing',
   rd(DYN_HOST).indexOf('args.case') >= 0 && rd(LIB_HOST).indexOf('input.case') >= 0);
 
-const diagramFiles = (n) => Array.from({ length: n }, (_, i) => ({ path: 'wspace/data/c/diagram/d' + i + '.drawio', size: 10 }));
-check('exactly one diagram opens directly, skipping the picker',
-  api.drawioDirectPath(diagramFiles(1)) === 'wspace/data/c/diagram/d0.drawio', api.drawioDirectPath(diagramFiles(1)));
-check('no diagram opens nothing directly',
-  api.drawioDirectPath([]) === null && api.drawioDirectPath(null) === null && api.drawioDirectPath(undefined) === null);
-check('several diagrams need the picker',
-  api.drawioDirectPath(diagramFiles(2)) === null && api.drawioDirectPath(diagramFiles(5)) === null);
-check('a malformed entry is never opened directly',
-  api.drawioDirectPath([{ size: 1 }]) === null && api.drawioDirectPath([{ path: '' }]) === null && api.drawioDirectPath([null]) === null);
-
-// the button's own enabled state, read off the rendered action row
+// 0.6.9 removed the InterPSS tab's Diagram button and the modal behind it, because the
+// Diagram tab is the preview surface now. Both absences are asserted, so re-adding either
+// one has to be a deliberate act rather than a merge artifact.
 const findButton = (node, label) => {
   let hit = null;
   const walk = (n) => {
@@ -599,29 +552,30 @@ const findButton = (node, label) => {
   walk(node);
   return hit;
 };
-const buttonWith = (files) => findButton(
-  build(Object.assign({ 0: true }, idxOf('drawioFiles') >= 0 ? { [idxOf('drawioFiles')]: files } : {})).InterPssView(props),
-  'Diagram');
-const noFiles = buttonWith([]);
-const oneFile = buttonWith(diagramFiles(1));
-const twoFiles = buttonWith(diagramFiles(2));
-check('the Diagram button is disabled when the case has no diagram',
-  noFiles !== null && noFiles.props.disabled === true, noFiles && String(noFiles.props.disabled));
-check('the Diagram button is enabled when the case has one diagram',
-  oneFile !== null && oneFile.props.disabled === false, oneFile && String(oneFile.props.disabled));
-check('the Diagram button stays enabled with several diagrams',
-  twoFiles !== null && twoFiles.props.disabled === false, twoFiles && String(twoFiles.props.disabled));
-check('the disabled button explains itself and the one-diagram hint promises a direct open',
-  noFiles !== null && String(noFiles.props.title).indexOf('diagram folder') >= 0
-  && oneFile !== null && String(oneFile.props.title).indexOf('Open the case diagram') >= 0,
-  noFiles && noFiles.props.title);
+const fullRow = build({ 0: true }).InterPssView(props);
+check('the InterPSS action row still carries ACLF, CA and Report',
+  ['ACLF', 'CA', 'Report'].every((label) => findButton(fullRow, label) !== null));
+check('the InterPSS action row has no Diagram button', findButton(fullRow, 'Diagram') === null);
+check('the single-diagram shortcut helper went with the modal (no dead code left)',
+  body.indexOf('drawioDirectPath') < 0 && body.indexOf('drawioFiles') < 0 && body.indexOf('drawioOpen') < 0);
 
 // --- 11. diagram bus/branch tooltips ---------------------------------------
 console.log('\n11. diagram bus/branch tooltips');
 const partsOf = (g) => (Array.isArray(g.kids[0]) ? g.kids[0] : g.kids);
 const groupsOf = (svg) => (svg.kids.length === 1 && Array.isArray(svg.kids[0]) ? svg.kids[0] : svg.kids);
-check('the template copy still matches the live case diagram',
-  readFileSync(DIAGRAM, 'utf8') === readFileSync(TEMPLATE_DIAGRAM, 'utf8'));
+// The template is the style contract the case diagrams are copied from. draw.io
+// re-serialises a file it opens — viewport offsets, attribute order — so the two are no
+// longer byte-identical; what must hold is that they describe the same drawing.
+let templateScene = null;
+try {
+  templateScene = api.parseDrawioScene(readFileSync(TEMPLATE_DIAGRAM, 'utf8'));
+} catch (e) {
+  templateScene = null;
+}
+const sceneShape = (s) => JSON.stringify({ viewBox: s.viewBox, nodes: s.nodes, edges: s.edges });
+const sameDrawing = templateScene !== null && scene !== null && sceneShape(templateScene) === sceneShape(scene);
+check('the template and the live case diagram parse to the same drawing', sameDrawing,
+  sameDrawing ? undefined : (templateScene === null ? 'the template did not parse' : 'the two drawings differ'));
 
 if (scene) {
   // the parser must keep what a tooltip needs
@@ -754,6 +708,154 @@ if (scene) {
   check('both tooltip builders survive a missing record',
     api.busTooltip(null) === 'Bus info' && api.branchTooltip(null) === 'Branch info');
 }
+
+// --- 12. the Diagram tab (a second conversation view, order 2) --------------
+console.log('\n12. the Diagram tab follows the InterPSS selection');
+// The tab exists only if it registers, and it must land between InterPSS (order 1) and
+// Trajectory (order 10).
+check('the Diagram tab is registered beside the InterPSS tab',
+  /name: 'conversation\.view', id: 'diagram', order: 2, label: 'Diagram'/.test(body)
+  && /name: 'conversation\.view', id: 'interpss', order: 1, label: 'InterPSS'/.test(body));
+// The InterPSS tab owns "the current simulation case" and this tab only follows it. No
+// render can observe that contract, so assert the wiring itself: the owning tab publishes
+// the selection, the following tab seeds from it and adopts a case the Host loaded.
+check('the InterPSS tab publishes its selection to the shared case',
+  /function onCaseChanged\(input\) \{[\s\S]{0,400}?selectedCaseInput = input/.test(body));
+check('the Diagram tab seeds from the shared case and follows a bridge-loaded one',
+  body.indexOf('React.useState(selectedCaseInput)') >= 0 && body.indexOf('adoptSelectedCase(input)') >= 0);
+check('the shared case defaults to the InterPSS preset rather than to nothing',
+  /let selectedCaseInput = selectionCaseInput\(\)/.test(body) && /function selectionCaseInput\(\)/.test(body));
+
+// Which diagram a case opens: the one the user last opened while it is still in the
+// folder, else the first — and nothing at all for a case with no diagram.
+const tabFiles = (n) => Array.from({ length: n }, (_, i) => ({ path: 'wspace/data/c/diagram/d' + i + '.drawio', size: 10 }));
+check('the tab opens the first diagram of a case',
+  api.drawioTabChoice(tabFiles(3), '') === 'wspace/data/c/diagram/d0.drawio', api.drawioTabChoice(tabFiles(3), ''));
+check('the tab reopens the diagram the user last chose',
+  api.drawioTabChoice(tabFiles(3), 'wspace/data/c/diagram/d2.drawio') === 'wspace/data/c/diagram/d2.drawio');
+check('a remembered diagram that is gone falls back to the first',
+  api.drawioTabChoice(tabFiles(3), 'wspace/data/c/diagram/gone.drawio') === 'wspace/data/c/diagram/d0.drawio');
+check('a case with no diagram opens nothing at all',
+  api.drawioTabChoice([], '') === null && api.drawioTabChoice(null, '') === null
+  && api.drawioTabChoice([{ size: 1 }], '') === null && api.drawioTabChoice([null], '') === null);
+
+// Render the view itself. Overrides are addressed by ITS OWN useState order, because a
+// fresh harness renders DiagramView alone and the mock counts from zero — and a throw
+// anywhere in the view would unmount it, blanking the tab with nothing in the Host log.
+const dgmNames = [...slice.slice(slice.indexOf('function DiagramView('))
+  .matchAll(/const \[([A-Za-z0-9_]+), set[A-Za-z0-9_]+\] = React\.useState/g)].map((m) => m[1]);
+const dgmIdx = (n) => dgmNames.indexOf(n);
+check('the Diagram tab state list parsed by name',
+  dgmNames.length >= 15 && dgmIdx('caseInput') === 0 && dgmIdx('scene') > 0 && dgmIdx('files') > 0,
+  dgmNames.length + ' states');
+check('every Diagram tab state is declared once, so an override cannot retarget',
+  dgmNames.every((n, i) => dgmNames.indexOf(n) === i), dgmNames.join(','));
+// §7 only sees the effects its own regex matches, so prove it parses every effect of this
+// view: an effect it skipped would be an unchecked blank-tab path. Verified by mutation —
+// adding a dep declared below its effect makes §7 report the char distance and the render
+// checks below throw `Cannot access '…' before initialization`, exactly the 0.6.0 defect.
+const dgmSlice = slice.slice(slice.indexOf('function DiagramView('));
+const dgmEffectDecls = (dgmSlice.match(/React\.useEffect\(/g) || []).length;
+const dgmEffectParsed = (dgmSlice.match(/React\.useEffect\(\(\) => \{[\s\S]*?\n      \}, \[[^\]]*\]\)/g) || []).length;
+check('the ordering check parses every Diagram tab effect',
+  dgmEffectDecls > 0 && dgmEffectDecls === dgmEffectParsed, dgmEffectParsed + ' of ' + dgmEffectDecls + ' effects parsed');
+
+const renderTab = (over) => build(over).DiagramView({ sessionId: 'test-session', callRemote: () => Promise.resolve({}) });
+const flatTree = (tree) => JSON.stringify(tree, (k, v) => (typeof v === 'function' ? '[fn]' : v));
+const renderFlat = (over) => {
+  try {
+    return flatTree(renderTab(over));
+  } catch (e) {
+    return 'THREW ' + e.constructor.name + ': ' + e.message;
+  }
+};
+const withState = (pairs) => {
+  const over = {};
+  for (const [name, value] of pairs) over[dgmIdx(name)] = value;
+  return over;
+};
+
+const idle = renderFlat({});
+check('the tab renders before the diagram list answers', idle.indexOf('THREW') < 0 && idle.indexOf('Simu Case') >= 0, idle.slice(0, 90));
+check('it names the shared case and shows the lookup state',
+  idle.indexOf('Simu Case') >= 0 && idle.indexOf('data/ieee/Ieee118Bus/ieee118.ieee') >= 0
+  && idle.indexOf('Looking for .drawio files') >= 0);
+// Asked for in 0.6.10: the tab bar names the view and the Simu Case row says what is drawn,
+// so a heading and a subtitle here only pushed the diagram down.
+check('the tab carries no heading or subtitle of its own',
+  idle.indexOf('The one-line diagram of the case') < 0 && idle.indexOf('<h2>') < 0
+  && idle.indexOf('"h2"') < 0 && idle.indexOf('"Diagram"') < 0);
+const noCase = renderFlat(withState([['caseInput', '']]));
+check('with no case it points at the InterPSS tab instead of drawing nothing',
+  noCase.indexOf('No simulation case selected') >= 0, noCase.slice(0, 90));
+const noDiagram = renderFlat(withState([['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'], ['files', []], ['filesLoading', false]]));
+check('a case with no .drawio file says so',
+  noDiagram.indexOf("No .drawio file in this case's diagram folder") >= 0, noDiagram.slice(0, 90));
+const failed = renderFlat(withState([['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'], ['filesError', 'Invalid case path: x'], ['files', []]]));
+check('a listing failure is shown rather than swallowed', failed.indexOf('Invalid case path: x') >= 0);
+
+// The open diagram: the rendered pane, its toolbar, the embedded renderer and the tooltip
+// element are the parts a reference error would take down.
+const openTab = { scene: scene };
+const drawn = withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['filesLoading', false],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['loading', false],
+  ['error', null],
+  ['tip', { text: 'Bus 5\nVoltage (pu): 1.0200', x: 10, y: 20 }],
+]);
+const drawnFlat = renderFlat(drawn);
+check('rendering an open diagram does not throw', drawnFlat.indexOf('THREW') < 0, drawnFlat.slice(0, 120));
+check('the zoom toolbar and readout are present',
+  drawnFlat.indexOf('"Fit"') >= 0 && drawnFlat.indexOf('"+"') >= 0
+  && drawnFlat.indexOf('"' + String.fromCharCode(0x2212) + '"') >= 0 && drawnFlat.indexOf('"100%"') >= 0);
+// Asked for in 0.6.11: the wheel and the drag are discoverable on their own, so the toolbar
+// ends at Fit.
+check('the toolbar carries no scroll/drag hint text',
+  drawnFlat.indexOf('Scroll to zoom') < 0 && body.indexOf('Scroll to zoom') < 0);
+check('the tooltip element renders the hovered record', drawnFlat.indexOf('Voltage (pu): 1.0200') >= 0);
+if (scene) {
+  const dgmApi = build(drawn);
+  let tree = null;
+  try {
+    tree = dgmApi.DiagramView({ sessionId: 'test-session', callRemote: () => Promise.resolve({}) });
+    check('rendering an open diagram does not throw', tree !== null && tree !== undefined);
+  } catch (e) {
+    check('rendering an open diagram does not throw', false, e.constructor.name + ': ' + e.message);
+  }
+  const found = [];
+  const walk = (n) => {
+    if (n === null || typeof n !== 'object') return;
+    if (Array.isArray(n)) { for (const k of n) walk(k); return; }
+    if (n.type === dgmApi.DrawioDiagram) found.push(n);
+    if (n.kids) walk(n.kids);
+  };
+  walk(tree);
+  check('the tab embeds DrawioDiagram with the live scene',
+    found.length === 1 && found[0].props.scene === scene, found.length + ' instance(s)');
+  check('the tab passes the pan/zoom view and the tooltip wiring to it',
+    found.length === 1 && Object.prototype.hasOwnProperty.call(found[0].props, 'view')
+    && found[0].props.hover !== null && typeof found[0].props.hover.onBus === 'function'
+    && typeof found[0].props.hover.onBranch === 'function',
+    found.length === 1 ? 'view=' + String(found[0].props.view) : '');
+}
+const sourceTab = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(1)],
+  ['filesLoading', false],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['view', 'source'],
+  ['xml', '<mxfile><diagram/></mxfile>'],
+]));
+check('the Source view shows the raw file', sourceTab.indexOf('<mxfile><diagram/></mxfile>') >= 0, sourceTab.slice(0, 90));
+// The modal that used to live in InterPssView is gone, so `readDrawio` must have exactly
+// one caller left. A second one would mean a preview surface grew back beside this tab.
+check('the preview has exactly one entry point left, and it is this view',
+  (slice.match(/callRemote\('readDrawio'/g) || []).length === 1
+  && slice.indexOf('drawioDirectPath') < 0 && slice.indexOf('drawioModal') < 0);
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

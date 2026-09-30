@@ -3,7 +3,8 @@
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
 GUI. It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW cases, exploring the bus/branch/gen/load results,
-and generating a **NERC TPL-001-5** contingency report.
+and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
+(0.6.8) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -17,7 +18,7 @@ restarts.
 | `package.json` | Package manifest + `dsh.bundle` (patch) + `dsh.client` declaration (`platform: web`). |
 | `cordis.patch.yml` | Bundle patch: inserts the `interpss` composition row. |
 | `lib/index.js` | Host half: provides the `interpss` service and exports its methods through the Typert Remote gateway (`interpss/<method>`). |
-| `lib/client.js` | Client half: the InterPSS tab, registered in `conversation.view`; calls the Host via `/api` RPC. |
+| `lib/client.js` | Client half: the InterPSS and Diagram tabs, registered in `conversation.view`; calls the Host via `/api` RPC. |
 | `LICENSE` | Distribution license (WattByte Nexus LLC, non-commercial). |
 
 The Host↔Client boundary uses the Typert Remote **SRC mode** — plain-JSON
@@ -41,6 +42,15 @@ parameters and results, no build-time Typert compiler required.
   CLI reads (OK = save + run, Cancel = write nothing).
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
+- **Diagram tab** (0.6.8; the only preview surface since 0.6.9) — a second conversation view
+  (Chat · InterPSS · **Diagram** · Trajectory) that draws the **selected case's**
+  `diagram/*.drawio` full-size. It follows the InterPSS tab's *Simu Case* selection (and a case
+  loaded from chat), offers a picker when the folder holds several files — reopening the one
+  last viewed — and gives the diagram pan / zoom / fit, a Rendered / Source toggle and
+  bus/branch tooltips. No new Host endpoint: it reuses `listDrawioFiles`, `readDrawio`,
+  `checkResult` and `busConnections`. 0.6.9 removed the **Diagram** button (and the modal it
+  opened) from the InterPSS tab's action row: the tab is the preview now, so the two surfaces
+  cannot drift apart.
 - Remembers the last selected case across tab switches.
 - **Chat tools** — `interpss_network_info` and `interpss_run_aclf` expose the selected case's network info and AC load flow to the chat agent (see *Chat tools*).
 - **ACLF result explorer in chat** — the `interpss_run_aclf` card offers Bus / Branch / Gen / Load tables, paged through the same `readCsv` RPC as the tab, plus a **Report** button that generates the AC Loadflow report.
@@ -51,7 +61,8 @@ parameters and results, no build-time Typert compiler required.
 `isActivated`, `checkResult`, `checkResultFiles`, `listCases`, `readCsv`,
 `busConnections`, `runAclf`, `runCa`, `runReport`, `getAclfOptions`,
 `saveAclfOptions`, `listCaFiles`, `getCaOptions`, `saveCaOptions`, `loadCase`,
-`summarizeResult`, `getNetworkInfo`.
+`summarizeResult`, `getNetworkInfo`, `getBridgeCase`, `listDrawioFiles`,
+`readDrawio`.
 
 ## Chat tools
 
