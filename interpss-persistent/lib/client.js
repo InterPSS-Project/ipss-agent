@@ -669,10 +669,59 @@ module.exports = {
         .split('\n')
     }
 
-    const DRAWIO_STROKE = '#64748b'
+    // mxGraph's default stroke, for a cell whose style names no strokeColor. It was a
+    // slate gray, which painted the 2 edges in this workspace's diagram that omit
+    // strokeColor in a different color from the other 25 (docs/oneline-diagram-process.md).
+    const DRAWIO_STROKE = '#000000'
     const DRAWIO_TEXT = '#111827'
     const DRAWIO_PAD = 20
     const DRAWIO_MAX_CELLS = 2000
+
+    // A draw.io model carries its own palette, and these one-line diagrams are ink on paper:
+    // white surfaces, black strokes and text, a few greys. Painting that literally drops a
+    // glaring white slab with black lines into the dark theme. The grayscale part of the
+    // palette is therefore re-expressed as theme tokens — paper -> the app surface, ink ->
+    // the app foreground, mid greys -> the secondary label colour — so the preview follows
+    // the active theme in both directions. Tokens rather than a computed colour on purpose:
+    // both palettes ship in the stylesheets, so this needs no theme detection, no extra
+    // service dependency, and it re-colours instantly when the theme switches.
+    //
+    // Only near-grayscale values are re-mapped. A saturated colour is left exactly as
+    // authored, because a deliberately coloured element (a red bus, a blue tie) must keep
+    // its identity in either theme.
+    const DRAWIO_PAPER = 'var(--dsw-alias-bg-layer-1)'
+    const DRAWIO_INK = 'var(--dsw-alias-label-primary)'
+    const DRAWIO_MID = 'var(--dsw-alias-label-secondary)'
+
+    function drawioHexBytes(color) {
+      if (typeof color !== 'string') return null
+      const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim())
+      if (m === null) return null
+      const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1]
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+    }
+
+    // Grayscale in -> a theme token out; anything else (a colour, 'none', an already-token
+    // value) passes through untouched.
+    function drawioThemeColor(color) {
+      const rgb = drawioHexBytes(color)
+      if (rgb === null) return color
+      const r = rgb[0] / 255
+      const g = rgb[1] / 255
+      const b = rgb[2] / 255
+      const max = Math.max(r, g, b)
+      const min = Math.min(r, g, b)
+      const lum = (max + min) / 2
+      const sat = max === min ? 0 : (max - min) / (1 - Math.abs(2 * lum - 1))
+      // The extremes are decided by lightness ALONE, before the saturation test: HSL
+      // saturation is ill-conditioned near black and white, so draw.io's default near-black
+      // text colour #111827 computes as 39% "saturated" while reading as plain ink. Testing
+      // saturation first left every default label near-black on a dark canvas.
+      if (lum >= 0.9) return DRAWIO_PAPER
+      if (lum <= 0.18) return DRAWIO_INK
+      if (sat > 0.25) return color
+      return DRAWIO_MID
+    }
 
     // mxGraphModel -> a flat, React-free scene description: { viewBox, nodes, edges }.
     // Geometry is resolved to absolute coordinates so grouped cells (style=group, whose
@@ -743,6 +792,8 @@ module.exports = {
         const kind = style.ellipse !== undefined || style.shape === 'ellipse' ? 'ellipse' : (style.text !== undefined ? 'text' : 'rect')
         const node = {
           id: cell.getAttribute('id'),
+          // Document position. The renderer paints in this order — see DrawioDiagram.
+          order: i,
           kind: kind,
           x: x, y: y, w: w, h: h,
           rounded: style.rounded !== undefined && kind === 'rect',
@@ -774,8 +825,13 @@ module.exports = {
         const sy = numOr(st.exitY, 0.5)
         const tx = numOr(st.entryX, 0.5)
         const ty = numOr(st.entryY, 0.5)
-        const from = src === undefined ? null : { x: src.x + src.w * sx, y: src.y + src.h * sy }
-        const to = tgt === undefined ? null : { x: tgt.x + tgt.w * tx, y: tgt.y + tgt.h * ty }
+        // `let`, not `const`: an edge that names no source/target CELL falls back to its
+        // own sourcePoint/targetPoint mxPoints below, and to its Array points after that.
+        // The workspace's diagram resolves every edge through a cell, so this branch is not
+        // exercised there — but a draw.io diagram with a free-floating edge would throw
+        // "Assignment to constant variable" and render no preview at all.
+        let from = src === undefined ? null : { x: src.x + src.w * sx, y: src.y + src.h * sy }
+        let to = tgt === undefined ? null : { x: tgt.x + tgt.w * tx, y: tgt.y + tgt.h * ty }
         const pts = []
         if (g !== null) {
           const arrays = g.getElementsByTagName('Array')
@@ -823,6 +879,7 @@ module.exports = {
         }
         const mid = points[Math.floor(points.length / 2)]
         edges.push({
+          order: i,
           points: points,
           stroke: st.strokeColor !== undefined ? st.strokeColor : DRAWIO_STROKE,
           strokeWidth: numOr(st.strokeWidth, 1),
@@ -873,7 +930,7 @@ module.exports = {
         key: key,
         x: cx, y: cy, textAnchor: 'middle',
         fontSize: node.fontSize, fontWeight: node.bold ? 600 : 400,
-        fontStyle: node.italic ? 'italic' : 'normal', fill: node.fontColor,
+        fontStyle: node.italic ? 'italic' : 'normal', fill: drawioThemeColor(node.fontColor),
       }, spans)
     }
 
@@ -935,26 +992,31 @@ module.exports = {
     function DrawioDiagram(props) {
       const scene = props.scene
       const vb = props.view || scene.viewBox
-      const children = []
+      // draw.io paints in the model's own document order, interleaving vertices and edges.
+      // That order is load-bearing: this workspace's diagram declares `bg`, an opaque
+      // 900x760 white rectangle, BEFORE its branches. Drawing every edge up front and every
+      // vertex afterwards therefore put the page fill on top of all 27 branches, and the
+      // preview showed a one-line diagram with no lines in it at all.
+      const painted = []
       for (let i = 0; i < scene.edges.length; i += 1) {
         const e = scene.edges[i]
         const parts = [React.createElement('polyline', {
           key: 'l',
           points: e.points.map((p) => p.x + ',' + p.y).join(' '),
           fill: 'none',
-          stroke: e.stroke,
+          stroke: drawioThemeColor(e.stroke),
           strokeWidth: e.strokeWidth,
           strokeDasharray: e.dashed ? '6 4' : undefined,
         })]
-        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: e.stroke }))
+        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: drawioThemeColor(e.stroke) }))
         if (e.label !== '') {
           parts.push(React.createElement('text', {
             key: 't',
             x: e.labelAt.x + 4, y: e.labelAt.y - 4,
-            fontSize: 10, fill: DRAWIO_TEXT,
+            fontSize: 10, fill: drawioThemeColor(DRAWIO_TEXT),
           }, e.label))
         }
-        children.push(React.createElement('g', { key: 'e' + i }, parts))
+        painted.push({ order: e.order === undefined ? i : e.order, el: React.createElement('g', { key: 'e' + i }, parts) })
       }
       for (let i = 0; i < scene.nodes.length; i += 1) {
         const n = scene.nodes[i]
@@ -963,8 +1025,8 @@ module.exports = {
           parts.push(React.createElement('ellipse', {
             key: 's',
             cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2, ry: n.h / 2,
-            fill: n.fill === null ? 'none' : n.fill,
-            stroke: n.stroke, strokeWidth: n.strokeWidth,
+            fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
+            stroke: drawioThemeColor(n.stroke), strokeWidth: n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         } else if (n.kind === 'rect') {
@@ -972,15 +1034,18 @@ module.exports = {
             key: 's',
             x: n.x, y: n.y, width: n.w, height: n.h,
             rx: n.rounded ? Math.min(8, n.h / 2) : 0,
-            fill: n.fill === null ? 'none' : n.fill,
-            stroke: n.stroke, strokeWidth: n.strokeWidth,
+            fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
+            stroke: drawioThemeColor(n.stroke), strokeWidth: n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         }
         const label = drawioLabel(n.lines, n.x + n.w / 2, n.y + n.h / 2, n, 't')
         if (label !== null) parts.push(label)
-        children.push(React.createElement('g', { key: 'n' + i }, parts))
+        painted.push({ order: n.order === undefined ? i : n.order, el: React.createElement('g', { key: 'n' + i }, parts) })
       }
+      // A stable sort, so a model with no order recorded keeps edges before vertices.
+      painted.sort((a, b) => a.order - b.order)
+      const children = painted.map((p) => p.el)
       return React.createElement('svg', {
         viewBox: vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h,
         preserveAspectRatio: 'xMidYMid meet',
@@ -2507,7 +2572,7 @@ module.exports = {
                   onPointerUp: drawioPointerUp,
                   onPointerCancel: drawioPointerUp,
                   onPointerLeave: drawioPointerUp,
-                  style: { flex: '1 1 auto', minHeight: 0, overflow: 'hidden', background: '#ffffff', borderRadius: '6px', cursor: drawioDragging ? 'grabbing' : 'grab', touchAction: 'none' },
+                  style: { flex: '1 1 auto', minHeight: 0, overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: drawioDragging ? 'grabbing' : 'grab', touchAction: 'none' },
                 }, React.createElement(DrawioDiagram, { scene: drawioScene, view: drawioRect }))
                 : null
 

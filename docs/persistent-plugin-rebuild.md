@@ -229,6 +229,46 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   zooming. `drawioZoomRect` clamps to 0.1x–12x and always derives height from width, so the
   aspect ratio cannot drift. All of it is client-only: `METHODS` and the Host half are
   unchanged.
+- **Diagram paint order** (Client half, since 0.6.4): `parseDrawioScene` records every cell's
+  **document position** (`order`) and `DrawioDiagram` emits its groups sorted by it, so
+  vertices and edges interleave the way draw.io paints them. This is not cosmetic — the
+  workspace diagram declares `bg`, an **opaque 900×760 white rectangle**, *before* its
+  branches (cell order 2, first edge 32). Drawing every edge first and every vertex
+  afterwards (0.6.1–0.6.3) put that page fill on top of every branch, and the preview
+  showed a one-line diagram with no lines in it. The same change moved the
+  no-`strokeColor` fallback from slate `#64748b` to mxGraph's own default **`#000000`** —
+  the workspace diagram's 2 unstyled edges were the only two drawn a different color from
+  the other 25 (both turned out to be stray edges and are no longer in the file, so the
+  guard checks that fallback with a synthetic diagram). Guard §3/§4 assert the paint order —
+  the page fill precedes every branch, and the emitted order is non-decreasing document
+  order.
+- **Latent `const` reassignment** (Client half, fixed 0.6.4): `parseDrawioScene` built
+  `from`/`to` with `const`, then reassigned them when an edge names no source/target *cell*
+  and falls back to its own `sourcePoint`/`targetPoint` `mxPoint`s (or to its `Array`
+  points). Every edge in this workspace resolves through a cell, so the branch never ran
+  here — but any draw.io diagram with a **free-floating edge** threw
+  `TypeError: Assignment to constant variable` and rendered no preview at all. The guard
+  covers it with a synthetic source/target-point edge.
+- **Theme-aware diagram colours** (Client half, since 0.6.5): a draw.io model carries its own
+  palette and these one-line diagrams are ink on paper, so painting them literally dropped a
+  glaring white slab with black lines into the dark theme. `drawioThemeColor` re-expresses
+  the **grayscale** part of the palette at paint time — paper → `--dsw-alias-bg-layer-1`,
+  ink → `--dsw-alias-label-primary`, mid greys → `--dsw-alias-label-secondary` — and the
+  rendered pane's own background uses the paper token too, so the letterbox padding around
+  the model's `bg` rect matches. Three deliberate choices:
+  - **Tokens, not a computed colour.** Both palettes ship in the stylesheets, so this needs no
+    theme detection, no `theme` service dependency, and it re-colours the instant the theme
+    switches. (The client `theme` service does expose `getTheme().active.colorScheme` and a
+    `theme/change` event if a future change genuinely needs the mode in JS.)
+  - **Applied in `DrawioDiagram`, not `parseDrawioScene`.** The scene keeps the authored
+    colours, so the parse-level assertions (§3: the page fill is `#FFFFFF`, the stroke
+    fallback is `#000000`) still describe the file, and a re-parse is not needed on a switch.
+  - **Only near-grayscale values are re-mapped;** a saturated colour passes through, so a
+    deliberately coloured element keeps its identity in either theme. The lightness extremes
+    are tested **before** saturation, because HSL saturation is ill-conditioned near black
+    and white: draw.io's default text colour `#111827` computes as 39% "saturated" while
+    reading as plain ink, and testing saturation first left every default label near-black on
+    a dark canvas. §5 covers the mapping and §4 the rendered result.
 - **`interpss_case_summary`** ports `IpssAgentBridge.summarize()`. Java always returns
   every result section in full (only the requested one is ranked/limited) and
   `text` is a JSON string inside the envelope, so the tool does a second parse and
@@ -329,7 +369,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 65 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 86 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js` and `wspace/template/ieee14-oneline.drawio`

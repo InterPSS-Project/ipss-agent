@@ -101,7 +101,8 @@ function build(overrides) {
     slice + '\nreturn { InterPssView: InterPssView, DrawioDiagram: DrawioDiagram, parseDrawioScene: parseDrawioScene,'
       + ' diagramXmlFrom: diagramXmlFrom, styleMap: styleMap, labelLines: labelLines,'
       + ' drawioFitRect: drawioFitRect, drawioZoomLimits: drawioZoomLimits, drawioZoomRect: drawioZoomRect,'
-      + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent };');
+      + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
+      + ' drawioThemeColor: drawioThemeColor };');
   return factory(makeReact(overrides || {}), { call: () => Promise.resolve({}) }, { get: () => undefined },
     DOMParserShim, Blob, Response, DecompressionStream, atob);
 }
@@ -150,7 +151,7 @@ try {
 if (scene) {
   const kinds = scene.nodes.reduce((a, n) => { a[n.kind] = (a[n.kind] || 0) + 1; return a; }, {});
   check('45 vertices minus 5 group containers are drawn', scene.nodes.length === 40, scene.nodes.length);
-  check('all 27 edges are drawn', scene.edges.length === 27, scene.edges.length);
+  check('all 25 edges are drawn', scene.edges.length === 25, scene.edges.length);
   check('15 bus bars / 15 text labels / 10 transformer ellipses',
     kinds.rect === 15 && kinds.text === 15 && kinds.ellipse === 10, JSON.stringify(kinds));
   // group children carry geometry relative to their group, so they must land at the
@@ -160,9 +161,18 @@ if (scene) {
   check('a group child lands at its group origin', xf15 && xf15.x === 462 && xf15.y === 306, xf15 && `${xf15.x},${xf15.y}`);
   check('its pair applies the relative offset', xf15b && xf15b.x === 462 && xf15b.y === 314, xf15b && `${xf15b.x},${xf15b.y}`);
   check('no group container is drawn', !scene.nodes.some((n) => n.id === '3' || n.id === '7'));
-  // this file's branches are deliberately undirected (endArrow=none)
+  // A one-line diagram is undirected: every branch carries endArrow=none. Anything with an
+  // arrowhead here came from a stray edge, and 0.6.4 removed the last two (a transformer
+  // wired to the page background, which also drew long diagonals across the drawing).
   const arrows = scene.edges.filter((e) => e.arrow !== null).length;
-  check('only the 2 directed edges get arrowheads', arrows === 2, arrows);
+  check('no branch carries an arrowhead', arrows === 0, arrows);
+  // The transformer symbol is two interlocking rings. An opaque fill on the second ellipse
+  // paints over the first one's inner arc, so the symbol rendered as a broken open arc plus
+  // a circle — in the preview and in draw.io alike. Both rings must stay unfilled.
+  const rings = scene.nodes.filter((n) => n.kind === 'ellipse');
+  check('the transformer rings are unfilled so neither occludes the other',
+    rings.length === 10 && rings.every((n) => n.fill === 'none'),
+    rings.filter((n) => n.fill !== 'none').length + ' of ' + rings.length + ' filled');
   check('every node has a positive size', scene.nodes.every((n) => n.w > 0 && n.h > 0));
   check('every edge has at least 2 finite points',
     scene.edges.every((e) => e.points.length >= 2 && e.points.every((p) => Number.isFinite(p.x) && Number.isFinite(p.y))));
@@ -170,6 +180,19 @@ if (scene) {
   check('the viewBox is finite and positive', Number.isFinite(vb.x) && vb.w > 0 && vb.h > 0, JSON.stringify(vb));
   check('the viewBox stays within the 900x760 page plus padding',
     vb.x >= -20 && vb.y >= -20 && vb.x + vb.w <= 920 && vb.y + vb.h <= 780, JSON.stringify(vb));
+  // Paint order. This diagram declares `bg` — an opaque 900x760 white rectangle — BEFORE
+  // its branches, so a renderer that draws every edge first and every vertex afterwards
+  // hides all 27 branches behind the page fill (shipped in 0.6.3; the preview looked like a
+  // one-line diagram with no lines).
+  check('every node and edge records its document order',
+    scene.nodes.every((n) => Number.isFinite(n.order)) && scene.edges.every((e) => Number.isFinite(e.order)));
+  const bgNode = scene.nodes.find((n) => n.id === 'bg');
+  check('the page background cell is the opaque white rect the fix exists for',
+    bgNode !== undefined && bgNode.fill === '#FFFFFF' && bgNode.w >= 900 && bgNode.h >= 760,
+    bgNode && bgNode.fill + ' ' + bgNode.w + 'x' + bgNode.h);
+  check('the opaque page background precedes every branch in paint order',
+    bgNode !== undefined && bgNode.order < Math.min.apply(null, scene.edges.map((e) => e.order)),
+    bgNode && bgNode.order + ' < ' + Math.min.apply(null, scene.edges.map((e) => e.order)));
 
   console.log('\n4. DrawioDiagram builds the SVG');
   try {
@@ -181,6 +204,19 @@ if (scene) {
     const kids = svg.kids.length === 1 && Array.isArray(svg.kids[0]) ? svg.kids[0] : svg.kids;
     check('one group per node and per edge', kids.length === scene.nodes.length + scene.edges.length,
       kids.length + ' vs ' + (scene.nodes.length + scene.edges.length));
+    // the emitted order must BE the model order, not edges-then-vertices
+    const orderAt = (c) => {
+      const k = String(c.props.key);
+      return k.charAt(0) === 'e' ? scene.edges[Number(k.slice(1))].order : scene.nodes[Number(k.slice(1))].order;
+    };
+    const seq = kids.map(orderAt);
+    check('the SVG paints in non-decreasing document order',
+      seq.every((v, i) => i === 0 || seq[i - 1] <= v), seq.slice(0, 8).join(','));
+    const bgPos = kids.findIndex((c) => String(c.props.key) === 'n' + scene.nodes.findIndex((n) => n.id === 'bg'));
+    const edgePos = kids.map((c, i) => (String(c.props.key).charAt(0) === 'e' ? i : -1)).filter((i) => i >= 0);
+    check('the page background group is emitted before every branch group',
+      bgPos >= 0 && edgePos.length === scene.edges.length && edgePos.every((i) => i > bgPos),
+      'bg at ' + bgPos + ', edges ' + edgePos[0] + '..' + edgePos[edgePos.length - 1]);
     // pan/zoom passes an explicit view into the renderer; without one the scene's own
     // viewBox must still be used, since that is the "fit" state
     const fitted = api.DrawioDiagram({ scene: scene });
@@ -191,6 +227,73 @@ if (scene) {
   } catch (e) {
     check('renders without throwing', false, e.constructor.name + ': ' + e.message);
   }
+}
+
+// A cell that names no strokeColor must fall back to mxGraph's own default (black). It was a
+// slate gray, which painted the workspace diagram's 2 unstyled edges a different color from
+// the other 25 — the "edge color is not correct" report. Those two turned out to be stray
+// edges and were removed from the file, so this check now uses a synthetic diagram.
+{
+  const bare = '<mxfile><diagram><mxGraphModel><root>'
+    + '<mxCell id="n1" vertex="1" parent="1"><mxGeometry x="0" y="0" width="10" height="10" as="geometry"/></mxCell>'
+    + '<mxCell id="e1" edge="1" parent="1" style="edgeStyle=none"><mxGeometry relative="1" as="geometry">'
+    + '<mxPoint x="0" y="0" as="sourcePoint"/><mxPoint x="50" y="50" as="targetPoint"/></mxGeometry></mxCell>'
+    + '</root></mxGraphModel></diagram></mxfile>';
+  const bareScene = api.parseDrawioScene(bare);
+  check('a cell with no strokeColor falls back to draw.io black',
+    bareScene.edges.length === 1 && bareScene.edges[0].stroke === '#000000',
+    bareScene.edges.length ? bareScene.edges[0].stroke : 'no edge parsed');
+  check('that fallback covers vertices too',
+    bareScene.nodes.length === 1 && bareScene.nodes[0].stroke === '#000000',
+    bareScene.nodes.length ? bareScene.nodes[0].stroke : 'no node parsed');
+}
+
+// The preview must follow the app theme. Its models are ink-on-paper, so the grayscale
+// part of the palette is re-expressed as theme tokens at paint time — the scene keeps the
+// authored colours (asserted above) and the renderer translates them.
+const PAPER = 'var(--dsw-alias-bg-layer-1)';
+const INK = 'var(--dsw-alias-label-primary)';
+const MID = 'var(--dsw-alias-label-secondary)';
+check('a white paper surface becomes the theme surface', api.drawioThemeColor('#FFFFFF') === PAPER, api.drawioThemeColor('#FFFFFF'));
+check('white in shorthand becomes the theme surface', api.drawioThemeColor('#fff') === PAPER, api.drawioThemeColor('#fff'));
+check('black ink becomes the theme foreground', api.drawioThemeColor('#000000') === INK, api.drawioThemeColor('#000000'));
+check('the default text colour is treated as ink', api.drawioThemeColor('#111827') === INK, api.drawioThemeColor('#111827'));
+check('a mid grey becomes the secondary label colour', api.drawioThemeColor('#666666') === MID, api.drawioThemeColor('#666666'));
+check('a dark grey outline becomes the secondary label colour', api.drawioThemeColor('#333333') === MID, api.drawioThemeColor('#333333'));
+check('a light grey becomes the secondary label colour', api.drawioThemeColor('#CCCCCC') === MID, api.drawioThemeColor('#CCCCCC'));
+// a deliberately coloured element must survive in either theme
+check('a saturated colour is left exactly as authored',
+  api.drawioThemeColor('#C0392B') === '#C0392B' && api.drawioThemeColor('#1F6FEB') === '#1F6FEB');
+check('none and already-token values pass through',
+  api.drawioThemeColor('none') === 'none' && api.drawioThemeColor(PAPER) === PAPER && api.drawioThemeColor(undefined) === undefined);
+
+if (scene) {
+  // and the renderer must actually use the mapping, not just define it
+  const svg = api.DrawioDiagram({ scene: scene });
+  const kids = svg.kids.length === 1 && Array.isArray(svg.kids[0]) ? svg.kids[0] : svg.kids;
+  const shapeOf = (key) => {
+    const g = kids.find((c) => String(c.props.key) === key);
+    if (g === undefined) return null;
+    const parts = Array.isArray(g.kids[0]) ? g.kids[0] : g.kids;
+    return parts[0] ? parts[0].props : null;
+  };
+  const bgIdx = scene.nodes.findIndex((n) => n.id === 'bg');
+  const bgShape = shapeOf('n' + bgIdx);
+  check('the rendered page background uses the theme surface',
+    bgShape !== null && bgShape.fill === PAPER, bgShape && bgShape.fill);
+  const edgeShape = shapeOf('e0');
+  check('the rendered branches use the theme foreground',
+    edgeShape !== null && edgeShape.stroke === INK, edgeShape && edgeShape.stroke);
+  const ringNode = scene.nodes.findIndex((n) => n.kind === 'ellipse');
+  const ringShape = shapeOf('n' + ringNode);
+  check('a transformer ring keeps fill none and takes the ink stroke',
+    ringShape !== null && ringShape.fill === 'none' && ringShape.stroke === INK,
+    ringShape && ringShape.fill + ' / ' + ringShape.stroke);
+  // a text-kind vertex paints no shape, so its first part IS the label element
+  const labelNode = scene.nodes.findIndex((n) => n.kind === 'text' && n.lines.length > 0);
+  const labelShape = shapeOf('n' + labelNode);
+  check('bus labels are painted in the theme foreground',
+    labelShape !== null && labelShape.fill === INK, labelShape && labelShape.fill);
 }
 
 // --- 5. diagram pan/zoom math ----------------------------------------------
