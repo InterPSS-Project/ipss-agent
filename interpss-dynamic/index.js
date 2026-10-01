@@ -97,23 +97,111 @@ const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
 // The browser cannot start a process, so the Diagram tab's edit button asks the Host — and the
 // Host goes through the `subprocess` service rather than `node:child_process`, because the
 // dynamic half is an injected body with no imports and the service is the sandbox-aware
-// execution world the harness already manages. The rungs are tried in order: the draw.io
-// desktop app (macOS), the OS default handler, then `xdg-open` (Linux) / `cmd /c start`
-// (Windows). Each rung resolves its executable FIRST, so a command that is not installed comes
-// back as a message instead of a spawn failure, and the failures are all reported together.
-const DRAWIO_LAUNCH_RUNGS = [
-  { exe: 'open', args: ['-a', 'draw.io'], label: 'open -a draw.io' },
+// execution world the harness already manages.
+//
+// WHICH executable to run is configuration, not code: `config/ipss_plugin_env.json` carries an
+// ordered `drawio.launchers` list (see the shipped file for the schema), so a Windows or Linux
+// install names its own draw.io path instead of living with the macOS default. The list below is
+// what the plugin uses when that file is missing, unreadable or malformed — a broken config must
+// never disable the button, only change which executable it tries.
+//
+// Entries are tried in order and the file path to edit is appended to `args`. Every entry
+// resolves its executable FIRST, so a command that is not installed comes back as a message
+// instead of a spawn failure, and all the failures are reported together.
+const DEFAULT_DRAWIO_LAUNCHERS = [
+  { platform: 'darwin', exe: 'open', args: ['-a', 'draw.io'], label: 'open -a draw.io' },
+  { platform: 'darwin', exe: '/Applications/draw.io.app/Contents/MacOS/draw.io', args: [], label: '/Applications/draw.io.app' },
+  { platform: 'win32', exe: 'C:\\Program Files\\draw.io\\draw.io.exe', args: [], label: 'C:\\Program Files\\draw.io\\draw.io.exe' },
+  { platform: 'win32', exe: 'cmd.exe', args: ['/c', 'start', ''], label: 'cmd /c start' },
+  { platform: 'linux', exe: 'drawio', args: [], label: 'drawio' },
+  { platform: 'linux', exe: '/opt/drawio/drawio', args: [], label: '/opt/drawio/drawio' },
+  { platform: 'linux', exe: 'xdg-open', args: [], label: 'xdg-open' },
   { exe: 'open', args: [], label: 'open' },
   { exe: 'xdg-open', args: [], label: 'xdg-open' },
 ]
-const DRAWIO_WINDOWS_RUNG = { exe: 'cmd', args: ['/c', 'start', ''], label: 'cmd /c start' }
 
-function drawioLaunchRungs(platform) {
-  return platform === 'windows' ? [DRAWIO_WINDOWS_RUNG] : DRAWIO_LAUNCH_RUNGS
+const DRAWIO_LAUNCHER_LIMIT = 12
+
+// `process` is a plain Node global — the persistent Host certainly has it, and the dynamic body
+// is an injected module that must not IMPORT anything (it may still read a global). The read is
+// guarded and the answer is only a HINT: with no platform, every launcher is kept in file order
+// and executable resolution decides, which is also how an entry for another OS is skipped.
+function drawioPlatformKey() {
+  try {
+    const p = typeof process === 'object' && process !== null ? process.platform : ''
+    if (p === 'darwin') return 'darwin'
+    if (p === 'win32') return 'win32'
+    if (p === 'linux') return 'linux'
+  } catch (e) {}
+  return ''
 }
 
-// A failing rung is worth quoting only if it said something: `open: no such file` is the useful
-// half of a failure, the empty string is not.
+// An entry's optional `platform` tag: absent = every OS (tried last, as a file-association
+// fallback), `posix` = any non-Windows, and the mac/win/linux spellings are accepted because the
+// file is hand-written.
+function drawioPlatformMatches(tag, platform) {
+  if (typeof tag !== 'string' || tag === '') return true
+  if (platform === '') return true
+  const wanted = tag.trim().toLowerCase()
+  if (wanted === platform) return true
+  if (wanted === 'posix') return platform !== 'win32'
+  if (platform === 'win32') return wanted === 'windows' || wanted === 'win'
+  if (platform === 'darwin') return wanted === 'macos' || wanted === 'mac' || wanted === 'osx'
+  if (platform === 'linux') return wanted === 'linux' || wanted === 'unix'
+  return false
+}
+
+// One config entry -> the { exe, args, label } a launcher needs, or null when it is unusable.
+function drawioLauncherEntry(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  if (typeof raw.exe !== 'string' || raw.exe.trim() === '') return null
+  const args = []
+  if (Array.isArray(raw.args)) {
+    for (const a of raw.args) if (typeof a === 'string') args.push(a)
+  }
+  const exe = raw.exe.trim()
+  return {
+    platform: typeof raw.platform === 'string' ? raw.platform.trim().toLowerCase() : '',
+    exe: exe,
+    args: args,
+    label: typeof raw.label === 'string' && raw.label.trim() !== '' ? raw.label.trim() : exe,
+  }
+}
+
+// The configured list, or null when the parsed file has no usable `drawio.launchers` array
+// (which is what makes the caller fall back to the defaults AND say why).
+function drawioLauncherList(parsed) {
+  const drawio = parsed !== null && typeof parsed === 'object' ? parsed.drawio : null
+  const raw = drawio !== null && typeof drawio === 'object' && Array.isArray(drawio.launchers) ? drawio.launchers : null
+  if (raw === null) return null
+  const out = []
+  for (const entry of raw) {
+    const one = drawioLauncherEntry(entry)
+    if (one !== null) out.push(one)
+    if (out.length >= DRAWIO_LAUNCHER_LIMIT) break
+  }
+  return out.length === 0 ? null : out
+}
+
+// This machine's launchers, in the order to try them: its own platform's entries first (in file
+// order), then the untagged association fallbacks. An unknown platform keeps the file order
+// untouched, so the same file works on a host whose OS cannot be identified.
+function drawioLaunchersFor(list, platform) {
+  const source = Array.isArray(list) && list.length > 0 ? list : DEFAULT_DRAWIO_LAUNCHERS
+  if (platform === '') return source.slice()
+  const own = []
+  const neutral = []
+  for (const entry of source) {
+    const one = drawioLauncherEntry(entry)
+    if (one === null) continue
+    if (one.platform === '') neutral.push(one)
+    else if (drawioPlatformMatches(one.platform, platform)) own.push(one)
+  }
+  return own.concat(neutral)
+}
+
+// A failing launcher is worth quoting only if it said something: `open: no such file` is the
+// useful half of a failure, the empty string is not.
 function drawioLaunchStderr(handle) {
   const collected = handle === null || handle === undefined ? null : handle.collected
   const reader = collected === null || collected === undefined ? null : collected.stderr
@@ -125,7 +213,7 @@ function drawioLaunchStderr(handle) {
   }
 }
 
-// One rung: resolve, spawn, wait for the exit fact. `open` returns as soon as the app is
+// One launcher: resolve, spawn, wait for the exit fact. `open` returns as soon as the app is
 // launched, so a zero exit means "handed to the OS", not "draw.io has drawn it".
 async function drawioLaunchOnce(sp, rung, absPath, cwd, signal) {
   let exe
@@ -160,16 +248,43 @@ async function drawioLaunchOnce(sp, rung, absPath, cwd, signal) {
   return { ok: false, why: rung.label + ' exited ' + code + (detail === '' ? '' : ': ' + detail) }
 }
 
-async function drawioLaunch(sp, platform, absPath, cwd, signal) {
+async function drawioLaunch(sp, launchers, absPath, cwd, signal) {
   const tried = []
-  for (const rung of drawioLaunchRungs(platform)) {
+  for (const rung of launchers) {
     const result = await drawioLaunchOnce(sp, rung, absPath, cwd, signal)
     if (result.ok === true) return { ok: true, launcher: result.launcher }
     tried.push(result.why)
   }
   return { ok: false, error: 'could not launch the local draw.io app (' + tried.join('; ') + ')' }
 }
-// --- end draw.io launcher ---------------------------------------------------
+
+// `config/ipss_plugin_env.json` (project-level, beside `aclf_run.json`) -> this machine's
+// launchers. A missing file is not an error: the defaults above are the shipped behaviour. A
+// file that exists but has no usable launcher list keeps the defaults and reports why, so a
+// typo in a hand-written config surfaces in the button's error instead of silently doing nothing.
+async function readDrawioLaunchers(fs, root) {
+  const rel = root + '/config/ipss_plugin_env.json'
+  let info
+  try {
+    const target = await fs.resolve(rel)
+    info = await fs.stat(target)
+  } catch (e) {
+    return { launchers: DEFAULT_DRAWIO_LAUNCHERS, source: 'defaults', warning: '' }
+  }
+  if (info === undefined) return { launchers: DEFAULT_DRAWIO_LAUNCHERS, source: 'defaults', warning: '' }
+  let parsed = null
+  try {
+    parsed = JSON.parse(await fs.readText(await fs.resolve(rel)))
+  } catch (e) {
+    return { launchers: DEFAULT_DRAWIO_LAUNCHERS, source: 'defaults', warning: 'config/ipss_plugin_env.json is not valid JSON, so the built-in draw.io launchers are used' }
+  }
+  const list = drawioLauncherList(parsed)
+  if (list === null) {
+    return { launchers: DEFAULT_DRAWIO_LAUNCHERS, source: 'defaults', warning: 'config/ipss_plugin_env.json has no usable drawio.launchers array, so the built-in draw.io launchers are used' }
+  }
+  return { launchers: list, source: 'config', warning: '' }
+}
+// --- end draw.io launcher --------------------------------------------------- ---------------------------------------------------
 
 // Sort CSV data rows by one header column. Numeric when every non-empty value in that
 // column parses as a finite number (LoadingPercent, flows, ratings), lexicographic
@@ -676,12 +791,10 @@ export default {
         if (typeof abs !== 'string' || abs === '') {
           return { ok: false, error: 'this filesystem exposes no host path for ' + path }
         }
-        let platform = 'posix'
-        try {
-          const env = await sp.terminalEnvironment()
-          if (env !== null && env !== undefined && env.platform === 'windows') platform = 'windows'
-        } catch (e) {}
-        return drawioLaunch(sp, platform, abs, root, undefined)
+        const configured = await readDrawioLaunchers(fs, root)
+        const result = await drawioLaunch(sp, drawioLaunchersFor(configured.launchers, drawioPlatformKey()), abs, root, undefined)
+        if (result.ok !== true && configured.warning !== '') result.error = result.error + ' — ' + configured.warning
+        return result
       },
 
       async readCsv(args) {

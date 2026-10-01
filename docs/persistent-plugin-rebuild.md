@@ -157,13 +157,31 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   `// --- Launch the local draw.io app` and `// --- end draw.io launcher` markers is
   **byte-identical in both hosts** (the guard slices exactly those markers and compares), so the
   two halves cannot answer differently:
-  - The rungs are `open -a draw.io <file>`, then `open <file>` (the OS default handler), then
-    `xdg-open <file>`; on Windows a single `cmd /c start "" <file>`. `sp.terminalEnvironment()`
-    picks the platform — not `process.platform`, which the dynamic half cannot read.
-  - Each rung calls `resolveExecutable` **before** `sp.spawn`, so a command that is not installed
-    comes back as a message rather than a spawn failure, and every failure is reported together
-    with that launcher's own stderr. `open` exits 0 once the OS has the file, so a success means
-    "launched", never "saved".
+  - **Which executable to run is configuration, not code** (0.6.16): `config/ipss_plugin_env.json`
+    carries an ordered `drawio.launchers` list, so a Windows or Linux install names its own
+    draw.io path instead of living with the macOS default. `readDrawioLaunchers(fs, root)` reads
+    it from the project config beside `aclf_run.json`; `drawioLauncherList(parsed)` validates the
+    entries (a non-empty string `exe`, string-only `args`, a `label`, at most
+    `DRAWIO_LAUNCHER_LIMIT`); `drawioLaunchersFor(list, platform)` orders them. The list compiled
+    into the plugin (`DEFAULT_DRAWIO_LAUNCHERS`) is **exactly the shipped file's list**, which
+    §13 asserts — so deleting the file changes nothing, and a missing, unreadable or malformed
+    file falls back to those defaults **with a warning** that rides along in the button's error
+    instead of silently doing nothing.
+  - Each entry's optional `platform` tag (`darwin` / `win32` / `linux`, plus the hand-written
+    `macos` / `windows` / `posix` spellings) puts this machine's entries first and the untagged
+    ones — the file-association fallbacks — last. An entry for **another** OS is skipped by
+    filter, and, belt and braces, would not resolve anyway: the platform only decides *order*.
+    `drawioPlatformKey()` reads `process.platform`, which is a plain Node global the persistent
+    Host certainly has and the dynamic body may read despite importing nothing; when it cannot,
+    the key is `''` and **every** launcher is tried in file order, so the same committed file
+    works on a host whose OS cannot be identified.
+  - The macOS entries are `open -a draw.io <file>` then the app binary, then the untagged
+    `open <file>` / `xdg-open <file>` associations; Windows has
+    `C:\Program Files\draw.io\draw.io.exe` then `cmd.exe /c start "" <file>`; Linux has `drawio`,
+    `/opt/drawio/drawio` then `xdg-open`. Each rung calls `resolveExecutable` **before**
+    `sp.spawn`, so a command that is not installed comes back as a message rather than a spawn
+    failure, and every failure is reported together with that launcher's own stderr. `open` exits
+    0 once the OS has the file, so a success means "launched", never "saved".
   - `openDrawio` is the 21st `METHODS` entry; adding it to one half only is what §9.4 catches,
     and §13 drives the ladder itself (the only executable check of it, since the real
     `subprocess` service exists only inside the Host).
@@ -500,7 +518,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 154 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 168 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -541,13 +559,23 @@ mechanism caught the 0.6.0 modal defect as
   Report, it has **no** Diagram button, and `drawioFiles` / `drawioOpen` /
   `drawioDirectPath` are absent from the body — so re-adding a second preview surface is a
   deliberate act rather than a merge artifact.
-- §13 (since 0.6.12) drives the **draw.io launcher ladder**, the one new behaviour with no
-  client-side surface to render: it slices the shared block out of the persistent Host, compiles
-  it, and runs it against a fake `subprocess` provider. It asserts the argv
-  (`open -a draw.io <file>` first), the fall-through when a rung exits non-zero or does not
-  resolve, that nothing is spawned for an unavailable command, that every failure is reported
-  with its own stderr, and the Windows `cmd /c start "" <file>` rung. The real service exists
-  only inside the Host, so this is as close as a dependency-free suite gets to the button.
+- §13 (since 0.6.12; config-aware since 0.6.16) drives the **draw.io launcher**, the one new
+  behaviour with no client-side surface to render: it slices the shared block out of the
+  persistent Host, compiles it, and runs it against a fake `subprocess` provider. It asserts
+  - the argv on macOS (`open -a draw.io <file>` first), the fall-through when a launcher exits
+    non-zero or does not resolve, that nothing is spawned for an unavailable command, that every
+    failure is reported with its own stderr, and the Windows `cmd /c start "" <file>` fallback;
+  - **the config file and the code agree**: `config/ipss_plugin_env.json` parses, lists a launcher
+    for each of darwin/win32/linux (each pointing at the app itself before an association), and
+    normalizes to exactly `DEFAULT_DRAWIO_LAUNCHERS`;
+  - the ordering rules — another OS's entries are skipped, this machine's come first and the
+    untagged associations last, an unknown platform keeps file order, and the hand-written
+    spellings (`macos`, `windows`, `posix`) match;
+  - that a config with no usable list falls back to the defaults, and that an entry keeps only
+    its string args.
+
+  The real service exists only inside the Host, so this is as close as a dependency-free suite
+  gets to the button.
 
 Since 0.6.3 **§9 asserts the two plugins are in sync**, which is what makes this rebuild
 guide trustworthy: the suite reads only the dynamic body, so silent drift had made it
@@ -625,12 +653,15 @@ Client-half change is served with the plugin bundle, so the reload is what picks
   resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
   the regression symptom is a Diagram tab that keeps drawing the previous case.
   **Since 0.6.12 the draw.io-marked button opens the same file in the local draw.io desktop
-  app** (`open -a draw.io` on macOS). It is at the right end of the **Simu Case** header row
+  app**; which executable that is comes from `config/ipss_plugin_env.json` (0.6.16), so on macOS
+  it is `open -a draw.io` and on a Windows or Linux box it is whatever that file names. It is at
+  the right end of the **Simu Case** header row
   (the tab's upper-right corner, 0.6.15), so it is on screen next to the drawing without
   scrolling: a second or two later the app shows
   the diagram, the tab prints `Launched draw.io (open -a draw.io)` to the button's left, and a failure prints the
   Host's reason (`Could not launch draw.io: could not launch the local draw.io app (… exited 1:
-  …)`) instead of an empty pane. This is the only part of the plugin that needs a **Host**
+  …)`) instead of an empty pane — a malformed `drawio.launchers` also warns there that the
+  built-in launchers were used. This is the only part of the plugin that needs a **Host**
   restart to appear — every other change in this guide is Client-half and reloads
 - **CA dialog** (since 0.3.16): with the Texas 2K case selected and no
   `config/ca_run.json`, pressing **CA** opens *Run Contingency Analysis* pre-filled with

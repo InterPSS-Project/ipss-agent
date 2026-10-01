@@ -958,8 +958,8 @@ check('the preview has exactly one entry point left, and it is this view',
   (slice.match(/callRemote\('readDrawio'/g) || []).length === 1
   && slice.indexOf('drawioDirectPath') < 0 && slice.indexOf('drawioModal') < 0);
 
-// --- 13. the draw.io launcher ladder ---------------------------------------
-console.log('\n13. the local draw.io launcher (edit button)');
+// --- 13. the draw.io launcher (edit button) --------------------------------
+console.log('\n13. the local draw.io launcher and its config');
 // The edit button cannot be exercised end to end here — the real `subprocess` service only
 // exists inside the harness Host — so this drives the SHARED helper out of the installed host
 // file against a fake provider. It is the only executable check of what the button actually
@@ -973,7 +973,10 @@ const spawnBlock = (() => {
 check('the launcher block is extractable from the persistent host', spawnBlock.length > 1000, spawnBlock.length + ' chars');
 let launchApi = null;
 try {
-  launchApi = new Function(spawnBlock + '\nreturn { drawioLaunch: drawioLaunch };')();
+  launchApi = new Function(spawnBlock
+    + '\nreturn { drawioLaunch: drawioLaunch, drawioLaunchersFor: drawioLaunchersFor,'
+    + ' drawioLauncherList: drawioLauncherList, drawioPlatformMatches: drawioPlatformMatches,'
+    + ' DEFAULT_DRAWIO_LAUNCHERS: DEFAULT_DRAWIO_LAUNCHERS };')();
 } catch (e) {
   launchApi = null;
 }
@@ -981,12 +984,70 @@ check('the launcher block evaluates on its own', launchApi !== null && typeof la
 
 if (launchApi !== null) {
   const ABS = '/ws/wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio';
+  const shape = (list) => list.map((e) => ({ platform: e.platform || '', exe: e.exe, args: e.args, label: e.label }));
+  const entry = (list, n) => list.filter((e) => e.label === n)[0];
+
+  // The shipped config and the built-in fallback are the same list: deleting the file changes
+  // nothing, and editing the file is how a Windows/Linux install names its own draw.io.
+  const envPath = join(ROOT, 'config', 'ipss_plugin_env.json');
+  let envConfig = null;
+  try {
+    envConfig = JSON.parse(readFileSync(envPath, 'utf8'));
+  } catch (e) {
+    envConfig = null;
+  }
+  check('config/ipss_plugin_env.json exists and is valid JSON', envConfig !== null);
+  const fromFile = envConfig === null ? null : launchApi.drawioLauncherList(envConfig);
+  check('the shipped config lists at least one launcher per OS',
+    fromFile !== null && fromFile.length >= 5
+    && fromFile.some((e) => e.platform === 'darwin') && fromFile.some((e) => e.platform === 'win32')
+    && fromFile.some((e) => e.platform === 'linux'),
+    fromFile === null ? 'unusable' : fromFile.length + ' entries');
+  check('the shipped config matches the built-in defaults exactly',
+    fromFile !== null && JSON.stringify(shape(fromFile)) === JSON.stringify(shape(launchApi.DEFAULT_DRAWIO_LAUNCHERS)),
+    fromFile === null ? 'n/a' : JSON.stringify(shape(fromFile).slice(0, 2)));
+  // Each OS names a real draw.io entry, not just a file association.
+  check('every OS points at the draw.io app itself before falling back to an association',
+    fromFile !== null
+    && entry(fromFile.filter((e) => e.platform === 'darwin'), 'open -a draw.io') !== undefined
+    && entry(fromFile.filter((e) => e.platform === 'win32'), 'C:\\Program Files\\draw.io\\draw.io.exe') !== undefined
+    && entry(fromFile.filter((e) => e.platform === 'linux'), 'drawio') !== undefined);
+
+  // Platform tags order the list; an unknown platform keeps the file order so resolution decides.
+  const ordered = (platform) => launchApi.drawioLaunchersFor(fromFile, platform);
+  check('an entry for another OS is skipped, not spawned',
+    ordered('darwin').every((e) => e.platform !== 'win32' && e.platform !== 'linux')
+    && ordered('win32').every((e) => e.platform !== 'darwin' && e.platform !== 'linux')
+    && ordered('linux').every((e) => e.platform !== 'darwin' && e.platform !== 'win32'));
+  check("this machine's entries come first, the untagged associations last",
+    ordered('darwin')[0].label === 'open -a draw.io'
+    && ordered('win32')[0].label.indexOf('draw.io.exe') >= 0
+    && ordered('linux')[0].label === 'drawio'
+    && ordered('darwin').slice(-1)[0].platform === '');
+  check('an unknown platform keeps every launcher in file order',
+    JSON.stringify(shape(ordered(''))) === JSON.stringify(shape(fromFile)));
+  check('the hand-written OS spellings are accepted',
+    launchApi.drawioPlatformMatches('macos', 'darwin') && launchApi.drawioPlatformMatches('windows', 'win32')
+    && launchApi.drawioPlatformMatches('posix', 'linux') && launchApi.drawioPlatformMatches('posix', 'darwin')
+    && !launchApi.drawioPlatformMatches('posix', 'win32')
+    && launchApi.drawioPlatformMatches('', 'linux'));
+
+  // A broken config must fall back to the defaults — and say so — not disable the button.
+  check('a config without a usable launcher list falls back to the defaults',
+    launchApi.drawioLauncherList({}) === null && launchApi.drawioLauncherList({ drawio: {} }) === null
+    && launchApi.drawioLauncherList({ drawio: { launchers: [] } }) === null
+    && launchApi.drawioLauncherList({ drawio: { launchers: [{ exe: '' }, null, 'x'] } }) === null
+    && launchApi.drawioLauncherList({ other: 1 }) === null);
+  check('an entry keeps only its string args and gets a label',
+    JSON.stringify(launchApi.drawioLauncherList({ drawio: { launchers: [{ exe: ' /usr/bin/drawio ', args: ['--edit', 7, null] }] } }))
+      === JSON.stringify([{ platform: '', exe: '/usr/bin/drawio', args: ['--edit'], label: '/usr/bin/drawio' }]));
+
+  // ...and the launch loop itself: resolve, spawn, step down on failure.
   const fakeSubprocess = (options) => {
     const o = options || {};
     const spawned = [];
     return {
       spawned,
-      async terminalEnvironment() { return { platform: o.platform === 'windows' ? 'windows' : 'posix' }; },
       async resolveExecutable(command) {
         if ((o.available || []).indexOf(command) < 0) throw new Error('not found: ' + command);
         return '/resolved/' + command;
@@ -1003,41 +1064,53 @@ if (launchApi !== null) {
     };
   };
 
-  const appRung = fakeSubprocess({ available: ['open', 'xdg-open'] });
-  const launched = await launchApi.drawioLaunch(appRung, 'posix', ABS, '/ws', undefined);
-  check('the draw.io app is the first rung on posix and the argv is open -a draw.io <file>',
+  const macRungs = ordered('darwin');
+  const appRung = fakeSubprocess({ available: ['open'] });
+  const launched = await launchApi.drawioLaunch(appRung, macRungs, ABS, '/ws', undefined);
+  check('the draw.io app is the first rung on macOS and the argv is open -a draw.io <file>',
     launched.ok === true && launched.launcher === 'open -a draw.io'
     && JSON.stringify(appRung.spawned) === JSON.stringify([['/resolved/open', '-a', 'draw.io', ABS]]),
     JSON.stringify(appRung.spawned));
 
-  const fallback = fakeSubprocess({ available: ['open', 'xdg-open'], exits: { ['-a draw.io ' + ABS]: 1 } });
-  const second = await launchApi.drawioLaunch(fallback, 'posix', ABS, '/ws', undefined);
-  check('a failing app rung falls through to the OS default handler',
-    second.ok === true && second.launcher === 'open' && fallback.spawned.length === 2, JSON.stringify(second));
+  const fallback = fakeSubprocess({ available: ['open'], exits: { ['-a draw.io ' + ABS]: 1 } });
+  const second = await launchApi.drawioLaunch(fallback, macRungs, ABS, '/ws', undefined);
+  check('a failing app rung falls through to the app binary and then the association',
+    second.ok === true && fallback.spawned.length === 2 && fallback.spawned[1][0] === '/resolved/open',
+    JSON.stringify(second));
 
+  const linuxRungs = ordered('linux');
   const linux = fakeSubprocess({ available: ['xdg-open'] });
-  check('a missing open falls through to xdg-open and spawns nothing else',
-    (await launchApi.drawioLaunch(linux, 'posix', ABS, '/ws', undefined)).launcher === 'xdg-open'
-    && linux.spawned.length === 1 && linux.spawned[0][0] === '/resolved/xdg-open');
+  const lin = await launchApi.drawioLaunch(linux, linuxRungs, ABS, '/ws', undefined);
+  check('a Linux host with only xdg-open spawns nothing it cannot resolve',
+    lin.ok === true && lin.launcher === 'xdg-open' && linux.spawned.length === 1
+    && linux.spawned[0][0] === '/resolved/xdg-open', JSON.stringify(linux.spawned));
 
   const nothing = fakeSubprocess({ available: [] });
-  const none = await launchApi.drawioLaunch(nothing, 'posix', ABS, '/ws', undefined);
+  const none = await launchApi.drawioLaunch(nothing, macRungs, ABS, '/ws', undefined);
   check('with no launcher installed the error names every rung and starts no process',
     none.ok === false && none.error.indexOf('open -a draw.io') >= 0 && none.error.indexOf('xdg-open') >= 0
     && nothing.spawned.length === 0, none.error);
 
-  const allFail = fakeSubprocess({ available: ['open', 'xdg-open'], exits: { ['-a draw.io ' + ABS]: 1, [ABS]: 1 } });
-  const failed = await launchApi.drawioLaunch(allFail, 'posix', ABS, '/ws', undefined);
+  const allFail = fakeSubprocess({ available: ['open'], exits: { ['-a draw.io ' + ABS]: 1, [ABS]: 1 } });
+  const failed = await launchApi.drawioLaunch(allFail, macRungs, ABS, '/ws', undefined);
   check('every rung failing quotes each launcher and its stderr',
-    failed.ok === false && failed.error.indexOf('boom from') >= 0 && failed.error.indexOf('xdg-open exited') >= 0);
+    failed.ok === false && failed.error.indexOf('boom from') >= 0);
 
-  const windows = fakeSubprocess({ available: ['cmd'], platform: 'windows' });
-  const win = await launchApi.drawioLaunch(windows, 'windows', ABS, '/ws', undefined);
-  check('windows uses cmd /c start "" <file> and skips the posix rungs',
+  const winRungs = ordered('win32');
+  const windows = fakeSubprocess({ available: ['cmd.exe'] });
+  const win = await launchApi.drawioLaunch(windows, winRungs, ABS, 'C:\\ws', undefined);
+  check('windows falls to cmd /c start "" <file> when draw.io.exe is not at the default path',
     win.ok === true && win.launcher === 'cmd /c start'
-    && JSON.stringify(windows.spawned) === JSON.stringify([['/resolved/cmd', '/c', 'start', '', ABS]]),
+    && JSON.stringify(windows.spawned) === JSON.stringify([['/resolved/cmd.exe', '/c', 'start', '', ABS]]),
     JSON.stringify(windows.spawned));
+
+  // The endpoint must actually read the file, in both halves.
+  check('both hosts read the config file for their launchers',
+    rd(LIB_HOST).indexOf('readDrawioLaunchers') >= 0 && rd(DYN_HOST).indexOf('readDrawioLaunchers') >= 0
+    && rd(LIB_HOST).indexOf("'/config/ipss_plugin_env.json'") >= 0
+    && rd(DYN_HOST).indexOf("'/config/ipss_plugin_env.json'") >= 0);
 }
+
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

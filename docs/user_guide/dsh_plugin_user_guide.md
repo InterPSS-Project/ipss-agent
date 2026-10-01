@@ -62,32 +62,13 @@ You can then run the power system simulation workflow or chat following the proc
 ### Open the Diagram tab
 
 The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
-one-line diagram of whichever case the InterPSS tab has selected, full-size. (Plugin 0.6.8 added
-the tab; 0.6.9 removed the InterPSS tab's **Diagram** button, which used to open the same picture
-in a dialog — the InterPSS action row is now **ACLF · ⚙ · CA · Report**; 0.6.10 dropped the tab's
-own heading and subtitle, so it opens straight onto the **Simu Case** row and the drawing gets the
-space; 0.6.11 dropped the `Scroll to zoom · drag to pan` hint, leaving the toolbar as controls:
-**Rendered · Source · − · 100% · + · Fit**; 0.6.12 added the draw.io button at its end.)
+one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
+folder). Hover buses/branches for tooltips, zoom/pan with the toolbar, and use the **draw.io**
+button (0.6.12+; the desktop-app path is configurable per OS via `config/ipss_plugin_env.json`,
+0.6.16+) to edit in the desktop app. If the case has no diagram yet, generate one with
+`$ipss-case-diagram` after ACLF.
 
-1. Select a case in the **InterPSS** tab (a preset or a custom path); the Diagram tab follows.
-2. Switch to **Diagram**. It reads that case's `diagram/` folder:
-  - one `.drawio` file — opened straight away;
-  - several — a picker to switch between them, reopening the one you last viewed;
-  - none — it says so; a case gets a diagram when you run the one-line diagram skill
-    (/ipss-case-diagram), which writes `<case>/diagram/`.
-3. Interact with the drawing:
-  - **hover** a bus bar (or its `Bus-N` label) or a branch for the same tooltip the InterPSS
-    connection diagram shows; without a converged result it says `no result data — run ACLF`;
-  - **scroll** to zoom about the cursor, **drag** to pan, **Fit** to reset;
-  - **Source** shows the raw draw.io XML.
-4. To change the diagram itself, click the **draw.io button at the right end of the top row** (the
-   tab's upper-right corner, 0.6.15+): it opens the file in the local draw.io desktop app
-   (`open -a draw.io` on macOS), so you can edit and save it there. The tab prints
-   `Launched draw.io (open -a draw.io)` to the button's left, or the Host's reason if it could
-   not. (The button arrived in 0.6.12; a Host change like this one takes effect only after the
-   app is restarted.)
-5. Loading another case from chat (`interpss_case_load`) moves the Diagram tab with it — it
-   always draws the current simulation case, so the two tabs cannot disagree.
+Full how-to (generate, edit, troubleshoot): [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
 
 ---
 
@@ -355,6 +336,8 @@ For the full tool contract (inputs, cards, version history), see [interpss-tools
 
 Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`, `$ipss-case-diagram`. Plain natural language works the same when the agent picks those tools.
 
+For the Diagram tab, generation, and draw.io editing, see [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
+
 ### Case selection
 
 When you do not name a case, tools resolve in this order:
@@ -467,6 +450,7 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 
 ### Related
 
+- Diagram tab / one-line generation — [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md)
 - InterPSS DSH Chat tools (developer reference) — [interpss-tools.md](../interpss-tools.md)
 - Batch Chat / `/ipss-sim` — [batch_chat_user_guide.md](batch_chat_user_guide.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)

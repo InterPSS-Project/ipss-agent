@@ -51,7 +51,11 @@ parameters and results, no build-time Typert compiler required.
   draw.io button that opens the file in the **local draw.io
   desktop app** to edit it. It reuses `listDrawioFiles`, `readDrawio`, `checkResult` and
   `busConnections`, and the launcher is the one new endpoint (`openDrawio`, over the sandbox-aware
-  `subprocess` service — no `node:child_process`, since the dynamic half has no imports). 0.6.9
+  `subprocess` service — no `node:child_process`, since the dynamic half has no imports). Which
+  desktop executable that endpoint runs is configuration, not code (0.6.16): the project's
+  `config/ipss_plugin_env.json` carries an ordered `drawio.launchers` list with an optional
+  per-entry `platform` tag (`darwin` / `win32` / `linux`), so macOS, Windows and Linux each name
+  their own path — and the built-in defaults are exactly that shipped file's list. 0.6.9
   removed the **Diagram** button (and the modal it
   opened) from the InterPSS tab's action row: the tab is the preview now, so the two surfaces
   cannot drift apart.

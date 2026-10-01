@@ -1,0 +1,17 @@
+{
+  "drawio": {
+    "_comment": "Launchers for the LOCAL draw.io desktop app, used by the Diagram tab's edit button (the draw.io icon in the tab's top-right corner). Tried in order; the file being edited is appended to `args`. Each entry's `exe` is resolved before it is spawned, so an entry that is not installed on this machine is skipped with a message rather than failing the click, and all failures are reported together in the button's error. Point `exe` at your own install to use a non-default location.",
+    "_platform": "Optional per-entry `platform` tag: darwin | win32 | linux (macos/windows/posix also accepted). Entries for this machine's platform are tried first, then the untagged ones (file-association fallbacks) as a last resort. An entry for another OS is skipped; with no tag it is tried everywhere. Delete the entries you do not need, or add your own above the defaults.",
+    "launchers": [
+      { "platform": "darwin", "exe": "open", "args": ["-a", "draw.io"], "label": "open -a draw.io" },
+      { "platform": "darwin", "exe": "/Applications/draw.io.app/Contents/MacOS/draw.io", "args": [], "label": "/Applications/draw.io.app" },
+      { "platform": "win32", "exe": "C:\\Program Files\\draw.io\\draw.io.exe", "args": [], "label": "C:\\Program Files\\draw.io\\draw.io.exe" },
+      { "platform": "win32", "exe": "cmd.exe", "args": ["/c", "start", ""], "label": "cmd /c start" },
+      { "platform": "linux", "exe": "drawio", "args": [], "label": "drawio" },
+      { "platform": "linux", "exe": "/opt/drawio/drawio", "args": [], "label": "/opt/drawio/drawio" },
+      { "platform": "linux", "exe": "xdg-open", "args": [], "label": "xdg-open" },
+      { "exe": "open", "args": [], "label": "open" },
+      { "exe": "xdg-open", "args": [], "label": "xdg-open" }
+    ]
+  }
+}
