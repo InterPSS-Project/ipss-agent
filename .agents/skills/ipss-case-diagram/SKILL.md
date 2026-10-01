@@ -54,8 +54,9 @@ failed.
    from those tables.
 3. **Generate.** Run the script with `--title`. For a case whose layout you dislike, try another
    `--seed` — same topology, another valid layout.
-4. **Report** the `.drawio` path (in the case's `diagram/` folder) and that the tab's **Diagram**
-   button renders it with bus/branch tooltips. Do not restate the geometry numbers unless asked.
+4. **Report** the `.drawio` path (in the case's `diagram/` folder) and that the **Diagram** tab
+   renders the selected case's diagram with bus/branch tooltips (the InterPSS tab's old **Diagram**
+   button is gone as of 0.6.9). Do not restate the geometry numbers unless asked.
 
 ## What gets drawn
 
@@ -159,7 +160,7 @@ resources.
 | Self-check prints `FAIL …` | Report the failing line: an id/parent convention above was broken, a transformer symbol could not be placed clear of a bar/label, or the first bus is not the top-left-most (the run also prints a `note:` line for the last two) |
 | `--check` reports the Bus 1 corner rule on a hand-*laid* file | Expected: the hand-laid IEEE 14-bus template predates the rule. It is a generated-diagram convention |
 | The diagram is for the wrong case | `case_dir` is what decides — pass it explicitly |
-| The preview shows nothing | The `.drawio` must sit in the **selected** case's `diagram/` folder, and the button lists `.drawio` files only (the PNG is ignored) |
+| The preview shows nothing | The `.drawio` must sit in the **selected** case's `diagram/` folder, and the **Diagram** tab lists `.drawio` files only (the PNG is ignored) |
 
 ## Limitations
 
