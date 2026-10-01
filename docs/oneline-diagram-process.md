@@ -153,7 +153,7 @@ bus/branch tooltips resolve against.
 
 | Rule | Detail |
 |------|--------|
-| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus, whatever its voltage |
+| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus **in the file**, whatever its voltage. The Diagram tab paints an out-of-band bus red *while it renders* (0.6.18, see "How the app reads a diagram") — that colour is never written to the `.drawio` |
 | Labels | `Bus-N` only (no name, no data), centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
 | Branches | thin black (`strokeWidth 1.5`), **undirected** (`endArrow=none`), no edge text, staggered taps so parallel lines leave a bar at different heights |
 | Transformers | two interlocking 16 x 16 rings (`fillColor=none`, centres 8 px apart) inside one `style=group` cell, sitting inline on the branch |
@@ -198,7 +198,7 @@ bus/branch tooltips resolve against.
 | Collision repair left pairs exactly at the threshold, so grid snapping broke them again | Split the comfort target used by the relaxation from the hard no-overlap test used for snapping and validation |
 | Force-directed spreading flattened the topology into a hairball | Layout is stress majorization on hop distances; force spreading is only used to compact it |
 | Transformer symbols floated up to ~160 px off their branch | Each symbol is placed on the branch trunk and slid along that line when the spot is taken; both stubs stay straight and collinear |
-| Voltage colours (tried, then removed on request) | Every bar uses the template grey; the name suffix only feeds the subtitle |
+| Voltage colours (tried in the generator, then removed on request) | The file keeps one grey per bar and the `Vn` suffix feeds only the subtitle. Since 0.6.18 the **Diagram tab** overlays the one colour that earns its keep — a bus whose solved `|V|` is outside **0.9–1.1 pu** is red at render time (bar, outline and `Bus-N`), with the violation spelled out in its tooltip. Nothing is baked into the `.drawio`, so the desktop app and the PNG preview stay as generated |
 | Legend collapsed to one long line in draw.io | The legend used a literal newline in an `html=1` label; draw.io treats that as a space, so the two lines merged. The break is now an escaped `<br>`, which both draw.io and the plugin preview render as a line break |
 | Legend painted over the title, page widened by 441 units | On the 600-unit pages the legend sat at `page_w - 370` and the title/subtitle cells were a fixed 800/1000 wide, so they ran under the legend and past the page edge; the exporter then widened the page to fit. Header cells are now measured against the page and the legend stacks under the subtitle when the title column would be under 340 units |
 | Transformer symbol clipped by a bus label | Labels paint last, so a symbol that overlapped one lost part of a ring (the Bus-7 cluster in the 14-bus cases). Placement now searches outward from the branch trunk -- along it, then stepping aside, avoiding bars **and** labels -- and the self-check fails on any overlap that remains |

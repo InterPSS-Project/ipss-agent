@@ -364,7 +364,8 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   Trajectory (10) — showing the preview full-size. It has **no heading and no subtitle** (0.6.10):
   the tab bar names the view and the first row (`Simu Case <path>`) says what is drawn, so a
   title block only pushed the diagram down. Its toolbar is controls only — the picker (when the
-  case has several files), `Rendered` / `Source`, `−` / percent / `+`, `Fit`; the
+  case has several files), `R` / `S` (the Rendered / Source toggle, spelled out only in the
+  tooltip and the accessible name since 0.6.17), `−` / percent / `+`, `Fit`; the
   `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped
   in 0.6.11, because the gestures are discoverable without a sentence in the control row.
   The **draw.io-marked edit button** (since 0.6.12) that hands the open file to the local
@@ -409,6 +410,27 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     "no diagram yet" rather than an empty pane. The wheel/pan handlers keep the geometry the
     modal used, on this view's own state, and the wheel listener is still registered natively
     so `preventDefault` is permitted.
+  - **Render-time voltage annotation (since 0.6.18)**: a bus whose solved `VoltMag` is outside
+    **[0.9, 1.1] pu** is painted **red** — the bar's fill (`#CC0000`) and outline (`#7F0000`) plus
+    its `Bus-N` text — and nothing is written: the `.drawio` file stays the authored artifact and
+    so do the desktop app, the generator's PNG preview and the parsed scene (`DrawioDiagram` reads
+    an optional `alert` map of lowercase `busN` ids and chooses colours at paint time; with no
+    `alert` prop the emitted tree is byte-identical to before, which §14 asserts).
+    - The band is a client constant (`DRAWIO_V_BAND`), checked strictly (`0.9`/`1.1` are in band)
+      and only for buses present in the case's `<stem>_DF_bus.csv`; a blank or non-numeric
+      `VoltMag` is never annotated. Colours are **saturated on purpose**: `drawioThemeColor`
+      passes a saturated value through, so a violation reads the same in the light and dark theme.
+    - The data comes over the existing `interpss/readCsv` (`_DF_bus.csv` is already whitelisted),
+      page by page, with the columns located by **header name** — `VoltAng` and `NomVolt` sit right
+      beside `VoltMag`, so a positional read would paint the wrong buses — and paging stops once the
+      open scene's buses are answered (which is what keeps a 2000- or 78k-bus table cheap). No ACLF
+      results, no bus table or a failed read simply means no colouring.
+    - The label's white paper box is **not** recoloured: it is what masks the wires under the text.
+      Note the two label spellings in the wild — the generated files paint a real white rect
+      (`rounded=0;fillColor=#FFFFFF`), the older hand-laid ones use a `text;` cell with
+      `labelBackgroundColor` and paint no box — §14 covers both.
+    - Colour alone is not accessible, so the same fact rides the tooltip (`drawioBusText` appends
+      `⚠ |V| outside 0.9–1.1 pu`), and the toolbar stays controls-only.
   - Guard §12 renders the view — idle, no case, no diagram, a listing failure, an open
     diagram with a live scene, the tooltip element and the Source view — because a
     reference error anywhere in it unmounts the tab. It also asserts the registration, the
@@ -518,7 +540,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 168 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 188 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -553,7 +575,11 @@ mechanism caught the 0.6.0 modal defect as
   regex to parse every one of its effects. Verified by mutation: adding a dep declared below
   its effect makes §7 report `fileCount is declared 936 chars after the effect` and §12's
   renders throw `Cannot access 'fileCount' before initialization` — the blank-tab defect,
-  twice over.
+  twice over. It also holds the **toolbar's shape**: the edit button's ancestor chain (the
+  upper-right corner), that the toolbar row still ends at **Fit** and carries no edit button, and
+  — since 0.6.17 — that the view toggle is the letters `R` / `S` **with** their tooltip and
+  accessible name still saying `Rendered view` / `Source view — the raw draw.io XML`, because a
+  bare letter with no label would be a regression even though the pixels look right.
 - §10 asserts the shape of the tab bar's data instead of the button it lost: the host listing
   stays scoped to the case's `diagram/` folder, the action row still carries ACLF / CA /
   Report, it has **no** Diagram button, and `drawioFiles` / `drawioOpen` /
@@ -576,6 +602,14 @@ mechanism caught the 0.6.0 modal defect as
 
   The real service exists only inside the Host, so this is as close as a dependency-free suite
   gets to the button.
+- §14 (since 0.6.18) covers the **render-time voltage annotation**: the band rule (exclusive at both
+  ends, blank/non-numeric never flagged), the reader (columns by header name — proved with a
+  shuffled header — scene-limited answers, a header without `ID`/`VoltMag` yielding nothing,
+  lowercase ids), the painting on the real IEEE 14-bus scene plus a synthetic generated-format label
+  (bar fill/stroke, red label text, the white paper box preserved or absent per format, an in-band
+  bus still on the theme tokens, red surviving `drawioThemeColor`), and — the constraint the whole
+  design exists for — that the **parsed scene is unchanged** after an alerted render and that no
+  write RPC exists anywhere in the diagram path.
 
 Since 0.6.3 **§9 asserts the two plugins are in sync**, which is what makes this rebuild
 guide trustworthy: the suite reads only the dynamic body, so silent drift had made it
@@ -643,7 +677,8 @@ Client-half change is served with the plugin bundle, so the reload is what picks
 - **Diagram tab** (since 0.6.8): the tab bar reads **Chat · InterPSS · Diagram · Trajectory**,
   and the InterPSS action row reads **ACLF · ⚙ · CA · Report** (the 0.6.9 change). The tab opens
   straight onto its **Simu Case** row — no heading, no subtitle (0.6.10) — with a toolbar of
-  controls that ends at **Fit** (0.6.11). Selecting a
+  controls that reads **R · S · − · 100% · + · Fit** (`R` / `S` since 0.6.17; hovering them says
+  `Rendered view` / `Source view — the raw draw.io XML`). Selecting a
   case in the InterPSS tab (preset or custom row) and switching to *Diagram*
   draws that case's `<case>/diagram/*.drawio` full-size; with several files the picker lists
   them and reopens the one last viewed; a case with none says so instead of drawing an empty
@@ -652,6 +687,12 @@ Client-half change is served with the plugin bundle, so the reload is what picks
   `no result data — run ACLF`), the wheel zooms about the cursor, dragging pans, **Fit**
   resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
   the regression symptom is a Diagram tab that keeps drawing the previous case.
+  **Since 0.6.18 a bus whose `|V|` is outside 0.9–1.1 pu is red** (bar, outline and `Bus-N`), and
+  hovering it adds `⚠ |V| outside 0.9–1.1 pu` to its tooltip. The check is
+  `Ieee14Bus_LargeLoadQ` (Bus-14 = 0.8714): exactly one red bar, the other thirteen grey — and
+  `git status` must still show **no** modification to any `.drawio`, because the annotation is
+  paint-time only. A case with no ACLF results (or in-band voltages, e.g. `Ieee118Bus` and
+  `ieee39`) shows no red at all, which is not an error.
   **Since 0.6.12 the draw.io-marked button opens the same file in the local draw.io desktop
   app**; which executable that is comes from `config/ipss_plugin_env.json` (0.6.16), so on macOS
   it is `open -a draw.io` and on a Windows or Linux box it is whatever that file names. It is at

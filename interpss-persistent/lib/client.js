@@ -779,6 +779,63 @@ module.exports = {
       return DRAWIO_MID
     }
 
+    // --- Render-time voltage annotation ---------------------------------------
+    // A bus whose solved |V| is outside this band is painted red — bar, outline and `Bus-N` label
+    // — by `DrawioDiagram`. The annotation is PAINT-TIME ONLY: it never touches the .drawio file,
+    // the parsed scene keeps its authored colours, and the desktop app plus the generator's PNG
+    // preview stay as authored. The colours are saturated on purpose: `drawioThemeColor` passes
+    // them through unchanged, so a violation reads the same in the light and the dark theme.
+    const DRAWIO_ALERT_FILL = '#CC0000'
+    const DRAWIO_ALERT_STROKE = '#7F0000'
+    const DRAWIO_ALERT_TEXT = '#CC0000'
+    const DRAWIO_V_BAND = [0.9, 1.1]
+
+    // The bus a node stands for — the bus half of `drawioHoverTarget`, without needing the
+    // element->branch pairs: a bar carries `busN`, a `Bus-N` label stands in for its bar.
+    function drawioBusCellId(node) {
+      if (node === null || node === undefined) return null
+      if (drawioIsBusId(node.id)) return node.id
+      return drawioLabelBusId(node.lines)
+    }
+
+    // Strictly outside the band: the endpoints 0.9 and 1.1 are in band, and a value that is not a
+    // finite number (a blank VoltMag, a `-` placeholder) is simply not annotated.
+    function drawioVoltOutsideBand(volt, band) {
+      const limits = Array.isArray(band) && band.length === 2 ? band : DRAWIO_V_BAND
+      const v = typeof volt === 'number' ? volt : parseFloat(volt)
+      if (!Number.isFinite(v)) return false
+      return v < limits[0] || v > limits[1]
+    }
+
+    // Which of `wantedIds` are out of band, as a plain lookup the renderer can index by bus id.
+    // `busRows` are raw CSV lines (`readCsv` hands back the file's own text) and the columns are
+    // found by NAME, never by position: `VoltAng` and `NomVolt` sit right beside `VoltMag`, and a
+    // positional read would silently colour the wrong buses.
+    function drawioVoltColumns(header) {
+      const cells = String(header === null || header === undefined ? '' : header).split(',')
+      const at = (name) => {
+        for (let i = 0; i < cells.length; i += 1) {
+          if (String(cells[i]).trim().toLowerCase() === name) return i
+        }
+        return -1
+      }
+      return { id: at('id'), volt: at('voltmag') }
+    }
+
+    function drawioBusAlerts(header, busRows, wantedIds, band) {
+      const out = {}
+      const cols = drawioVoltColumns(header)
+      if (cols.id < 0 || cols.volt < 0 || !Array.isArray(busRows)) return out
+      for (const line of busRows) {
+        const c = String(line).split(',')
+        const id = String(c[cols.id] || '').trim()
+        if (id === '') continue
+        if (wantedIds !== null && wantedIds !== undefined && wantedIds[id.toLowerCase()] !== true) continue
+        if (drawioVoltOutsideBand(String(c[cols.volt] || '').trim(), band)) out[id.toLowerCase()] = true
+      }
+      return out
+    }
+
     // mxGraphModel -> a flat, React-free scene description: { viewBox, nodes, edges }.
     // Geometry is resolved to absolute coordinates so grouped cells (style=group, whose
     // children carry relative="1" geometry) land in the right place.
@@ -1159,6 +1216,9 @@ module.exports = {
       // Tooltips are opt-in: with no hover prop the renderer emits exactly what it always
       // did — no hit areas and no handlers — so a diagram still renders on its own.
       const hover = props.hover || null
+      // Voltage alerts are opt-in in the same way: `alert` maps a lowercase bus id (`bus14`) to
+      // true, and without it every colour below is exactly what it was before.
+      const alert = props.alert || null
       // draw.io paints in the model's own document order, interleaving vertices and edges.
       // That order is load-bearing: this workspace's diagram declares `bg`, an opaque
       // 900x760 white rectangle, BEFORE its branches. Drawing every edge up front and every
@@ -1204,6 +1264,12 @@ module.exports = {
       for (let i = 0; i < scene.nodes.length; i += 1) {
         const n = scene.nodes[i]
         const parts = []
+        // An out-of-band bus is red: the bar's fill and outline, and the `Bus-N` text — but NOT
+        // the label's white paper box, which must stay white so it keeps masking the wires under
+        // the text. The scene object is never modified; the colours are chosen here.
+        const alertBus = alert === null ? null : drawioBusCellId(n)
+        const alerted = alertBus !== null && alert[String(alertBus).toLowerCase()] === true
+        const isBar = drawioIsBusId(n.id)
         if (n.kind === 'ellipse') {
           parts.push(React.createElement('ellipse', {
             key: 's',
@@ -1217,12 +1283,14 @@ module.exports = {
             key: 's',
             x: n.x, y: n.y, width: n.w, height: n.h,
             rx: n.rounded ? Math.min(8, n.h / 2) : 0,
-            fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
-            stroke: drawioThemeColor(n.stroke), strokeWidth: n.strokeWidth,
+            fill: alerted && isBar ? DRAWIO_ALERT_FILL : (n.fill === null ? 'none' : drawioThemeColor(n.fill)),
+            stroke: alerted && isBar ? DRAWIO_ALERT_STROKE : drawioThemeColor(n.stroke),
+            strokeWidth: n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         }
-        const label = drawioLabel(n.lines, n.x + n.w / 2, n.y + n.h / 2, n, 't')
+        const labelNode = alerted && !isBar ? Object.assign({}, n, { fontColor: DRAWIO_ALERT_TEXT }) : n
+        const label = drawioLabel(labelNode.lines, n.x + n.w / 2, n.y + n.h / 2, labelNode, 't')
         if (label !== null) parts.push(label)
         // A transparent padded rect, so a 6px bar or a 16px transformer ring is comfortable
         // to hover. Added after the drawn geometry so it wins the hit test inside this group.
@@ -2657,6 +2725,11 @@ module.exports = {
       const [view, setView] = React.useState('rendered')
       const [resultDir, setResultDir] = React.useState(null)
       const [branchFile, setBranchFile] = React.useState(null)
+      const [busFile, setBusFile] = React.useState(null)
+      // Which buses the renderer paints red: a lowercase `busN` -> true lookup built from the bus
+      // result table's `VoltMag` column. Empty (or null) means "nothing to annotate", which is
+      // also the state when the case has no results at all.
+      const [busAlerts, setBusAlerts] = React.useState(null)
       // Pan/zoom of the rendered pane: the visible rectangle in scene coordinates, or null
       // for "fit the whole diagram". Declared with the other state, above every reader.
       const [rect, setRect] = React.useState(null)
@@ -2706,6 +2779,8 @@ module.exports = {
         setFilesError(null)
         setResultDir(null)
         setBranchFile(null)
+        setBusFile(null)
+        setBusAlerts(null)
         setTip(null)
         setPath('')
         setXml('')
@@ -2744,8 +2819,10 @@ module.exports = {
             if (seq !== diagramSeq) return
             if (res === null || res === undefined || res.ok !== true || res.exists !== true) return
             setResultDir(typeof res.resultDir === 'string' ? res.resultDir : null)
-            const name = (res.files || []).find((f) => String(f).indexOf('_DF_branch.csv') !== -1)
-            setBranchFile(name === undefined ? null : name)
+            const branch = (res.files || []).find((f) => String(f).indexOf('_DF_branch.csv') !== -1)
+            setBranchFile(branch === undefined ? null : branch)
+            const bus = (res.files || []).find((f) => String(f).indexOf('_DF_bus.csv') !== -1)
+            setBusFile(bus === undefined ? null : bus)
           },
           () => {},
         )
@@ -2790,6 +2867,42 @@ module.exports = {
         page(0, 0)
         return undefined
       }, [branchFile, resultDir])
+
+      // The render-time voltage annotation: read `<case>/result/<stem>_DF_bus.csv` and keep the
+      // buses whose `VoltMag` is outside `DRAWIO_V_BAND`. The columns come from the file's own
+      // header (never by position), the ids are lowercased so they match the diagram's `busN`
+      // cells, and the paging stops early — a page that has answered for no bus the open scene
+      // draws is the common case, which is what keeps a 2000-bus (or 78k-bus) table cheap.
+      // Nothing in this path writes: the .drawio stays read-only for the whole feature.
+      React.useEffect(() => {
+        if (busFile === null || resultDir === null) { setBusAlerts(null); return undefined }
+        let alive = true
+        const wanted = {}
+        if (scene !== null) {
+          for (const n of scene.nodes) {
+            const id = drawioBusCellId(n)
+            if (id !== null) wanted[String(id).toLowerCase()] = true
+          }
+        }
+        const hits = {}
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + busFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!alive) return
+              if (res === null || res === undefined || res.ok !== true) { setBusAlerts(null); return }
+              const rows = res.rows || []
+              const found = drawioBusAlerts(res.header, rows, wanted, DRAWIO_V_BAND)
+              for (const id of Object.keys(found)) hits[id] = true
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setBusAlerts(hits)
+            },
+            () => { if (alive) setBusAlerts(null) },
+          )
+        }
+        page(0, 0)
+        return () => { alive = false }
+      }, [busFile, resultDir, scene])
 
       // The preview's read: fetch the .drawio, decode it
       // (plain or compressed) and resolve element -> branch once, not on every repaint.
@@ -2871,6 +2984,16 @@ module.exports = {
         )
       }
 
+      // The bus tooltip the connection diagram shows, plus the one line that explains a red bar.
+      // A colour alone is not accessible, and this is the surface a reader already opens for a bus.
+      function diagramBusText(record) {
+        const text = busTooltip(record)
+        if (busAlerts === null) return text
+        const id = record !== null && record !== undefined && record.id !== undefined ? String(record.id).toLowerCase() : ''
+        if (id === '' || busAlerts[id] !== true) return text
+        return text + '\n⚠ |V| outside ' + DRAWIO_V_BAND[0] + '\u2013' + DRAWIO_V_BAND[1] + ' pu'
+      }
+
       // A cache hit answers instantly; otherwise the bus says who it is, one call fills the
       // cache for it AND its branch neighbours, and the tip is rewritten only if that same
       // bus is still under the cursor.
@@ -2880,7 +3003,7 @@ module.exports = {
         data.hovered = { kind: 'bus', id: busId }
         const known = data.busCache[busId]
         if (known !== undefined) {
-          showTip(busTooltip(known), event)
+          showTip(diagramBusText(known), event)
           return
         }
         showTip(drawioFallbackTip(String(busId), data.branch !== null), event)
@@ -2893,7 +3016,7 @@ module.exports = {
             const now = data.hovered
             const filled = data.busCache[busId]
             if (filled === undefined || now === null || now.kind !== 'bus' || now.id !== busId) return
-            setTip((t) => (t === null ? t : { text: busTooltip(filled), x: t.x, y: t.y }))
+            setTip((t) => (t === null ? t : { text: diagramBusText(filled), x: t.x, y: t.y }))
           },
           () => {},
         )
@@ -3051,8 +3174,11 @@ module.exports = {
       const toolbar = (path !== '' || picker !== null)
         ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
           picker,
-          path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered') : null,
-          path !== '' ? React.createElement('button', { onClick: () => setView('source'), style: { ...btn, padding: '4px 10px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source') : null,
+          // `R` / `S` rather than `Rendered` / `Source` (0.6.17): this row is the drawing's
+          // controls, and the two words took a third of it for the two most obvious buttons. The
+          // tooltip and the accessible name carry the meaning the label no longer spells out.
+          path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), title: 'Rendered view', 'aria-label': 'Rendered view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'R') : null,
+          path !== '' ? React.createElement('button', { onClick: () => setView('source'), title: 'Source view — the raw draw.io XML', 'aria-label': 'Source view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'S') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(scene, rect) + '%') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
@@ -3090,6 +3216,8 @@ module.exports = {
                       }, React.createElement(DrawioDiagram, {
                         scene: scene,
                         view: rect,
+                        // Render-time only: `busAlerts` never reaches the file.
+                        alert: busAlerts,
                         hover: {
                           pairs: dataRef.current.pairs,
                           onBus: diagramBusTip,

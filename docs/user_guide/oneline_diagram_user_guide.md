@@ -27,7 +27,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 
 ## Prerequisites
 
-- DeepSeek Harness with the InterPSS plugin installed (Diagram tab: **0.6.8+**; draw.io button: **0.6.12+**, improved **0.6.15+**, configurable launcher **0.6.16+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
+- DeepSeek Harness with the InterPSS plugin installed (Diagram tab: **0.6.8+**; draw.io button: **0.6.12+**, improved **0.6.15+**, configurable launcher **0.6.16+**, red out-of-band buses **0.6.18+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 - An **iPSS Agent** workspace (same activation gate as the InterPSS tab)
 - A selected / loaded simulation case under `wspace/data/**`
 - For **generation**: converged ACLF outputs `<case>/result/<stem>_DF_bus.csv` and `_DF_branch.csv` (run ACLF first if missing)
@@ -54,17 +54,18 @@ The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram**
 
 ### Toolbar and interaction
 
-Toolbar (plugin **0.6.11+**): **Rendered · Source · − · 100% · + · Fit**, plus the **draw.io** button at the right end (**0.6.12+**).
+Toolbar (plugin **0.6.11+**, single-letter view toggle **0.6.17+**): **R · S · − · 100% · + · Fit**, plus the **draw.io** button in the tab’s upper-right corner (**0.6.12+**). `R` is the rendered drawing and `S` the raw XML — hover either for the full wording (`Rendered view` / `Source view — the raw draw.io XML`).
 
 | Action | Effect |
 | ------ | ------ |
 | **hover** a bus bar (or its `Bus-N` label) or a branch | Same tooltip style as the InterPSS connection diagram; without a converged result: `no result data — run ACLF` |
 | **scroll** / **drag** | Zoom about the cursor / pan |
 | **Fit** | Reset view to the page |
-| **Source** | Raw draw.io XML |
+| **R** / **S** | Rendered drawing / Source — the raw draw.io XML |
+| **a red bar + red `Bus-N`** (**0.6.18+**) | That bus's solved voltage magnitude is outside **0.9–1.1 pu** (checked strictly: the endpoints themselves are in band). Hover it for `⚠ |V| outside 0.9–1.1 pu`. Needs the case's ACLF result tables; a case with no results, or every bus in band, simply shows no red. **The `.drawio` file is not modified** — the colour is chosen when the tab renders the SVG, so the file, the desktop draw.io app and the generator's PNG preview stay exactly as generated |
 | **draw.io** button (upper-right, **0.6.15+**) | Opens the current file in the local draw.io desktop app, using the launcher configured in `config/ipss_plugin_env.json` (**0.6.16+**; `open -a draw.io` on macOS by default). Status text appears to the left of the button (`Launched draw.io…` or the Host error). Restart `dsh web` after a Host change so the button works. |
 
-(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS tab’s old **Diagram** dialog button; **0.6.10** gave the drawing more space; **0.6.11** dropped the zoom/pan hint text; **0.6.12** added the draw.io button; **0.6.15** moved it to the tab’s upper-right corner; **0.6.16** made the desktop-app path configuration.)
+(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS tab’s old **Diagram** dialog button; **0.6.10** gave the drawing more space; **0.6.11** dropped the zoom/pan hint text; **0.6.12** added the draw.io button; **0.6.15** moved it to the tab’s upper-right corner; **0.6.16** made the desktop-app path configuration; **0.6.17** shortened the view toggle to `R` / `S`; **0.6.18** paints buses outside 0.9–1.1 pu red at render time.)
 
 ### Configure the draw.io launcher (0.6.16+)
 
@@ -209,6 +210,7 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 | Diagram tab says there is no diagram | No `.drawio` under `<case>/diagram/` — run `$ipss-case-diagram` (after ACLF) |
 | Preview shows nothing / wrong case | File must sit in the **selected** case’s `diagram/` folder; only `.drawio` is listed (PNG is ignored) |
 | Tooltips say `no result data — run ACLF` | Run ACLF so bus/branch result CSVs exist for the case |
+| No red buses, or the wrong ones | The colouring needs `<case>/result/<stem>_DF_bus.csv` for the **selected** case and a `VoltMag` column in it — run ACLF, and re-select the case. It reads the table by column **name**, so a hand-edited table with renamed columns colours nothing rather than guessing. Nothing red is normal when every bus is inside 0.9–1.1 pu |
 | Generator: `no *_DF_bus.csv / *_DF_branch.csv` | Solve ACLF first (`$ipss-case-aclf`), then re-run |
 | `ModuleNotFoundError: No module named 'PIL'` | Use the harness Python path above, or pass `--no-png` |
 | draw.io button does nothing / Host error | Install draw.io desktop app; point `exe` at your install in `config/ipss_plugin_env.json` (0.6.16+); restart `dsh web` after plugin Host updates (0.6.12+) |

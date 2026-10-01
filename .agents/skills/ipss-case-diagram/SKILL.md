@@ -66,7 +66,7 @@ failed.
 | Branches | one line per `_DF_branch` row, undirected; parallel circuits bow slightly apart |
 | Transformers | `IsXfmr = true` rows as two interlocking rings in one group cell, inline on the branch and clear of every bar and label |
 | Loads / generators | not drawn — the template shows topology only |
-| Voltage | not drawn: every bar uses the template's single grey. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix, else the bus table's `NomVolt` when that is a real voltage, else nothing |
+| Voltage | Not drawn **in the file**: every bar uses the template's single grey. The Diagram tab paints a bus whose solved `|V|` is outside **0.9–1.1 pu** red when it renders (0.6.18) — render-time only, so never bake a colour in for it. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix, else the bus table's `NomVolt` when that is a real voltage, else nothing |
 | Orientation | the case's first bus (**Bus 1**) is the top-left-most bus: the layout is rotated, then eased, until every other bar is right of and below it |
 | Header | title, subtitle (counts and voltage levels), and a symbol legend box |
 
@@ -91,6 +91,10 @@ failed.
 - Every edge needs `endArrow=none` (a one-line diagram is undirected) and an explicit `strokeColor`.
 - Keep the file uncompressed XML under `<mxfile>`, and under 2000 cells (the preview's cap; the
   118-bus diagram uses 465).
+- **Do not bake voltage colour into the file.** The Diagram tab reads the case's
+  `result/<stem>_DF_bus.csv` and paints out-of-band buses (`|V|` outside 0.9–1.1 pu) red as it
+  renders (0.6.18); the `.drawio` itself stays one grey per bar, and the generator has no colour
+  flag on purpose. A bar cell id that does not resolve to a table row simply stays grey.
 
 ## Flags
 

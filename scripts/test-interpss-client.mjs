@@ -114,6 +114,8 @@ function build(overrides) {
       + ' drawioHoverTarget: drawioHoverTarget, drawioCanonicalBusId: drawioCanonicalBusId,'
       + ' drawioPairLabel: drawioPairLabel, drawioFallbackTip: drawioFallbackTip,'
       + ' drawioTabChoice: drawioTabChoice, DiagramView: DiagramView,'
+      + ' drawioBusAlerts: drawioBusAlerts, drawioBusCellId: drawioBusCellId,'
+      + ' drawioVoltOutsideBand: drawioVoltOutsideBand, drawioVoltColumns: drawioVoltColumns,'
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip };');
 
 
@@ -903,11 +905,29 @@ check('the button no longer needs the retired sticky-strip workaround',
   styleOf(editButton).position === undefined && styleOf(editButton).pointerEvents === undefined
   && slice.slice(slice.indexOf('function DiagramView(')).indexOf("position: 'sticky'") < 0);
 const toolbarRow = findInTree(editTree, (n) => n.type === 'div' && Array.isArray(n.kids)
-  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button' && (k.kids || []).indexOf('Rendered') >= 0));
+  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button' && (k.kids || []).indexOf('R') >= 0));
 check('the toolbar row ends at Fit and no longer carries the draw.io button',
   toolbarRow !== null
-  && findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props.title || '').indexOf('draw.io') >= 0) === null
+  // the EDIT button's own title — the bare word `draw.io` now also appears in the Source tooltip
+  && findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props.title || '').indexOf('local draw.io app') >= 0) === null
   && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Fit') >= 0) !== null);
+// Asked for in 0.6.17: the view toggle is `R` / `S`. The letters only work because the tooltip
+// and the accessible name still say the words, so assert both halves of that bargain — a bare
+// letter with no label would be a UI regression even though the pixels look right.
+const viewButton = (letter) => findInTree(toolbarRow, (n) => n.type === 'button'
+  && (n.kids || []).indexOf(letter) >= 0 && String(n.props.title || '').indexOf('view') >= 0);
+const renderedBtn = toolbarRow === null ? null : viewButton('R');
+const sourceBtn = toolbarRow === null ? null : viewButton('S');
+check('the view toggle is the single letters R and S',
+  renderedBtn !== null && sourceBtn !== null
+  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Rendered') >= 0) === null
+  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Source') >= 0) === null,
+  renderedBtn === null ? 'no R' : String(renderedBtn.props.title));
+check('each letter keeps its meaning in the tooltip and the accessible name',
+  renderedBtn !== null && renderedBtn.props.title === 'Rendered view' && renderedBtn.props['aria-label'] === 'Rendered view'
+  && sourceBtn !== null && String(sourceBtn.props['aria-label']).indexOf('Source view') >= 0
+  && String(sourceBtn.props.title).indexOf('draw.io XML') >= 0,
+  sourceBtn === null ? 'no S' : String(sourceBtn.props.title));
 if (editButton !== null) {
   editButton.props.onClick();
   check('the edit button asks the Host to launch draw.io for the open diagram',
@@ -1111,6 +1131,118 @@ if (launchApi !== null) {
     && rd(DYN_HOST).indexOf("'/config/ipss_plugin_env.json'") >= 0);
 }
 
+
+// --- 14. render-time voltage annotation ------------------------------------
+console.log('\n14. render-time voltage annotation (red buses outside [0.9, 1.1] pu)');
+// The rule itself: strictly outside the band, and a value that is not a finite number (a blank
+// VoltMag, a placeholder) is simply not annotated rather than flagged.
+check('the band is exclusive at both ends',
+  api.drawioVoltOutsideBand(0.9, [0.9, 1.1]) === false && api.drawioVoltOutsideBand(1.1, [0.9, 1.1]) === false
+  && api.drawioVoltOutsideBand(0.8999, [0.9, 1.1]) === true && api.drawioVoltOutsideBand(1.1001, [0.9, 1.1]) === true);
+check('a blank, missing or non-numeric voltage is never annotated',
+  api.drawioVoltOutsideBand('', [0.9, 1.1]) === false && api.drawioVoltOutsideBand('-', [0.9, 1.1]) === false
+  && api.drawioVoltOutsideBand(undefined, [0.9, 1.1]) === false && api.drawioVoltOutsideBand('n/a', [0.9, 1.1]) === false
+  && api.drawioVoltOutsideBand(NaN, [0.9, 1.1]) === false && api.drawioVoltOutsideBand(0.5, null) === true);
+check('the band defaults to 0.9-1.1 when none is given',
+  api.drawioVoltOutsideBand(0.95, undefined) === false && api.drawioVoltOutsideBand(0.8, undefined) === true);
+
+// The table reader. drawioBusAlerts gets raw CSV lines from readCsv, so the columns MUST come from
+// the file's own header: VoltAng and NomVolt sit beside VoltMag, and a positional read would
+// silently paint the wrong buses.
+const BUS_HEADER = 'ID,Number,Name,AreaName,NomVolt,VoltAng,VoltMag,LoadP';
+const BUS_ROWS = [
+  'Bus1,1,A,1,100000.0,0.100,1.047360469272905,0.0',
+  'Bus2,2,B,1,100000.0,0.200,0.871400000000000,0.0',
+  'Bus3,3,C,1,100000.0,0.300,1.120000000000000,0.0',
+  'Bus4,4,D,1,100000.0,0.400,,0.0',
+  'Bus5,5,E,1,100000.0,0.500,n/a,0.0',
+];
+check('only the out-of-band buses are flagged',
+  JSON.stringify(api.drawioBusAlerts(BUS_HEADER, BUS_ROWS, null, [0.9, 1.1])) === JSON.stringify({ bus2: true, bus3: true }),
+  JSON.stringify(api.drawioBusAlerts(BUS_HEADER, BUS_ROWS, null, [0.9, 1.1])));
+check('the columns are read by header name, not by position',
+  JSON.stringify(api.drawioBusAlerts('VoltMag,ID,Name', ['0.8714,Bus2,B', '1.02,Bus9,X'], null, [0.9, 1.1]))
+    === JSON.stringify({ bus2: true }),
+  JSON.stringify(api.drawioBusAlerts('VoltMag,ID,Name', ['0.8714,Bus2,B', '1.02,Bus9,X'], null, [0.9, 1.1])));
+check('a scene-limited read answers only for the buses it draws',
+  JSON.stringify(api.drawioBusAlerts(BUS_HEADER, BUS_ROWS, { bus3: true }, [0.9, 1.1])) === JSON.stringify({ bus3: true }));
+check('a header without ID or VoltMag yields nothing rather than a wrong guess',
+  JSON.stringify(api.drawioBusAlerts('ID,Name', BUS_ROWS, null, [0.9, 1.1])) === '{}'
+  && JSON.stringify(api.drawioBusAlerts('', BUS_ROWS, null, [0.9, 1.1])) === '{}'
+  && JSON.stringify(api.drawioBusAlerts(BUS_HEADER, null, null, [0.9, 1.1])) === '{}');
+check('ids are lowercased so they match the diagram cells',
+  JSON.stringify(api.drawioBusAlerts('ID,VoltMag', ['BUS2,0.87'], null, [0.9, 1.1])) === JSON.stringify({ bus2: true }));
+
+// The painting. The bar and its label go red; the label's paper box must stay white (it masks the
+// wires under the text), an in-band bus is untouched, and red passes the theme mapping through.
+if (scene) {
+  const alertScene = api.DrawioDiagram({ scene: scene, alert: { bus5: true } });
+  const byKey = {};
+  for (const g of groupsOf(alertScene)) byKey[g.props.key] = partsOf(g);
+  const shapeOf = (key) => (byKey[key] || []).filter((part) => part.props.key === 's')[0];
+  const iBar = scene.nodes.findIndex((n) => n.id === 'bus5');
+  const iLabel = scene.nodes.findIndex((n) => (n.lines || []).join('') === 'Bus-5' && n.id !== 'bus5');
+  const bar = shapeOf('n' + iBar);
+  const labelParts = byKey['n' + iLabel] || [];
+  const labelText = labelParts.filter((part) => part.type === 'text')[0];
+  const labelBox = labelParts.filter((part) => part.type === 'rect')[0];
+  check('an out-of-band bar is painted red',
+    bar !== undefined && bar.props.fill === '#CC0000' && bar.props.stroke === '#7F0000',
+    bar === undefined ? 'no bar' : bar.props.fill + ' / ' + bar.props.stroke);
+  check('its Bus-N label text is red too', labelText !== undefined && labelText.props.fill === '#CC0000',
+    labelText === undefined ? 'no label' : String(labelText.props.fill));
+  // The label's paper box, when the file paints one, must stay white: it is what masks the wires
+  // under the text. (The older hand-laid files use a `text;` cell with `labelBackgroundColor`, so
+  // they paint no box at all — the generated format paints a real white rect. Both are asserted.)
+  const labelNode = scene.nodes[iLabel];
+  check('the label keeps a white paper box wherever the file draws one',
+    labelText !== undefined && labelText.props.fill === '#CC0000'
+    && (labelNode.kind === 'text' ? labelBox === undefined : labelBox !== undefined && labelBox.props.fill === 'var(--dsw-alias-bg-layer-1)'),
+    labelNode === undefined ? 'no node' : labelNode.kind + ' / ' + (labelBox === undefined ? 'no box' : String(labelBox.props.fill)));
+  const boxed = api.parseDrawioScene('<mxfile><diagram><mxGraphModel><root>'
+    + '<mxCell id="bus7" value="" vertex="1" parent="1" style="rounded=0;fillColor=#666666;strokeColor=#333333;">'
+    + '<mxGeometry x="0" y="40" width="6" height="52" as="geometry"/></mxCell>'
+    + '<mxCell id="nm7" value="Bus-7" vertex="1" parent="1" style="rounded=0;fillColor=#FFFFFF;strokeColor=none;fontColor=#000000;fontSize=11;">'
+    + '<mxGeometry x="0" y="20" width="52" height="14" as="geometry"/></mxCell>'
+    + '</root></mxGraphModel></diagram></mxfile>');
+  const boxedSvg = api.DrawioDiagram({ scene: boxed, alert: { bus7: true } });
+  const boxedByKey = {};
+  for (const g of groupsOf(boxedSvg)) boxedByKey[g.props.key] = partsOf(g);
+  const boxedBar = (boxedByKey['n0'] || []).filter((part) => part.type === 'rect')[0];
+  const boxedParts = boxedByKey['n1'] || [];
+  const boxedBox = boxedParts.filter((part) => part.type === 'rect')[0];
+  const boxedText = boxedParts.filter((part) => part.type === 'text')[0];
+  check('a generated-format label keeps its white box and reddens only the text',
+    boxedBar !== undefined && boxedBar.props.fill === '#CC0000'
+    && boxedBox !== undefined && boxedBox.props.fill === 'var(--dsw-alias-bg-layer-1)'
+    && boxedText !== undefined && boxedText.props.fill === '#CC0000',
+    (boxedBox === undefined ? 'no box' : String(boxedBox.props.fill)) + ' / ' + (boxedText === undefined ? 'no text' : String(boxedText.props.fill)));
+  const iQuiet = scene.nodes.findIndex((n) => n.id === 'bus1');
+  const quiet = shapeOf('n' + iQuiet);
+  check('an in-band bar keeps the theme tokens',
+    quiet !== undefined && quiet.props.fill === 'var(--dsw-alias-label-secondary)'
+    && quiet.props.stroke === 'var(--dsw-alias-label-secondary)',
+    quiet === undefined ? 'no bar' : String(quiet.props.fill));
+  check('the alert red survives the theme mapping in both themes',
+    api.drawioThemeColor('#CC0000') === '#CC0000' && api.drawioThemeColor('#7F0000') === '#7F0000');
+  check('with no alert the painting is byte-identical to before',
+    JSON.stringify(api.DrawioDiagram({ scene: scene })) === JSON.stringify(api.DrawioDiagram({ scene: scene, alert: null })));
+
+  // The constraint behind this whole design: the annotation is paint-time only. Nothing above may
+  // have written to the scene, and no file write exists anywhere in the client path.
+  const authored = JSON.stringify(scene);
+  api.DrawioDiagram({ scene: scene, alert: { bus5: true, bus1: true } });
+  check('the parsed scene keeps its authored colours after an alerted render',
+    JSON.stringify(scene) === authored
+    && scene.nodes.filter((n) => n.id === 'bus5')[0].fill === '#666666',
+    scene.nodes.filter((n) => n.id === 'bus5')[0].fill);
+}
+check('the diagram path has no write RPC — the .drawio is only ever read',
+  (slice.match(/callRemote\('(?:writeText|writeFile|saveDrawio|writeDrawio|saveFile)'/g) || []).length === 0
+  && slice.indexOf("callRemote('readDrawio'") >= 0);
+check('the tab wires the alert into the renderer from the bus result table',
+  slice.indexOf('alert: busAlerts') >= 0 && slice.indexOf('setBusAlerts') >= 0
+  && slice.indexOf('_DF_bus.csv') >= 0 && slice.indexOf('drawioBusAlerts(') >= 0);
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);
