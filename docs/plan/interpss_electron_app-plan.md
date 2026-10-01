@@ -29,9 +29,9 @@ isProject: false
 
 Today the InterPSS study UI is a **DeepSeek Harness Cordis plugin**:
 
-- Legacy source of truth: [`interpss-dynamic/`](interpss-dynamic/) (host + client bodies)
-- Installable package: [`interpss-persistent/`](interpss-persistent/) (`@deepseek-ai/dsh-interpss`)
-- Java facade: [`IpssAgentBridge`](src/main/java/org/interpss/agent/bridge/IpssAgentBridge.java) + CLI [`IpssCmd`](src/main/java/org/interpss/agent/IpssCmd.java)
+- Legacy source of truth: [`interpss-dynamic/`](../../interpss-dynamic/) (host + client bodies)
+- Installable package: [`interpss-persistent/`](../../interpss-persistent/) (`@deepseek-ai/dsh-interpss`)
+- Java facade: [`IpssAgentBridge`](../../src/main/java/org/interpss/agent/bridge/IpssAgentBridge.java) + CLI [`IpssCmd`](../../src/main/java/org/interpss/agent/IpssCmd.java)
 - Node↔JVM: `java-bridge` (docs already note Electron packaging via `isPackagedElectron: true`)
 
 ```mermaid
@@ -116,7 +116,7 @@ ipss-agent/
 | **Preload** | Expose typed `window.interpss.*` via `contextBridge` | Typert `/api` RPC |
 | **Renderer** | React study UI | Cordis `conversation.view` client |
 
-Keep the existing rule from [`docs/js-java-integration.md`](docs/js-java-integration.md): **only paths + JSON/text cross the JS/Java boundary**—no EMF objects in Electron.
+Keep the existing rule from [`docs/js-java-integration.md`](../js-java-integration.md): **only paths + JSON/text cross the JS/Java boundary**—no EMF objects in Electron.
 
 ### IPC contract (mirror current Host methods)
 
@@ -146,7 +146,7 @@ Replace DSH session cwd with an explicit **user-chosen project folder** (default
 ### Phase 1 — Electron skeleton + in-app Host service (3–5 days)
 
 - Scaffold `interpss-electron` with Electron + Vite + React + TypeScript (all code lives under this package).
-- Copy Host bootstrap/handlers from [`interpss-persistent/lib/index.js`](interpss-persistent/lib/index.js) into `electron/java/IpssService.ts`; strip Cordis/`ctx.provide`/Typert; define app-local `ipc-contract.ts`.
+- Copy Host bootstrap/handlers from [`interpss-persistent/lib/index.js`](../../interpss-persistent/lib/index.js) into `electron/java/IpssService.ts`; strip Cordis/`ctx.provide`/Typert; define app-local `ipc-contract.ts`.
 - Main: window creation, secure preload, workspace root persistence (`electron-store` or app `userData`).
 - Wire `java-bridge` with `isPackagedElectron: true`; unpack native binaries outside asar (`asarUnpack` / `extraResources`).
 - Prove one round-trip: `loadCase` → `runAclf` → return `networkInfo` + result files for IEEE14.

@@ -43,16 +43,64 @@ window.__ModuleLoader__.load({
    persistent browser bundle uses `setInterval(sync, 4000)` plus
    `window.addEventListener('focus', …)` and keeps that version. This is the one
    deliberate divergence between the two tab bodies; everything else stays
-   byte-identical, so a rebuild must re-apply it.
+   byte-identical, so a rebuild must re-apply it. Anything new in the shared body must
+   respect this: the draw.io preview's Escape handling rides the focused overlay's
+   `onKeyDown` rather than a `window` listener for exactly this reason, so it needed no
+   divergence of its own.
 
 Mechanically, only the **tab body** changes between rebuilds: splice the dynamic
 file's region from `    const PRESETS = [` up to (excluding) its
 `    const slots = ctx.get('slots')` into the persistent file between the
 transport block and the `    // --- ACLF tool-card result explorer` section. That
-keeps the persistent-only tool-card section, all five `slots.inject`
+keeps the persistent-only tool-card section, all six `slots.inject`
 registrations, and the module footer intact — copying only up to
 `const slots` drops the tool cards, and diffing the result against the previous
 `lib/client.js` should show your UI change alone.
+
+`node scripts/sync-persistent-client.mjs` performs that splice for you — it also rewrites
+`interpss-dynamic/client.js` as a byte copy of the body, and it refuses to run when the
+markers or the timer form have drifted, so a half-splice cannot be written silently. The
+manual procedure below is what it automates, and §9 asserts the same invariants.
+
+**Since 0.6.3 the two bodies differ only by that timer swap**, so the splice is safe again
+— with one mandatory correction. Baseline the change first:
+`node scripts/test-interpss-client.mjs` must be green, and its §9 asserts the invariant this
+procedure depends on. Then:
+
+1. splice the body region as above, and
+2. **re-apply the persistent timer form**, which the splice overwrites with the dynamic
+   `ctx.timer.interval` version:
+
+```js
+// after the splice, in lib/client.js — put the persistent transport back
+        const timer = setInterval(sync, 4000)
+        const onFocus = () => sync()
+        window.addEventListener('focus', onFocus)
+        return () => {
+          alive = false
+          clearInterval(timer)
+          window.removeEventListener('focus', onFocus)
+        }
+```
+
+Then re-run the guard: §9 fails if the bodies diverge by anything other than that swap, if a
+helper the body needs drifts into the persistent-only region, if `client.js` and
+`client-body.js` stop being byte-identical, or if the two hosts stop agreeing on `METHODS`
+or on the shared features (CSV sort, CA overload threshold). Before 0.6.3 this class of
+drift was silent: `lib/client.js` had accreted sortable CSV headers (`csvHeaderCell`,
+commit 27a66e9c) and the whole CA over-loading threshold field that the dynamic body never
+got (142 changed lines), and the guard stayed green because it only ever read the dynamic
+body. Both sides now carry those features; keep it that way rather than editing one side.
+
+**Declare state before anything that reads it.** A `React.useEffect` dependency array is
+evaluated *during* render, so an effect placed above the `const [x, setX] = React.useState(…)`
+it depends on throws `ReferenceError: Cannot access 'x' before initialization` (a temporal
+dead zone error). Because `InterPssView` is one component, that throw unmounts the whole
+view and the tab renders **completely blank** — with no message and nothing in the Host's
+diagnostic log, since the failure is entirely client-side. This shipped once (0.6.0) when the
+draw.io preview's focus effect landed above its own state block; 0.6.1 moved it below. Keep
+new effects under the state they read, and run the component-level check described in §4
+before packing — `node --check` cannot see this class of bug.
 
 ## 2. Host (`lib/index.js`)
 
@@ -62,11 +110,81 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
 
 - `inject: ['typert']` on the default export (else `apply()` runs before the
   typert registry and `/api` endpoints silently 404)
-- `METHODS` matches the dynamic list (18): `isActivated, checkResult,
+- `METHODS` matches the dynamic list (21): `isActivated, checkResult,
   checkResultFiles, listCases, readCsv, busConnections, runAclf, runCa,
   runReport, getAclfOptions, saveAclfOptions, listCaFiles, getCaOptions,
-  saveCaOptions, loadCase, summarizeResult, getNetworkInfo, getBridgeCase`
+  saveCaOptions, loadCase, summarizeResult, getNetworkInfo, getBridgeCase,
+  listDrawioFiles, readDrawio, openDrawio`
 - `readCsv` whitelist includes `contingency`: `_DF_(bus|branch|gen|load|contingency)\.csv`
+- **Shared Host features (both halves, since 0.6.3)**: `applyCsvSort(rows, header, column,
+  desc)` — byte-identical in both hosts, so the sorted order cannot drift; `readCsv` applies
+  it *before* slicing the page, so a sorted table is sorted over the whole file rather than
+  the rows already loaded, and reports back the sort it actually applied (`sortColumn` /
+  `sortDesc`, `null` for an unknown column). The CA `overloadThreshold` chain is also on both
+  sides: `DEFAULT_CA_CONFIG.overloadThreshold` (90), `validateCaConfig` rejecting anything
+  outside 0–1000, `saveCaOptions` round-tripping it into `config/ca_run.json`, and `runCa`
+  passing `caConfig.overloadThreshold` as the 7th `runContingency` argument. The CLI fallback
+  passes no threshold in either host (positional args only), so the file is what carries it.
+- **Accepted Host divergences** (do not "fix" these):
+  - the **chat tools** are persistent-only — `interpss_case_load`, `interpss_network_info`,
+    `interpss_run_aclf`, `interpss_case_summary`, `interpss_run_gvy`, `interpss_run_ca`.
+    The dynamic Host is an injected body with **no imports at all**, so it cannot carry them,
+    and the persistent host's `writeConfigText` fallback (which needs `node:fs` for a direct
+    write when the DSH fs sandbox denies one) is unavailable there for the same reason: the
+    dynamic host writes config with the `fs` service alone.
+  - `getBridgeCase`: the persistent Host answers from its module-level `lastLoadedAbs`
+    mirror; the dynamic Host delegates to `javaBridge.caseInfo`.
+- **Diagram source (Host half, since 0.6.6)**: `listDrawioFiles` takes the **selected case**
+  and lists the `.drawio` files *directly inside* `<case folder>/diagram/` —
+  `wspace/data/ieee/Ieee14Bus/diagram/*.drawio` — as workspace-relative paths, sorted by
+  name. A diagram belongs to a case and the Diagram tab draws this answer
+  alone, so an **absent case or folder is an empty list, not an error** ("this case has no
+  diagram yet" is a state the tab renders); a malformed case path *is* an error. 0.6.1–0.6.5
+  instead walked the whole workspace through `scanDrawio` (skipping `node_modules`, `.git`,
+  `target`, `build`, `logs`, `temp`, `.venv`, `.mvn`, `.npm-cache-local` and the local
+  backup, capped at depth 6 and 200 files); that scanner and its constants are **gone**, and
+  the guard asserts neither host still carries them. `readDrawio` is unchanged: it takes a
+  **workspace-relative** `.drawio` path — not the `data/…` form `readCsv` uses — and rejects
+  `..`, any non-`.drawio` name and anything over `MAX_DRAWIO_BYTES` (2 MiB) *before* reading,
+  so an oversized file never reaches the RPC payload. `MAX_DRAWIO_BYTES` and `readDrawio` are
+  byte-identical in the persistent Host and the two dynamic ones.
+- **Edit in the local draw.io app (Host half, since 0.6.12)**: `openDrawio` takes the same
+  workspace-relative `.drawio` path and the same validation as `readDrawio`, turns it into a
+  host path with `fs.processPath`, and launches it. The browser cannot start a process, so this
+  has to be Host work — and the launch goes through the **`subprocess` service**, not
+  `node:child_process`: the dynamic half is an injected body with **no imports**, and `subprocess`
+  is the sandbox-aware execution world the harness already manages. A shared block between the
+  `// --- Launch the local draw.io app` and `// --- end draw.io launcher` markers is
+  **byte-identical in both hosts** (the guard slices exactly those markers and compares), so the
+  two halves cannot answer differently:
+  - **Which executable to run is configuration, not code** (0.6.16): `config/ipss_plugin_env.json`
+    carries an ordered `drawio.launchers` list, so a Windows or Linux install names its own
+    draw.io path instead of living with the macOS default. `readDrawioLaunchers(fs, root)` reads
+    it from the project config beside `aclf_run.json`; `drawioLauncherList(parsed)` validates the
+    entries (a non-empty string `exe`, string-only `args`, a `label`, at most
+    `DRAWIO_LAUNCHER_LIMIT`); `drawioLaunchersFor(list, platform)` orders them. The list compiled
+    into the plugin (`DEFAULT_DRAWIO_LAUNCHERS`) is **exactly the shipped file's list**, which
+    §13 asserts — so deleting the file changes nothing, and a missing, unreadable or malformed
+    file falls back to those defaults **with a warning** that rides along in the button's error
+    instead of silently doing nothing.
+  - Each entry's optional `platform` tag (`darwin` / `win32` / `linux`, plus the hand-written
+    `macos` / `windows` / `posix` spellings) puts this machine's entries first and the untagged
+    ones — the file-association fallbacks — last. An entry for **another** OS is skipped by
+    filter, and, belt and braces, would not resolve anyway: the platform only decides *order*.
+    `drawioPlatformKey()` reads `process.platform`, which is a plain Node global the persistent
+    Host certainly has and the dynamic body may read despite importing nothing; when it cannot,
+    the key is `''` and **every** launcher is tried in file order, so the same committed file
+    works on a host whose OS cannot be identified.
+  - The macOS entries are `open -a draw.io <file>` then the app binary, then the untagged
+    `open <file>` / `xdg-open <file>` associations; Windows has
+    `C:\Program Files\draw.io\draw.io.exe` then `cmd.exe /c start "" <file>`; Linux has `drawio`,
+    `/opt/drawio/drawio` then `xdg-open`. Each rung calls `resolveExecutable` **before**
+    `sp.spawn`, so a command that is not installed comes back as a message rather than a spawn
+    failure, and every failure is reported together with that launcher's own stderr. `open` exits
+    0 once the OS has the file, so a success means "launched", never "saved".
+  - `openDrawio` is the 21st `METHODS` entry; adding it to one half only is what §9.4 catches,
+    and §13 drives the ladder itself (the only executable check of it, since the real
+    `subprocess` service exists only inside the Host).
 - **`getBridgeCase`**: the persistent Host answers from its module-level
   `lastLoadedAbs` / `lastLoadedBusCount` / `lastLoadedBranchCount` mirror. A
   dynamic Host has no such mirror, so it delegates to
@@ -127,6 +245,175 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   and only falls back to the contingency-CSV auto rule when it is absent or
   unrecognized, so the tab's own Report button is unchanged. `METHODS` still has
   no new endpoint — `reportType` is an added optional input field
+- **Diagram preview** (Client half, since 0.6.1): a `.drawio` file is read through
+  `interpss/readDrawio`, decoded with `diagramXmlFrom`, and rendered with `parseDrawioScene` +
+  `DrawioDiagram` as inline SVG with a Rendered / Source toggle. Since 0.6.9 that preview has
+  exactly **one** surface — the **Diagram tab** below — and `readDrawio` has exactly one
+  caller. 0.6.1–0.6.8 the InterPSS action row also carried a **Diagram** button that opened the
+  same preview in a modal, gated by the selected case's `diagram/` folder and nothing else
+  (`refreshCaseDiagrams` re-read `listDrawioFiles` on every case-selection change — it rode
+  `onCaseChanged` — stored the answer in `drawioFiles`, and the button took both its `disabled`
+  state and its tooltip from that one fact; `drawioDirectPath` was the pure "exactly one
+  diagram opens directly, skipping the picker" rule). 0.6.9 deleted the button, the modal and
+  those helpers rather than leave a second, unmounted copy of the preview to drift: guard §10
+  asserts the absence of `drawioFiles`/`drawioOpen`/`drawioDirectPath` and §12 that one caller
+  of `readDrawio` remains.
+  The renderer is **self-contained and offline on purpose**:
+  the harness forbids frames (`frame-src 'none'` in the preview CSP) and the app page CSP
+  cannot be assumed, so an embedded draw.io viewer or `embed.diagrams.net` iframe is not an
+  option. It draws the subset these workspaces produce — rounded rectangles, ellipses, text
+  labels and orthogonal edges — and covers two things a naive reader gets wrong:
+  - `diagramXmlFrom` accepts **both** storage forms: plain XML, and draw.io's
+    `base64(raw-deflate(uri-encoded XML))`, inflated with `DecompressionStream('deflate-raw')`
+  - `parseDrawioScene` resolves geometry **down the parent chain with the parent's own
+    `mxGeometry`** (a descendant lookup would take a child's box for a `group`), and it
+    **skips `group` cells entirely** — a group is a container that draws nothing, while its
+    children carry geometry relative to it (this workspace's transformer symbols are five
+    groups of two ellipses each; drawing the groups adds five spurious boxes)
+  The view registers no `window` listener of its own (see §1.3), which is why the modal this
+  replaced needed no second divergence either.
+- **Diagram pan / zoom / fit** (Client half, since 0.6.2): the rendered pane is one SVG
+  whose `viewBox` moves, so a zoom step re-parses nothing. The view's `rect` is the visible
+  rectangle in scene coordinates (`null` = fit, which is simply the scene's own viewBox);
+  the wheel zooms about the cursor and dragging pans. The cursor anchor is computed through
+  the box `preserveAspectRatio="xMidYMid meet"` actually draws — the smaller of the two
+  ratios, centred — because using the element's own box would let the anchor drift as the
+  pointer moves off centre. The wheel listener is registered natively with
+  `{ passive: false }` rather than through `onWheel`: React delegates wheel passively, so
+  `preventDefault` would be ignored and the page behind the pointer would scroll while
+  zooming. `drawioZoomRect` clamps to 0.1x–12x and always derives height from width, so the
+  aspect ratio cannot drift. All of it is client-only: `METHODS` and the Host half are
+  unchanged.
+- **Diagram paint order** (Client half, since 0.6.4): `parseDrawioScene` records every cell's
+  **document position** (`order`) and `DrawioDiagram` emits its groups sorted by it, so
+  vertices and edges interleave the way draw.io paints them. This is not cosmetic — the
+  workspace diagram declares `bg`, an **opaque 900×760 white rectangle**, *before* its
+  branches (cell order 2, first edge 32). Drawing every edge first and every vertex
+  afterwards (0.6.1–0.6.3) put that page fill on top of every branch, and the preview
+  showed a one-line diagram with no lines in it. The same change moved the
+  no-`strokeColor` fallback from slate `#64748b` to mxGraph's own default **`#000000`** —
+  the workspace diagram's 2 unstyled edges were the only two drawn a different color from
+  the other 25 (both turned out to be stray edges and are no longer in the file, so the
+  guard checks that fallback with a synthetic diagram). Guard §3/§4 assert the paint order —
+  the page fill precedes every branch, and the emitted order is non-decreasing document
+  order.
+- **Latent `const` reassignment** (Client half, fixed 0.6.4): `parseDrawioScene` built
+  `from`/`to` with `const`, then reassigned them when an edge names no source/target *cell*
+  and falls back to its own `sourcePoint`/`targetPoint` `mxPoint`s (or to its `Array`
+  points). Every edge in this workspace resolves through a cell, so the branch never ran
+  here — but any draw.io diagram with a **free-floating edge** threw
+  `TypeError: Assignment to constant variable` and rendered no preview at all. The guard
+  covers it with a synthetic source/target-point edge.
+- **Theme-aware diagram colours** (Client half, since 0.6.5): a draw.io model carries its own
+  palette and these one-line diagrams are ink on paper, so painting them literally dropped a
+  glaring white slab with black lines into the dark theme. `drawioThemeColor` re-expresses
+  the **grayscale** part of the palette at paint time — paper → `--dsw-alias-bg-layer-1`,
+  ink → `--dsw-alias-label-primary`, mid greys → `--dsw-alias-label-secondary` — and the
+  rendered pane's own background uses the paper token too, so the letterbox padding around
+  the model's `bg` rect matches. Three deliberate choices:
+  - **Tokens, not a computed colour.** Both palettes ship in the stylesheets, so this needs no
+    theme detection, no `theme` service dependency, and it re-colours the instant the theme
+    switches. (The client `theme` service does expose `getTheme().active.colorScheme` and a
+    `theme/change` event if a future change genuinely needs the mode in JS.)
+  - **Applied in `DrawioDiagram`, not `parseDrawioScene`.** The scene keeps the authored
+    colours, so the parse-level assertions (§3: the page fill is `#FFFFFF`, the stroke
+    fallback is `#000000`) still describe the file, and a re-parse is not needed on a switch.
+  - **Only near-grayscale values are re-mapped;** a saturated colour passes through, so a
+    deliberately coloured element keeps its identity in either theme. The lightness extremes
+    are tested **before** saturation, because HSL saturation is ill-conditioned near black
+    and white: draw.io's default text colour `#111827` computes as 39% "saturated" while
+    reading as plain ink, and testing saturation first left every default label near-black on
+    a dark canvas. §5 covers the mapping and §4 the rendered result.
+- **Diagram element tooltips** (Client half, since 0.6.7): hovering a bus or a branch in the
+  preview shows the same tooltip the connection diagram shows, from the same builders —
+  `busTooltip(record)` and `branchTooltip(row)` — so the two cannot word things differently.
+  It is a client-only feature: `METHODS` and the Host half are unchanged.
+  - **Element → data.** `parseDrawioScene` now also keeps what a tooltip needs: each edge's
+    `id`/`source`/`target` and each vertex's `parent`. `drawioBranchPairs(scene)` resolves every
+    interactive cell to a `busa|busb` key of lowercased bus cell ids. A branch is either one
+    edge between two bars, or a transformer symbol drawn as **two chained edges** (`bus4 → xf8`
+    then `xf8b → bus7`); an edge with a single bus end is paired with the sibling edge whose
+    endpoint shares the same `parent` group, and both take the union of their bus ends — the
+    group id, not the `xfN`/`xfNb` spelling, is what pairs them. The transformer **nodes** take
+    their group's key too, so the symbol itself is hoverable. It is resolved once per parsed
+    scene, not per repaint, and runs only when a `hover` prop is passed.
+  - **Hit areas.** A branch is a 1.5px line and a bar is 6px wide, so the drawn geometry is
+    impractical to hover: each interactive edge also emits an invisible twin polyline
+    (`stroke: transparent`, `strokeWidth: 10`, `pointerEvents: 'stroke'`) and each interactive
+    vertex a transparent rect padded by 4 scene units. They live inside the SVG, so they follow
+    the `viewBox` with no coordinate maths, and they do not stop propagation — panning and
+    wheel-zoom still work over them.
+  - **Data.** The branch table is indexed once per opened diagram: `readCsv` is paged over
+    `<case>/result/<stem>_DF_branch.csv` (5000 rows/page, 20-page cap) into a
+    `Map<'busa|busb', row[]>` — an **array** per pair, so parallel circuits all match — plus a
+    `canonical` map of the `BusN` spelling the Host matches on (a diagram cell is `bus1`, but
+    `busConnections` compares against the table's `Bus1` exactly; an isolated bus falls back to
+    capitalising the cell id). Bus records are **not** preloaded: one `busConnections` call fills
+    the cache for the hovered bus *and its branch neighbours*, and `readCsv` rows are raw CSV
+    lines split at hover time because `branchTooltip` wants columns.
+  - **Degradation.** With no result table the tooltip names the element and adds
+    `no result data — run ACLF` and fires **no** call; with a table but no matching row it says
+    `not found in the case result tables`. Fetch failures are swallowed: a tooltip is an
+    enhancement and must never error or block the preview. The tip is dropped when the diagram
+    is switched, and a late `busConnections` answer is applied only if that bus is still under the
+    cursor. Guard §11 covers the pairing (all 25 edges resolve, and the 20 resolved pairs agree
+    with the result table), the hit areas, the wiring and the tooltip wording.
+- **Diagram tab** (Client half, since 0.6.8; the only preview surface since 0.6.9): a
+  **second `conversation.view`** entry —
+  `{ id: 'diagram', order: 2, label: 'Diagram' }`, which lands between InterPSS (1) and
+  Trajectory (10) — showing the preview full-size. It has **no heading and no subtitle** (0.6.10):
+  the tab bar names the view and the first row (`Simu Case <path>`) says what is drawn, so a
+  title block only pushed the diagram down. Its toolbar is controls only — the picker (when the
+  case has several files), `Rendered` / `Source`, `−` / percent / `+`, `Fit`; the
+  `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped
+  in 0.6.11, because the gestures are discoverable without a sentence in the control row.
+  The **draw.io-marked edit button** (since 0.6.12) that hands the open file to the local
+  desktop app over `interpss/openDrawio` is deliberately **not** in that row: since 0.6.15 it
+  sits at the **upper-right corner of the tab**, as the last child of the header row that names
+  the case (`justifyContent: 'space-between'` — `Simu Case <path>` on the left, the launch
+  outcome and the button on the right), so it is always in view beside the drawing's own
+  controls. The launch outcome — `Launched draw.io (open -a draw.io)` or the
+  Host's own reason — prints to the button's left rather than replacing the preview. The button
+  is in flight (`disabled`, `cursor: progress`) while the Host launches.
+  - **Both earlier corners failed in the app, which is why it is in the header now.** At the end
+    of the toolbar (0.6.12) the one control that leaves the app sat among the zoom controls; a
+    row of its own below the drawing (0.6.13) landed **below the fold** — the canvas is 70vh
+    plus the tab's chrome — so the button looked like it had vanished; pinning that row with
+    `position: sticky; bottom` (0.6.14) kept it visible but as a full-width strip floating over
+    the canvas, which needed `pointerEvents: none` so it would not swallow drags and wheel-zoom,
+    and a shorter `62vh` canvas to stay off the fold. The header needs none of that: the canvas
+    is back to `70vh` / min `320px`, and there is no sticky element or pointer-events carve-out
+    anywhere in the view.
+  - Guard §12 walks the button's **ancestor chain** and asserts that placement — a
+    `space-between` top row containing the case label, with the edit controls as its **last**
+    child — because "it is on the page somewhere" would not hold it there, let alone keep it
+    visible. It also asserts the retired workarounds are gone (no `position: sticky` and no
+    `pointerEvents` on the button). It reuses
+  every renderer piece (`diagramXmlFrom`, `parseDrawioScene`, `drawioBranchPairs`,
+  `DrawioDiagram`, the pan/zoom math, `busTooltip`/`branchTooltip`) and adds **no new preview
+  endpoint**: `listDrawioFiles` finds the case's diagrams, `readDrawio` reads one,
+  `checkResult` supplies the result dir the tooltips page `<stem>_DF_branch.csv` from,
+  `busConnections` fills a hovered bus, and `openDrawio` is the launcher above.
+  - **The case is not chosen here.** The InterPSS tab owns "the current simulation case",
+    so `onCaseChanged` publishes its selection to the module-level `selectedCaseInput` and
+    the Diagram tab seeds from it on mount. That is sound because the conversation view
+    mounts **one view at a time** — there is never a second mounted view to miss a change —
+    and it keeps the two tabs from ever disagreeing. `adoptSelectedCase()` is the mirror's
+    counterpart: a one-shot `getBridgeCase` on mount (not a poll, since a tool can only run
+    while the Chat view is mounted) adopts a case the Host loaded, and so does the
+    InterPSS tab's own mirror. The tab therefore needs **no timer**, which keeps §1.3's one
+    timer swap the tab body's only dynamic/persistent divergence.
+  - **`drawioTabChoice(files, remembered)`** is the pure picker rule: reopen the diagram the
+    user last chose when it is still in the folder (the module-level `diagramChoice`
+    survives a tab switch), else the first, and `null` for an empty folder — the tab renders
+    "no diagram yet" rather than an empty pane. The wheel/pan handlers keep the geometry the
+    modal used, on this view's own state, and the wheel listener is still registered natively
+    so `preventDefault` is permitted.
+  - Guard §12 renders the view — idle, no case, no diagram, a listing failure, an open
+    diagram with a live scene, the tooltip element and the Source view — because a
+    reference error anywhere in it unmounts the tab. It also asserts the registration, the
+    `selectedCaseInput` wiring, the picker rule and that §7's regex parses **every** effect
+    of the new view. It is the replacement for the retired §8, which rendered the modal.
 - **`interpss_case_summary`** ports `IpssAgentBridge.summarize()`. Java always returns
   every result section in full (only the requested one is ranked/limited) and
   `text` is a JSON string inside the envelope, so the tool does a second parse and
@@ -175,25 +462,37 @@ disk.
 
 ```bash
 cd interpss-persistent
-# bump version first, e.g. 0.5.0 → 0.5.1
+# bump version first, e.g. 0.6.2 → 0.6.3
 node --check lib/index.js && node --check lib/client.js
-rm -f deepseek-ai-dsh-interpss-0.5.1.tgz
-npm pack --cache /tmp/npm-cache-fresh     # sole distributable (no zip)
+# corepack refuses to run without a packageManager field and tries to ADD one to the
+# nearest package.json it can write — under this harness that is $HOME, which the file
+# sandbox denies (EPERM: open '/Users/<you>/package.json'). Disable that lookup instead of
+# granting it write access to your home directory.
+COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
-# tarball == source
-tar -xzf deepseek-ai-dsh-interpss-0.5.1.tgz -C /tmp/pkgv
+# tarball == source (under pnpm pack the only difference is package.json's final newline)
+tar -xzf deepseek-ai-dsh-interpss-0.6.3.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
-# reinstall — a NEW version only needs `add`; do not `pnpm remove` first
-cd /Users/mzhou/.dsh/profiles/web
-dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.5.1.tgz
-diff -q <source lib/client.js> ~/.dsh/profiles/web/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
+# install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
+# In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.6.3.tgz
+# Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
+diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
+```
+
+The install rewrites the profile lockfile, so **check the native bridge straight afterwards**,
+before any restart — a `Packages: +1 -6` line in the output is the shape that has broken it:
+
+```bash
+cd ~/.dsh/profiles/desktop
+node -e "console.log(require.resolve('java-bridge-darwin-arm64'))"
 ```
 
 **Never `pnpm remove` as a routine step.** It rewrites the profile lockfile, and in
 0.3.19 that rewrite dropped `java-bridge`'s optional native package for this platform
-(`java-bridge-darwin-arm64`) — the next `dsh web` restart then failed every bridge call
+(`java-bridge-darwin-arm64`) — the next restart then failed every bridge call
 with `Cannot find module 'java-bridge-darwin-arm64'`, and no in-process retry can
 recover, because a failed module load is latched for the life of the process. Reach for
 `remove` only when a *same-version* repack must be relinked, and repair the lockfile
@@ -201,11 +500,11 @@ afterwards:
 
 ```bash
 # is the native bridge package resolvable? (name = java-bridge-<platform>)
-cd /Users/mzhou/.dsh/profiles/web
+cd /Users/mzhou/.dsh/profiles/desktop
 node -e "console.log(require.resolve('java-bridge-darwin-arm64'))"
 
-# repair: regenerate the lockfile, keeping a backup, then restart dsh web
-cp pnpm-lock.yaml /tmp/pnpm-lock.web.bak
+# repair: regenerate the lockfile, keeping a backup, then restart the app
+cp pnpm-lock.yaml /tmp/pnpm-lock.desktop.bak
 rm -f pnpm-lock.yaml
 pnpm install
 node -e "console.log(require.resolve('java-bridge-darwin-arm64'))"
@@ -213,16 +512,126 @@ node -e "console.log(require.resolve('java-bridge-darwin-arm64'))"
 
 ## 4. Post-restart verification
 
-Restart `dsh web` on :3080, then hard-reload the page (a Client-half change is
-served with the plugin bundle, so the reload is what picks it up):
+**First, before packing anything** — run the client-half guard. It renders the real
+`InterPssView` against a minimal React and exercises the draw.io renderer, so it catches the
+two failures `node --check` cannot see: a render-time ordering error (which blanks the tab)
+and a geometry regression in the diagram:
+
+```bash
+node scripts/test-interpss-client.mjs    # 168 checks; non-zero exit on failure
+```
+
+It reads `interpss-dynamic/client-body.js`,
+`wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio` and the style reference
+`wspace/template/oneline-diagram.drawio` directly, so it needs no build, no browser and no
+dependencies. It has been verified to fail
+— with `ReferenceError: Cannot access 'drawioOpen' before initialization` — when the 0.6.0
+ordering defect is re-introduced, so a green run is meaningful.
+
+Two fixture notes, both from the same rename (commit e1075429 moved the reference to
+`wspace/template/oneline-diagram.drawio`, and a stray `xf10b -> bg` edge — the only one of
+its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
+- §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
+  draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
+  was never going to survive a round trip through the editor.
+- the case diagram must stay the reference's copy, which is what that check now says.
+
+Since 0.6.2 §7 checks effect ordering **statically**. It parses every `React.useEffect`
+dependency array out of the body and asserts each name it lists is declared textually above
+that effect — the one thing the render checks cannot see, because the throwing path needs an
+effect to actually run. The section numbers were **not** renumbered when 0.6.9 removed the
+modal, so there is no §8 any more: it rendered that modal *open*, and §12 does the same job for
+the view that replaced it. §7's mutation case now lives in the Diagram tab (a dep declared
+below its effect makes it report `fileCount is declared 936 chars after the effect`); the same
+mechanism caught the 0.6.0 modal defect as
+`drawioRect is declared 833 chars after the effect`.
+- §12 (since 0.6.8) is the render-time coverage now: it renders the **Diagram tab** idle, with
+  no case, with no diagram, with a failed listing, with an open diagram and a live scene, with
+  a tooltip on screen and in its Source view. Overrides are addressed
+  by the view's **own** `useState` order (a fresh harness renders `DiagramView` alone, so the
+  call counter starts at zero), and it proves §7 inspects the new view by requiring that
+  regex to parse every one of its effects. Verified by mutation: adding a dep declared below
+  its effect makes §7 report `fileCount is declared 936 chars after the effect` and §12's
+  renders throw `Cannot access 'fileCount' before initialization` — the blank-tab defect,
+  twice over.
+- §10 asserts the shape of the tab bar's data instead of the button it lost: the host listing
+  stays scoped to the case's `diagram/` folder, the action row still carries ACLF / CA /
+  Report, it has **no** Diagram button, and `drawioFiles` / `drawioOpen` /
+  `drawioDirectPath` are absent from the body — so re-adding a second preview surface is a
+  deliberate act rather than a merge artifact.
+- §13 (since 0.6.12; config-aware since 0.6.16) drives the **draw.io launcher**, the one new
+  behaviour with no client-side surface to render: it slices the shared block out of the
+  persistent Host, compiles it, and runs it against a fake `subprocess` provider. It asserts
+  - the argv on macOS (`open -a draw.io <file>` first), the fall-through when a launcher exits
+    non-zero or does not resolve, that nothing is spawned for an unavailable command, that every
+    failure is reported with its own stderr, and the Windows `cmd /c start "" <file>` fallback;
+  - **the config file and the code agree**: `config/ipss_plugin_env.json` parses, lists a launcher
+    for each of darwin/win32/linux (each pointing at the app itself before an association), and
+    normalizes to exactly `DEFAULT_DRAWIO_LAUNCHERS`;
+  - the ordering rules — another OS's entries are skipped, this machine's come first and the
+    untagged associations last, an unknown platform keeps file order, and the hand-written
+    spellings (`macos`, `windows`, `posix`) match;
+  - that a config with no usable list falls back to the defaults, and that an entry keeps only
+    its string args.
+
+  The real service exists only inside the Host, so this is as close as a dependency-free suite
+  gets to the button.
+
+Since 0.6.3 **§9 asserts the two plugins are in sync**, which is what makes this rebuild
+guide trustworthy: the suite reads only the dynamic body, so silent drift had made it
+describe something other than what ships. §9 requires
+- `interpss-dynamic/client.js` and `client-body.js` to be **byte-identical**;
+- the persistent and dynamic tab bodies to be identical once the documented timer swap is
+  re-applied, with each side carrying its own timer form exactly once;
+- nothing the tab body calls to be defined in the persistent-only region (the `nextCsvSort`
+  trap: it was defined among the tool cards and reached the body only through hoisting);
+- `index.js` and `host-body.js` to differ only in `export default {` vs `return {`;
+- both hosts to declare the same `METHODS` and to carry the shared features (CSV sort, CA
+  overload threshold), with `applyCsvSort` byte-identical;
+- the chat tools to stay persistent-only.
+
+Verified by mutation in both drift directions: deleting the threshold from both dynamic host
+files fails with `dynamic host lacks overloadThreshold`; deleting the sort plumbing fails
+with `dynamic host lacks applyCsvSort; dynamic host lacks sortColumn; dynamic host lacks
+sortDesc` plus the `applyCsvSort` identity check; perturbing one character of the dynamic tab
+body fails the byte-identity and body-equality checks.
+
+Restart the Desktop app (the plugin manager reports `application: restart-required`; a page
+reload alone does **not** pick up a new plugin version), then hard-reload the page. A
+Client-half change is served with the plugin bundle, so the reload is what picks it up:
 
 - Client bundle `GET /plugins/@deepseek-ai/dsh-interpss/client.js` → `200`,
   SHA-256 matches `lib/client.js`
 - `POST /api/interpss/<method>` with
   `{"type":"client-request","rpcId":"x","method":"interpss/<method>","payload":{"args":{"input":{}}}}`:
   - `isActivated`, `listCases`, `getAclfOptions`, `listCaFiles`, `getCaOptions`, `runCa`, `getNetworkInfo`, `getBridgeCase` → `200`, `ok:true`
+  - `listDrawioFiles` → `200`, `ok:true`, with `wspace/template/ieee14-oneline.drawio` in `files`
+  - `readDrawio` with `{"path":"wspace/template/ieee14-oneline.drawio"}` → `200`, `ok:true`, non-empty `xml`; with `../etc/passwd`, an absolute path, or a non-`.drawio` name → `ok:false`
   - unknown method → `404` (proves only registered endpoints respond)
-- Composition row present: `dsh --profile web --dump-config` → `- id: interpss`
+
+> **These two HTTP checks are written for a bare `dsh web` server and do not work as-is
+> against the Desktop app.** On the Desktop surface the GUI answers on `127.0.0.1:19387`
+> (not `:3080`) and both routes are closed to an unauthenticated client: `POST
+> /api/interpss/<method>` returns `401 unauthorized` and `GET
+> /plugins/@deepseek-ai/dsh-interpss/client.js` returns `404`. Do not spend time trying to
+> work around that. Verify the Desktop install from the profile on disk instead — the
+> installed `lib/client.js` and `lib/index.js` must be byte-identical to the source, the
+> plugin manager must list the new version as `installed: true, enabled: true`, and
+> `java-bridge-<platform>` must resolve:
+>
+> ```bash
+> P=~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss
+> shasum -a 256 $P/lib/client.js interpss-persistent/lib/client.js   # equal
+> grep -m1 '"version"' $P/package.json                               # the version you packed
+> (cd ~/.dsh/profiles/desktop && node -e "console.log(require.resolve('java-bridge-darwin-arm64'))")
+> ```
+>
+> Then confirm the tab behaviour by hand in the GUI — that is the check that actually
+> exercises the Client half.
+
+- Composition row present: the plugin manager's bundle list includes
+  `@deepseek-ai/dsh-interpss` with `enabled: true` (`dsh --profile desktop --dump-config`
+  → `- id: interpss` when the CLI is on PATH)
 - **Bridge-case mirroring**: with no simulation case loaded, `getBridgeCase`
   answers `{ ok: true, case: '' }` (never an error). Load a case from chat with
   `interpss_case_load`, then switch back to the InterPSS tab: the *Simu Case*
@@ -231,6 +640,29 @@ served with the plugin bundle, so the reload is what picks it up):
   A deliberate, not-yet-loaded picker choice survives a tab switch — the
   regression symptom is a picker that silently reverts or a "✓ Loaded" line that
   disappears every time the view remounts
+- **Diagram tab** (since 0.6.8): the tab bar reads **Chat · InterPSS · Diagram · Trajectory**,
+  and the InterPSS action row reads **ACLF · ⚙ · CA · Report** (the 0.6.9 change). The tab opens
+  straight onto its **Simu Case** row — no heading, no subtitle (0.6.10) — with a toolbar of
+  controls that ends at **Fit** (0.6.11). Selecting a
+  case in the InterPSS tab (preset or custom row) and switching to *Diagram*
+  draws that case's `<case>/diagram/*.drawio` full-size; with several files the picker lists
+  them and reopens the one last viewed; a case with none says so instead of drawing an empty
+  pane, and a case never touched shows the InterPSS preset's diagram. Hovering a bar or a
+  branch shows the connection diagram's tooltip (without a result table it says
+  `no result data — run ACLF`), the wheel zooms about the cursor, dragging pans, **Fit**
+  resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
+  the regression symptom is a Diagram tab that keeps drawing the previous case.
+  **Since 0.6.12 the draw.io-marked button opens the same file in the local draw.io desktop
+  app**; which executable that is comes from `config/ipss_plugin_env.json` (0.6.16), so on macOS
+  it is `open -a draw.io` and on a Windows or Linux box it is whatever that file names. It is at
+  the right end of the **Simu Case** header row
+  (the tab's upper-right corner, 0.6.15), so it is on screen next to the drawing without
+  scrolling: a second or two later the app shows
+  the diagram, the tab prints `Launched draw.io (open -a draw.io)` to the button's left, and a failure prints the
+  Host's reason (`Could not launch draw.io: could not launch the local draw.io app (… exited 1:
+  …)`) instead of an empty pane — a malformed `drawio.launchers` also warns there that the
+  built-in launchers were used. This is the only part of the plugin that needs a **Host**
+  restart to appear — every other change in this guide is Client-half and reloads
 - **CA dialog** (since 0.3.16): with the Texas 2K case selected and no
   `config/ca_run.json`, pressing **CA** opens *Run Contingency Analysis* pre-filled with
   `2k_contingencies_115kVAbove.json` (2359) and `2k_monitored_branches.json`

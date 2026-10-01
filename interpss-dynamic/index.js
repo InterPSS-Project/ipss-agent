@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio', 'openDrawio']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -88,6 +88,237 @@ async function scanCases(fs, dirTarget, relDir, out) {
       else if (/\.raw$/i.test(entry.name)) out.push({ path: rel, format: 'psse' })
     }
   }
+}
+
+// The preview reads one diagram at a time, so this bounds what it accepts as text.
+const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
+
+// --- Launch the local draw.io app (shared, byte-identical in both hosts) -----
+// The browser cannot start a process, so the Diagram tab's edit button asks the Host — and the
+// Host goes through the `subprocess` service rather than `node:child_process`, because the
+// dynamic half is an injected body with no imports and the service is the sandbox-aware
+// execution world the harness already manages.
+//
+// WHICH executable to run is configuration, not code: `config/ipss_plugin_env.json` carries an
+// ordered `drawio.launchers` list (see the shipped file for the schema), so a Windows or Linux
+// install names its own draw.io path instead of living with the macOS default. The list below is
+// what the plugin uses when that file is missing, unreadable or malformed — a broken config must
+// never disable the button, only change which executable it tries.
+//
+// Entries are tried in order and the file path to edit is appended to `args`. Every entry
+// resolves its executable FIRST, so a command that is not installed comes back as a message
+// instead of a spawn failure, and all the failures are reported together.
+const DEFAULT_DRAWIO_LAUNCHERS = [
+  { platform: 'darwin', exe: 'open', args: ['-a', 'draw.io'], label: 'open -a draw.io' },
+  { platform: 'darwin', exe: '/Applications/draw.io.app/Contents/MacOS/draw.io', args: [], label: '/Applications/draw.io.app' },
+  { platform: 'win32', exe: 'C:\\Program Files\\draw.io\\draw.io.exe', args: [], label: 'C:\\Program Files\\draw.io\\draw.io.exe' },
+  { platform: 'win32', exe: 'cmd.exe', args: ['/c', 'start', ''], label: 'cmd /c start' },
+  { platform: 'linux', exe: 'drawio', args: [], label: 'drawio' },
+  { platform: 'linux', exe: '/opt/drawio/drawio', args: [], label: '/opt/drawio/drawio' },
+  { platform: 'linux', exe: 'xdg-open', args: [], label: 'xdg-open' },
+  { exe: 'open', args: [], label: 'open' },
+  { exe: 'xdg-open', args: [], label: 'xdg-open' },
+]
+
+const DRAWIO_LAUNCHER_LIMIT = 12
+
+// `process` is a plain Node global — the persistent Host certainly has it, and the dynamic body
+// is an injected module that must not IMPORT anything (it may still read a global). The read is
+// guarded and the answer is only a HINT: with no platform, every launcher is kept in file order
+// and executable resolution decides, which is also how an entry for another OS is skipped.
+function drawioPlatformKey() {
+  try {
+    const p = typeof process === 'object' && process !== null ? process.platform : ''
+    if (p === 'darwin') return 'darwin'
+    if (p === 'win32') return 'win32'
+    if (p === 'linux') return 'linux'
+  } catch (e) {}
+  return ''
+}
+
+// An entry's optional `platform` tag: absent = every OS (tried last, as a file-association
+// fallback), `posix` = any non-Windows, and the mac/win/linux spellings are accepted because the
+// file is hand-written.
+function drawioPlatformMatches(tag, platform) {
+  if (typeof tag !== 'string' || tag === '') return true
+  if (platform === '') return true
+  const wanted = tag.trim().toLowerCase()
+  if (wanted === platform) return true
+  if (wanted === 'posix') return platform !== 'win32'
+  if (platform === 'win32') return wanted === 'windows' || wanted === 'win'
+  if (platform === 'darwin') return wanted === 'macos' || wanted === 'mac' || wanted === 'osx'
+  if (platform === 'linux') return wanted === 'linux' || wanted === 'unix'
+  return false
+}
+
+// One config entry -> the { exe, args, label } a launcher needs, or null when it is unusable.
+function drawioLauncherEntry(raw) {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return null
+  if (typeof raw.exe !== 'string' || raw.exe.trim() === '') return null
+  const args = []
+  if (Array.isArray(raw.args)) {
+    for (const a of raw.args) if (typeof a === 'string') args.push(a)
+  }
+  const exe = raw.exe.trim()
+  return {
+    platform: typeof raw.platform === 'string' ? raw.platform.trim().toLowerCase() : '',
+    exe: exe,
+    args: args,
+    label: typeof raw.label === 'string' && raw.label.trim() !== '' ? raw.label.trim() : exe,
+  }
+}
+
+// The configured list, or null when the parsed file has no usable `drawio.launchers` array
+// (which is what makes the caller fall back to the defaults AND say why).
+function drawioLauncherList(parsed) {
+  const drawio = parsed !== null && typeof parsed === 'object' ? parsed.drawio : null
+  const raw = drawio !== null && typeof drawio === 'object' && Array.isArray(drawio.launchers) ? drawio.launchers : null
+  if (raw === null) return null
+  const out = []
+  for (const entry of raw) {
+    const one = drawioLauncherEntry(entry)
+    if (one !== null) out.push(one)
+    if (out.length >= DRAWIO_LAUNCHER_LIMIT) break
+  }
+  return out.length === 0 ? null : out
+}
+
+// This machine's launchers, in the order to try them: its own platform's entries first (in file
+// order), then the untagged association fallbacks. An unknown platform keeps the file order
+// untouched, so the same file works on a host whose OS cannot be identified.
+function drawioLaunchersFor(list, platform) {
+  const source = Array.isArray(list) && list.length > 0 ? list : DEFAULT_DRAWIO_LAUNCHERS
+  if (platform === '') return source.slice()
+  const own = []
+  const neutral = []
+  for (const entry of source) {
+    const one = drawioLauncherEntry(entry)
+    if (one === null) continue
+    if (one.platform === '') neutral.push(one)
+    else if (drawioPlatformMatches(one.platform, platform)) own.push(one)
+  }
+  return own.concat(neutral)
+}
+
+// A failing launcher is worth quoting only if it said something: `open: no such file` is the
+// useful half of a failure, the empty string is not.
+function drawioLaunchStderr(handle) {
+  const collected = handle === null || handle === undefined ? null : handle.collected
+  const reader = collected === null || collected === undefined ? null : collected.stderr
+  if (reader === null || reader === undefined || typeof reader.readFrom !== 'function') return ''
+  try {
+    return String(reader.readFrom(0).text || '').trim().slice(0, 300)
+  } catch (e) {
+    return ''
+  }
+}
+
+// One launcher: resolve, spawn, wait for the exit fact. `open` returns as soon as the app is
+// launched, so a zero exit means "handed to the OS", not "draw.io has drawn it".
+async function drawioLaunchOnce(sp, rung, absPath, cwd, signal) {
+  let exe
+  try {
+    exe = await sp.resolveExecutable(rung.exe, undefined, signal)
+  } catch (e) {
+    return { ok: false, why: rung.label + ' is not available here' }
+  }
+  let handle
+  try {
+    handle = sp.spawn({
+      argv: [exe].concat(rung.args, [absPath]),
+      cwd: cwd,
+      stdio: { stdin: 'ignore', stdout: { maxBytes: 4096 }, stderr: { maxBytes: 4096 } },
+      graceMs: 10000,
+      signal: signal,
+    })
+  } catch (e) {
+    return { ok: false, why: rung.label + ' could not start' }
+  }
+  let outcome = null
+  try {
+    outcome = await handle.done
+  } catch (e) {
+    return { ok: false, why: rung.label + ' failed to run' }
+  }
+  if (outcome !== null && outcome !== undefined && outcome.exitCode === 0) {
+    return { ok: true, launcher: rung.label }
+  }
+  const code = outcome === null || outcome === undefined ? '?' : String(outcome.exitCode)
+  const detail = drawioLaunchStderr(handle)
+  return { ok: false, why: rung.label + ' exited ' + code + (detail === '' ? '' : ': ' + detail) }
+}
+
+async function drawioLaunch(sp, launchers, absPath, cwd, signal) {
+  const tried = []
+  for (const rung of launchers) {
+    const result = await drawioLaunchOnce(sp, rung, absPath, cwd, signal)
+    if (result.ok === true) return { ok: true, launcher: result.launcher }
+    tried.push(result.why)
+  }
+  return { ok: false, error: 'could not launch the local draw.io app (' + tried.join('; ') + ')' }
+}
+
+// `config/ipss_plugin_env.json` (project-level, beside `aclf_run.json`) -> this machine's
+// launchers. A missing file is not an error: the defaults above are the shipped behaviour. A
+// file that exists but has no usable launcher list keeps the defaults and reports why, so a
+// typo in a hand-written config surfaces in the button's error instead of silently doing nothing.
+async function readDrawioLaunchers(fs, root) {
+  const rel = root + '/config/ipss_plugin_env.json'
+  let info
+  try {
+    const target = await fs.resolve(rel)
+    info = await fs.stat(target)
+  } catch (e) {
+    return { launchers: DEFAULT_DRAWIO_LAUNCHERS, source: 'defaults', warning: '' }
+  }
+  if (info === undefined) return { launchers: DEFAULT_DRAWIO_LAUNCHERS, source: 'defaults', warning: '' }
+  let parsed = null
+  try {
+    parsed = JSON.parse(await fs.readText(await fs.resolve(rel)))
+  } catch (e) {
+    return { launchers: DEFAULT_DRAWIO_LAUNCHERS, source: 'defaults', warning: 'config/ipss_plugin_env.json is not valid JSON, so the built-in draw.io launchers are used' }
+  }
+  const list = drawioLauncherList(parsed)
+  if (list === null) {
+    return { launchers: DEFAULT_DRAWIO_LAUNCHERS, source: 'defaults', warning: 'config/ipss_plugin_env.json has no usable drawio.launchers array, so the built-in draw.io launchers are used' }
+  }
+  return { launchers: list, source: 'config', warning: '' }
+}
+// --- end draw.io launcher --------------------------------------------------- ---------------------------------------------------
+
+// Sort CSV data rows by one header column. Numeric when every non-empty value in that
+// column parses as a finite number (LoadingPercent, flows, ratings), lexicographic
+// otherwise. An unknown column is not an error: the caller gets the file order back and
+// `column: null`, so a UI can avoid claiming a sort it did not get.
+function applyCsvSort(rows, header, column, desc) {
+  const names = String(header).split(',')
+  const wanted = typeof column === 'string' ? column.trim().toLowerCase() : ''
+  if (wanted === '') return { rows: rows, column: null, desc: false }
+  const index = names.findIndex((name) => name.trim().toLowerCase() === wanted)
+  if (index < 0) return { rows: rows, column: null, desc: false }
+  const valueOf = (line) => {
+    const cells = String(line).split(',')
+    return index < cells.length ? cells[index].trim() : ''
+  }
+  const numeric = rows.every((line) => {
+    const value = valueOf(line)
+    return value === '' || Number.isFinite(Number(value))
+  })
+  const compare = (a, b) => {
+    const left = valueOf(a)
+    const right = valueOf(b)
+    let result
+    if (numeric) {
+      const l = left === '' ? Number.NEGATIVE_INFINITY : Number(left)
+      const r = right === '' ? Number.NEGATIVE_INFINITY : Number(right)
+      result = l < r ? -1 : l > r ? 1 : 0
+    } else {
+      result = left.localeCompare(right)
+    }
+    return desc ? -result : result
+  }
+  const sorted = rows.slice().sort(compare)
+  return { rows: sorted, column: names[index].trim(), desc: desc }
 }
 
 export default {
@@ -183,6 +414,10 @@ export default {
       contingencyFile: null,
       monitorMode: 'all',
       monitoredBranchFile: null,
+      // Violation-check loading (%): a monitored branch at or above it after a contingency
+      // lands in the result CSV. The CA dialog's field and config/ca_run.json both feed
+      // this one number.
+      overloadThreshold: 90,
     }
 
     // The dialog reports how many entries a candidate file holds, which means
@@ -272,7 +507,7 @@ export default {
       return { ok: true, exists: exists }
     }
 
-    // Normalise an untrusted config payload to the four known keys. Modes must
+    // Normalise an untrusted config payload to the five known keys. Modes must
     // be exactly 'all' | 'custom'; a custom mode must name a file, which must
     // exist when `requireFiles` is set.
     async function validateCaConfig(root, value, requireFiles) {
@@ -280,6 +515,17 @@ export default {
         return { ok: false, error: 'the run configuration must be a JSON object' }
       }
       const out = Object.assign({}, DEFAULT_CA_CONFIG)
+      if (value.overloadThreshold !== undefined && value.overloadThreshold !== null && value.overloadThreshold !== '') {
+        const threshold = Number(value.overloadThreshold)
+        if (!Number.isFinite(threshold) || threshold <= 0 || threshold > 1000) {
+          return {
+            ok: false,
+            error: 'overloadThreshold must be a loading percentage between 0 and 1000 (got ' +
+              JSON.stringify(value.overloadThreshold) + ')',
+          }
+        }
+        out.overloadThreshold = threshold
+      }
       const fields = [
         ['contingencyMode', 'contingencyFile'],
         ['monitorMode', 'monitoredBranchFile'],
@@ -448,6 +694,109 @@ export default {
         return { ok: true, cases: out }
       },
 
+      // The tab's Diagram source: the .drawio files DIRECTLY inside the selected case's
+      // `diagram/` folder, as workspace-relative paths so `readDrawio` can take one
+      // straight back. A diagram belongs to a case, and the tab's Diagram button is enabled
+      // by this answer, so an absent case or folder is an EMPTY LIST and not an error —
+      // "this case has no diagram yet" is a state the tab renders. A malformed case path is
+      // a real error.
+      async listDrawioFiles(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const caseInput = args && typeof args.case === 'string' ? args.case : ''
+        if (caseInput === '' || caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+          return { ok: false, error: 'Invalid case path: ' + caseInput }
+        }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const relDir = 'wspace/' + wspaceJoin(caseParts(caseInput).parent, 'diagram')
+        let entries
+        try {
+          entries = await fs.listDir(await fs.resolve(root + '/' + relDir))
+        } catch (e) {
+          return { ok: true, files: [], dir: relDir }
+        }
+        const files = []
+        for (const entry of entries.slice().sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+          if (entry.type !== 'file' || !/\.drawio$/i.test(entry.name)) continue
+          let size = null
+          try {
+            const info = await fs.stat(entry.target)
+            size = info && typeof info.size === 'number' ? info.size : null
+          } catch (e) {}
+          files.push({ path: relDir + '/' + entry.name, size: size })
+        }
+        return { ok: true, files: files, dir: relDir }
+      },
+
+      // Read one .drawio as text for the client-side renderer. The whitelist is the same
+      // shape as readCsv's, plus an explicit `..` rejection, and the size check happens
+      // before the read so an oversized file never reaches the RPC payload.
+      async readDrawio(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const path = args && typeof args.path === 'string' ? args.path : ''
+        if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-\/]*\.drawio$/i.test(path) || path.indexOf('..') !== -1) {
+          return { ok: false, error: 'Invalid diagram path: ' + path }
+        }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        let target
+        try {
+          target = await fs.resolve(root + '/' + path)
+        } catch (e) {
+          return { ok: false, error: 'cannot resolve diagram: ' + path }
+        }
+        let size = null
+        try {
+          const info = await fs.stat(target)
+          size = info && typeof info.size === 'number' ? info.size : null
+        } catch (e) {
+          return { ok: false, error: 'cannot stat diagram: ' + path }
+        }
+        if (size !== null && size > MAX_DRAWIO_BYTES) {
+          return { ok: false, error: 'diagram too large (' + size + ' bytes; limit ' + MAX_DRAWIO_BYTES + ')' }
+        }
+        let xml
+        try {
+          xml = await fs.readText(target)
+        } catch (e) {
+          return { ok: false, error: 'cannot read diagram: ' + path }
+        }
+        return { ok: true, path: path, xml: String(xml), size: size }
+      },
+
+      // Hand one diagram to the local draw.io desktop app (the Diagram tab's edit button).
+      // The path validation is readDrawio's, the launch itself is the shared helper above, and
+      // the answer names the rung that worked — `open` reports success once the OS has the
+      // file, so this says "launched", not "edited".
+      async openDrawio(args) {
+        const sp = ctx.get('subprocess')
+        if (sp === undefined) return { ok: false, error: 'subprocess service unavailable' }
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const path = args && typeof args.path === 'string' ? args.path : ''
+        if (!/^[A-Za-z0-9_][A-Za-z0-9_.\-\/]*\.drawio$/i.test(path) || path.indexOf('..') !== -1) {
+          return { ok: false, error: 'Invalid diagram path: ' + path }
+        }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        let target
+        try {
+          target = await fs.resolve(root + '/' + path)
+        } catch (e) {
+          return { ok: false, error: 'cannot resolve diagram: ' + path }
+        }
+        const abs = typeof fs.processPath === 'function' ? fs.processPath(target) : ''
+        if (typeof abs !== 'string' || abs === '') {
+          return { ok: false, error: 'this filesystem exposes no host path for ' + path }
+        }
+        const configured = await readDrawioLaunchers(fs, root)
+        const result = await drawioLaunch(sp, drawioLaunchersFor(configured.launchers, drawioPlatformKey()), abs, root, undefined)
+        if (result.ok !== true && configured.warning !== '') result.error = result.error + ' — ' + configured.warning
+        return result
+      },
+
       async readCsv(args) {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
@@ -469,13 +818,28 @@ export default {
         }
         const lines = String(text).replace(/\r\n/g, '\n').split('\n')
         while (lines.length > 0 && lines[lines.length - 1].trim() === '') lines.pop()
-        if (lines.length === 0) return { ok: true, header: '', rows: [], totalRows: 0, hasMore: false }
+        if (lines.length === 0) {
+          return { ok: true, header: '', rows: [], totalRows: 0, hasMore: false, sortColumn: null, sortDesc: false }
+        }
         const header = lines[0]
-        const totalRows = Math.max(0, lines.length - 1)
-        const dataStart = 1 + start
-        const dataEnd = Math.min(dataStart + limit, lines.length)
-        const rows = dataStart < lines.length ? lines.slice(dataStart, dataEnd) : []
-        return { ok: true, header: header, rows: rows, totalRows: totalRows, hasMore: dataEnd < lines.length }
+        let data = lines.slice(1)
+        // Sorting happens here, before the page is sliced, so a sorted table is sorted over
+        // the whole file rather than over the rows the caller happens to have loaded.
+        const applied = applyCsvSort(data, header, args && args.sortColumn, args && args.sortDesc === true)
+        data = applied.rows
+        const totalRows = data.length
+        const dataStart = Math.min(start, data.length)
+        const dataEnd = Math.min(dataStart + limit, data.length)
+        const rows = dataStart < data.length ? data.slice(dataStart, dataEnd) : []
+        return {
+          ok: true,
+          header: header,
+          rows: rows,
+          totalRows: totalRows,
+          hasMore: dataEnd < data.length,
+          sortColumn: applied.column,
+          sortDesc: applied.desc,
+        }
       },
 
       async busConnections(args) {
@@ -731,7 +1095,8 @@ export default {
             const absCont = contRel !== null ? root + '/wspace/' + contRel : null
             const absMon = monRel !== null ? root + '/wspace/' + monRel : null
             const absResults = root + '/wspace/' + resultDir
-            const raw = await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem)
+            const raw = await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
+              caConfig.overloadThreshold)
             const parsed = JSON.parse(raw)
             if (parsed && parsed.ok) {
               return {
@@ -1095,6 +1460,9 @@ export default {
           contingencyFile: validated.config.contingencyFile,
           monitorMode: validated.config.monitorMode,
           monitoredBranchFile: validated.config.monitoredBranchFile,
+          // The dialog's over loading threshold. It must round-trip, or the next dialog
+          // open and the CLI silently fall back to 90.
+          overloadThreshold: validated.config.overloadThreshold,
         }
         try {
           const target = await fs.resolve(caConfigPath(root, parent))

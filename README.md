@@ -8,6 +8,10 @@ It is also integrated into DeepSeek Harness as a DSH Plugin. You can run power s
 
 ![ipss-dsh-plugin](./docs/image/ipss-dsh-plugin.png)
 
+The simulation results can be visualized in a one-line diagram:
+
+![ipss-dsh-diagram](./docs/image/ipss-dsh-diagram.png)
+
 ## Environment setup
 
 **Prerequisites:** Java JDK 21, Maven (or the included `mvnw` wrapper).
@@ -50,7 +54,8 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 ## User Guide
 
 - InterPSS DSH Plugin user guide [dsh_plugin_user_guide.md](docs/user_guide/dsh_plugin_user_guide.md)
-- InterPSS Loadflow Adjustment user guide [loadflow_adjustment_user_guide.md](docs/user_guide/loadflow-adjustment-user-guide.md)
+- InterPSS One-Line Diagram user guide [oneline_diagram_user_guide.md](docs/user_guide/oneline_diagram_user_guide.md)
+- InterPSS Loadflow Adjustment user guide [loadflow-adjustment-user-guide.md](docs/user_guide/loadflow-adjustment-user-guide.md)
 - iPSS Agent Chat (Batch) user guide [batch_chat_user_guide.md](docs/user_guide/batch_chat_user_guide.md)
 
 
@@ -75,5 +80,6 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 | Adjust load Q to a bus-voltage band       | [.agents/skills/ipss-case-aclf-adjust/SKILL.md](.agents/skills/ipss-case-aclf-adjust/SKILL.md) |
 | Summary report for the current case       | [.agents/skills/ipss-case-summary/SKILL.md](.agents/skills/ipss-case-summary/SKILL.md)     |
 | Run a scenario script on the current case | [.agents/skills/ipss-case-script/SKILL.md](.agents/skills/ipss-case-script/SKILL.md)       |
+| Draw a one-line diagram for the case      | [.agents/skills/ipss-case-diagram/SKILL.md](.agents/skills/ipss-case-diagram/SKILL.md)     |
 
 
