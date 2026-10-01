@@ -346,13 +346,31 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   Trajectory (10) — showing the preview full-size. It has **no heading and no subtitle** (0.6.10):
   the tab bar names the view and the first row (`Simu Case <path>`) says what is drawn, so a
   title block only pushed the diagram down. Its toolbar is controls only — the picker (when the
-  case has several files), `Rendered` / `Source`, `−` / percent / `+`, `Fit`, and (since 0.6.12)
-  a **draw.io-marked edit button** that hands the open file to the local desktop app over
-  `interpss/openDrawio`; the `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped
-  in 0.6.11, because the gestures are discoverable without a sentence in the control row. The
-  edit button is in flight (`disabled`, `cursor: progress`) while the Host launches, and its
-  one-line outcome — `Launched draw.io (open -a draw.io)` or the Host's own reason — sits beside
-  it rather than replacing the preview. It reuses
+  case has several files), `Rendered` / `Source`, `−` / percent / `+`, `Fit`; the
+  `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped
+  in 0.6.11, because the gestures are discoverable without a sentence in the control row.
+  The **draw.io-marked edit button** (since 0.6.12) that hands the open file to the local
+  desktop app over `interpss/openDrawio` is deliberately **not** in that row: since 0.6.15 it
+  sits at the **upper-right corner of the tab**, as the last child of the header row that names
+  the case (`justifyContent: 'space-between'` — `Simu Case <path>` on the left, the launch
+  outcome and the button on the right), so it is always in view beside the drawing's own
+  controls. The launch outcome — `Launched draw.io (open -a draw.io)` or the
+  Host's own reason — prints to the button's left rather than replacing the preview. The button
+  is in flight (`disabled`, `cursor: progress`) while the Host launches.
+  - **Both earlier corners failed in the app, which is why it is in the header now.** At the end
+    of the toolbar (0.6.12) the one control that leaves the app sat among the zoom controls; a
+    row of its own below the drawing (0.6.13) landed **below the fold** — the canvas is 70vh
+    plus the tab's chrome — so the button looked like it had vanished; pinning that row with
+    `position: sticky; bottom` (0.6.14) kept it visible but as a full-width strip floating over
+    the canvas, which needed `pointerEvents: none` so it would not swallow drags and wheel-zoom,
+    and a shorter `62vh` canvas to stay off the fold. The header needs none of that: the canvas
+    is back to `70vh` / min `320px`, and there is no sticky element or pointer-events carve-out
+    anywhere in the view.
+  - Guard §12 walks the button's **ancestor chain** and asserts that placement — a
+    `space-between` top row containing the case label, with the edit controls as its **last**
+    child — because "it is on the page somewhere" would not hold it there, let alone keep it
+    visible. It also asserts the retired workarounds are gone (no `position: sticky` and no
+    `pointerEvents` on the button). It reuses
   every renderer piece (`diagramXmlFrom`, `parseDrawioScene`, `drawioBranchPairs`,
   `DrawioDiagram`, the pan/zoom math, `busTooltip`/`branchTooltip`) and adds **no new preview
   endpoint**: `listDrawioFiles` finds the case's diagrams, `readDrawio` reads one,
@@ -606,9 +624,11 @@ Client-half change is served with the plugin bundle, so the reload is what picks
   `no result data — run ACLF`), the wheel zooms about the cursor, dragging pans, **Fit**
   resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
   the regression symptom is a Diagram tab that keeps drawing the previous case.
-  **Since 0.6.12 the draw.io-marked button at the end of the toolbar opens the same file in the
-  local draw.io desktop app** (`open -a draw.io` on macOS): a second or two later the app shows
-  the diagram, the tab prints `Launched draw.io (open -a draw.io)`, and a failure prints the
+  **Since 0.6.12 the draw.io-marked button opens the same file in the local draw.io desktop
+  app** (`open -a draw.io` on macOS). It is at the right end of the **Simu Case** header row
+  (the tab's upper-right corner, 0.6.15), so it is on screen next to the drawing without
+  scrolling: a second or two later the app shows
+  the diagram, the tab prints `Launched draw.io (open -a draw.io)` to the button's left, and a failure prints the
   Host's reason (`Could not launch draw.io: could not launch the local draw.io app (… exited 1:
   …)`) instead of an empty pane. This is the only part of the plugin that needs a **Host**
   restart to appear — every other change in this guide is Client-half and reloads

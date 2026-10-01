@@ -47,7 +47,8 @@ parameters and results, no build-time Typert compiler required.
   `diagram/*.drawio` full-size. It follows the InterPSS tab's *Simu Case* selection (and a case
   loaded from chat), offers a picker when the folder holds several files — reopening the one
   last viewed — and gives the diagram pan / zoom / fit, a Rendered / Source toggle and
-  bus/branch tooltips, and (0.6.12) a draw.io button that opens the file in the **local draw.io
+  bus/branch tooltips, and (0.6.12; at the right end of the top row since 0.6.15) a
+  draw.io button that opens the file in the **local draw.io
   desktop app** to edit it. It reuses `listDrawioFiles`, `readDrawio`, `checkResult` and
   `busConnections`, and the launcher is the one new endpoint (`openDrawio`, over the sandbox-aware
   `subprocess` service — no `node:child_process`, since the dynamic half has no imports). 0.6.9

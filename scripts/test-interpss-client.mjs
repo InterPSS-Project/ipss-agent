@@ -864,11 +864,50 @@ const findInTree = (node, want) => {
   walk(node);
   return hit;
 };
+// Ancestor chain of the first matching node, so the edit button's PLACEMENT can be asserted and
+// not just its presence: it belongs in the lower-right row, never in the view/zoom toolbar.
+const pathToNode = (node, want) => {
+  let found = null;
+  const walk = (n, chain) => {
+    if (found !== null || n === null || typeof n !== 'object') return;
+    if (Array.isArray(n)) { for (const k of n) walk(k, chain); return; }
+    const next = chain.concat([n]);
+    if (want(n)) { found = next; return; }
+    if (n.kids) walk(n.kids, next);
+  };
+  walk(node, []);
+  return found;
+};
 const editButton = findInTree(editTree, (n) => n.type === 'button'
   && String(n.props.title || '').indexOf('local draw.io app') >= 0);
-check('the toolbar carries the local-draw.io edit button with its tooltip',
+check('the tab carries the local-draw.io edit button with its tooltip',
   editButton !== null && String(editButton.props['aria-label']).indexOf('local draw.io app') >= 0
   && editButton.props.disabled === false, editButton === null ? 'no button' : String(editButton.props.title));
+const editChain = pathToNode(editTree, (n) => n.type === 'button'
+  && String(n.props.title || '').indexOf('local draw.io app') >= 0);
+// Placement, not presence: the button belongs in the tab's TOP row (the one naming the case),
+// right-aligned — the upper-right corner. Both earlier placements failed in the app: at the end
+// of the toolbar it sat among the zoom controls, and in a row of its own after a 70vh drawing it
+// landed below the fold (0.6.13) or needed a sticky strip to stay in view (0.6.14).
+const styleOf = (n) => (n === null || n === undefined || n.props === undefined ? {} : (n.props.style || {}));
+const topRow = editChain === null ? null
+  : editChain.find((n) => styleOf(n).justifyContent === 'space-between');
+check('the edit button sits in the tab\'s top row, right-aligned (the upper-right corner)',
+  topRow !== null && topRow.type === 'div' && styleOf(topRow).display === 'flex'
+  && findInTree(topRow, (n) => n.type === 'span' && (n.kids || []).indexOf('Simu Case') >= 0) !== null
+  // the edit controls are the row's LAST child, i.e. the right-hand side
+  && findInTree(topRow.kids[topRow.kids.length - 1], (n) => n.type === 'button'
+    && String(n.props.title || '').indexOf('local draw.io app') >= 0) !== null,
+  topRow === null ? 'no top row' : JSON.stringify(styleOf(topRow)));
+check('the button no longer needs the retired sticky-strip workaround',
+  styleOf(editButton).position === undefined && styleOf(editButton).pointerEvents === undefined
+  && slice.slice(slice.indexOf('function DiagramView(')).indexOf("position: 'sticky'") < 0);
+const toolbarRow = findInTree(editTree, (n) => n.type === 'div' && Array.isArray(n.kids)
+  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button' && (k.kids || []).indexOf('Rendered') >= 0));
+check('the toolbar row ends at Fit and no longer carries the draw.io button',
+  toolbarRow !== null
+  && findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props.title || '').indexOf('draw.io') >= 0) === null
+  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Fit') >= 0) !== null);
 if (editButton !== null) {
   editButton.props.onClick();
   check('the edit button asks the Host to launch draw.io for the open diagram',

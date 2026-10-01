@@ -80,10 +80,12 @@ space; 0.6.11 dropped the `Scroll to zoom · drag to pan` hint, leaving the tool
     connection diagram shows; without a converged result it says `no result data — run ACLF`;
   - **scroll** to zoom about the cursor, **drag** to pan, **Fit** to reset;
   - **Source** shows the raw draw.io XML.
-4. To change the diagram itself, click the **draw.io button** at the end of the toolbar: it opens
-   the file in the local draw.io desktop app (`open -a draw.io` on macOS), so you can edit and
-   save it there. The tab prints `Launched draw.io (open -a draw.io)`, or the Host's reason if it
-   could not. (0.6.12+; a Host change like this one takes effect only after the app is restarted.)
+4. To change the diagram itself, click the **draw.io button at the right end of the top row** (the
+   tab's upper-right corner, 0.6.15+): it opens the file in the local draw.io desktop app
+   (`open -a draw.io` on macOS), so you can edit and save it there. The tab prints
+   `Launched draw.io (open -a draw.io)` to the button's left, or the Host's reason if it could
+   not. (The button arrived in 0.6.12; a Host change like this one takes effect only after the
+   app is restarted.)
 5. Loading another case from chat (`interpss_case_load`) moves the Diagram tab with it — it
    always draws the current simulation case, so the two tabs cannot disagree.
 

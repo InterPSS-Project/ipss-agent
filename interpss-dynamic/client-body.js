@@ -2975,14 +2975,38 @@ return {
       const fileCount = files === null ? 0 : files.length
       const selectStyle = { padding: '0 10px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', height: '30px', boxSizing: 'border-box', maxWidth: '420px' }
 
-      const caseRow = React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
-        React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' } }, 'Simu Case'),
-        React.createElement('span', { style: { fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' } },
-          caseInput === '' ? '(none selected)' : caseInput),
-        caseInput === ''
-          ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } },
-            'Select a case in the InterPSS tab and this view follows it.')
-          : null,
+      // The tab's top row: the case it follows on the left, and the one control that leaves the
+      // app — the draw.io edit button — in the upper-right corner. The button is deliberately
+      // NOT in the toolbar below (that row is view/zoom only) and deliberately not on a row of
+      // its own at the bottom: the drawing is taller than the panel, so a bottom row lands below
+      // the fold and the button looks like it vanished (0.6.13) or has to be pinned with sticky
+      // (0.6.14). The header keeps it in view, beside the drawing's own controls.
+      const editControls = path !== ''
+        ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          editMsg !== null ? React.createElement('span', {
+            style: { fontSize: '12px', maxWidth: '360px', textAlign: 'right', color: editMsg.ok ? 'var(--dsw-alias-label-secondary)' : 'var(--dsw-alias-state-error-primary)' },
+          }, editMsg.text) : null,
+          React.createElement('button', {
+            onClick: openInDrawio,
+            disabled: editBusy,
+            title: 'Edit this diagram in the local draw.io app',
+            'aria-label': 'Edit this diagram in the local draw.io app',
+            style: { ...btn, padding: '4px 7px', display: 'inline-flex', alignItems: 'center', opacity: editBusy ? 0.6 : 1, cursor: editBusy ? 'progress' : 'pointer' },
+          }, drawioAppIcon),
+        )
+        : null
+
+      const caseRow = React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
+        React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
+          React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' } }, 'Simu Case'),
+          React.createElement('span', { style: { fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' } },
+            caseInput === '' ? '(none selected)' : caseInput),
+          caseInput === ''
+            ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } },
+              'Select a case in the InterPSS tab and this view follows it.')
+            : null,
+        ),
+        editControls,
       )
 
       // The picker only exists when there is something to pick: one diagram is already
@@ -3005,18 +3029,6 @@ return {
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(scene, rect) + '%') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: fit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
-          // The one control that leaves the app: hand the file to the local draw.io desktop
-          // editor. The Host launches it (`openDrawio`), so this stays a plain button.
-          path !== '' ? React.createElement('button', {
-            onClick: openInDrawio,
-            disabled: editBusy,
-            title: 'Edit this diagram in the local draw.io app',
-            'aria-label': 'Edit this diagram in the local draw.io app',
-            style: { ...btn, padding: '4px 7px', display: 'inline-flex', alignItems: 'center', marginLeft: '4px', opacity: editBusy ? 0.6 : 1, cursor: editBusy ? 'progress' : 'pointer' },
-          }, drawioAppIcon) : null,
-          editMsg !== null ? React.createElement('span', {
-            style: { fontSize: '12px', color: editMsg.ok ? 'var(--dsw-alias-label-secondary)' : 'var(--dsw-alias-state-error-primary)' },
-          }, editMsg.text) : null,
         )
         : null
 
