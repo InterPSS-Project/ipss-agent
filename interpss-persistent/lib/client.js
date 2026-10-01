@@ -40,6 +40,12 @@ module.exports = {
     let lastSelection = { mode: '0', customFormat: 'ieee', customInput: '' }
     let checkSeq = 0
     let reportSeq = 0
+    let diagramSeq = 0
+    let diagramLoadSeq = 0
+    // The diagram the Diagram tab last opened. Kept beside `lastSelection` because it has
+    // to outlive the view: switching to another conversation view unmounts this one, and
+    // coming back should land on the same diagram rather than the folder's first.
+    let diagramChoice = ''
     // The bridge-held case this tab has already mirrored into its picker. A chat tool
     // can load another case while the tab shows one the user picked, so the picker
     // follows the bridge — but only when the bridge case *changes*, which leaves a
@@ -58,6 +64,43 @@ module.exports = {
         customInput: input,
         customFormat: /\.raw$/i.test(input) ? 'psse' : 'ieee',
       }
+    }
+
+    // The case the InterPSS tab has selected, derived from its picker state. The InterPSS
+    // tab owns "the current simulation case"; the Diagram tab only follows it, so the
+    // selection is shared here rather than being asked of the Host. One conversation view
+    // is mounted at a time, so a plain module-level value is enough: the Diagram tab seeds
+    // from it when it mounts, and every `onCaseChanged` keeps it current.
+    function selectionCaseInput() {
+      if (lastSelection.mode === 'custom') return lastSelection.customInput.trim()
+      const p = PRESETS[Number(lastSelection.mode)]
+      return p ? p.input : ''
+    }
+    let selectedCaseInput = selectionCaseInput()
+
+    // Adopt a case the Host holds into the shared selection. The InterPSS picker does this
+    // with its own UI bookkeeping (`adoptBridgeCase`); the Diagram tab needs only the
+    // picker state to follow, so that opening the InterPSS tab lands on the same case.
+    function adoptSelectedCase(input) {
+      const selection = bridgeCaseSelection(input)
+      lastSelection.mode = selection.mode
+      lastSelection.customInput = selection.customInput === '' ? lastSelection.customInput : selection.customInput
+      lastSelection.customFormat = selection.customFormat
+      selectedCaseInput = input
+    }
+
+    // Which diagram the Diagram tab shows for a case: the one the user last opened
+    // (`remembered`) while it is still in the folder, else the first. An empty folder is
+    // null, which the tab renders as "no diagram yet" rather than as an empty preview.
+    // Pure — the remembered path is passed in — so the guard can exercise it directly.
+    function drawioTabChoice(files, remembered) {
+      if (!Array.isArray(files) || files.length === 0) return null
+      const kept = files.find((f) => f !== null && typeof f === 'object' && f.path === remembered)
+      if (kept !== undefined) return kept.path
+      const first = files[0]
+      return first !== null && typeof first === 'object' && typeof first.path === 'string' && first.path !== ''
+        ? first.path
+        : null
     }
 
     // Editable fields of the AC Loadflow Option dialog, keyed by the real
@@ -185,6 +228,14 @@ module.exports = {
       React.createElement('circle', { cx: 12, cy: 12, r: 3 }),
       React.createElement('path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' }),
     )
+    // The draw.io app mark, drawn inline: the toolbar must work offline and the app page CSP
+    // cannot be assumed, so there is no remote image here. Orange tile, white two-node flow.
+    const drawioAppIcon = React.createElement('svg',
+      { width: 16, height: 16, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+      React.createElement('rect', { x: 0.75, y: 0.75, width: 14.5, height: 14.5, rx: 3.5, fill: '#F08705' }),
+      React.createElement('path', { d: 'M4.3 4.3h3v3h-3z M8.7 8.7h3v3h-3z', fill: '#FFFFFF' }),
+      React.createElement('path', { d: 'M7.3 5.8h2.9v2.9', fill: 'none', stroke: '#FFFFFF', strokeWidth: 1.2 }),
+    )
     const thStyle = { position: 'sticky', top: 0, zIndex: 1, padding: '4px 8px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-overlay)', textAlign: 'left', fontWeight: 600, whiteSpace: 'nowrap' }
     const tdStyle = { padding: '3px 8px', border: '1px solid var(--dsw-alias-border-l1)', whiteSpace: 'nowrap' }
     const tableStyle = { borderCollapse: 'collapse', fontSize: '12px', marginTop: '8px', width: '100%' }
@@ -286,6 +337,18 @@ module.exports = {
       }, h + (active ? (sort.desc === true ? ' \u25bc' : ' \u25b2') : ''))
     }
 
+    // Clicking a header sorts by it (ascending first); clicking the sorted one flips the
+    // direction. Pure, so the panel's state change stays a one-liner. Shared by the tab's
+    // result table and the ACLF explorer card, so it lives in the tab body.
+    function nextCsvSort(column, desc, clicked) {
+      const name = String(clicked === null || clicked === undefined ? '' : clicked).trim()
+      if (name === '') return { column: column, desc: desc === true }
+      if (column !== null && String(column).toLowerCase() === name.toLowerCase()) {
+        return { column: column, desc: !(desc === true) }
+      }
+      return { column: name, desc: false }
+    }
+
     function renderCsvTable(header, rows, busCols, onBusDoubleClick, formatDecimals, sort) {
       if (!header) return null
       const headerCols = header.split(',')
@@ -345,8 +408,14 @@ module.exports = {
       )
     }
 
-    function renderConnTable(header, rows, idx) {
+    // `decimals` maps a SOURCE column index (not a position in `idx`) to the decimal
+    // places its cell shows — for the columns the CSV carries as full-precision floats
+    // (PFrom2To / QFrom2To / QGen), so they read like the bus table instead of 17
+    // digits. `formatValue` shortens only a value carrying more decimals than asked,
+    // so an already-short column is left exactly as the Host sent it.
+    function renderConnTable(header, rows, idx, decimals) {
       const cols = idx || [4, 6, 7, 9, 11, 12, 13, 14, 19, 20, 24]
+      const places = decimals || {}
       const hdr = cols.map((i) => (header && header[i] != null ? header[i] : ''))
       return React.createElement('table', { style: tableStyle },
         React.createElement('thead', null,
@@ -354,7 +423,11 @@ module.exports = {
         ),
         React.createElement('tbody', null,
           (rows || []).map((r, ri) => React.createElement('tr', { key: ri },
-            cols.map((i) => React.createElement('td', { key: i, style: tdStyle }, r[i] != null ? r[i] : '')),
+            cols.map((i) => {
+              const raw = r[i] != null ? r[i] : ''
+              const d = places[i]
+              return React.createElement('td', { key: i, style: tdStyle }, d != null ? formatValue(raw, d) : raw)
+            }),
           )),
         ),
       )
@@ -582,6 +655,601 @@ module.exports = {
       return blocks
     }
 
+    // --- draw.io preview -------------------------------------------------------
+    // The Diagram tab reads a .drawio file over `interpss/readDrawio` and renders it as
+    // inline SVG. The renderer is deliberately self-contained and offline:
+    // the harness forbids frames (`frame-src 'none'` in the preview CSP) and the app
+    // page CSP cannot be assumed, so an embedded draw.io viewer is not an option. It
+    // covers the subset these workspaces' diagrams use — rounded rectangles, ellipses,
+    // text labels, groups and orthogonal edges — and degrades an unknown shape to a
+    // rectangle instead of failing.
+
+    // draw.io stores a diagram either as plain XML or as base64(raw-deflate(uri-encoded
+    // XML)). Both round-trip here; the compressed form needs DecompressionStream.
+    function diagramXmlFrom(raw) {
+      const text = String(raw === null || raw === undefined ? '' : raw).trim()
+      if (text === '') return Promise.reject(new Error('the diagram file is empty'))
+      if (/<mxGraphModel|<mxfile/i.test(text)) return Promise.resolve(text)
+      if (typeof DecompressionStream !== 'function') {
+        return Promise.reject(new Error('this diagram is stored compressed and DecompressionStream is unavailable — re-save it uncompressed in draw.io'))
+      }
+      let bytes
+      try {
+        const bin = atob(text.replace(/\s+/g, ''))
+        bytes = new Uint8Array(bin.length)
+        for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i)
+      } catch (e) {
+        return Promise.reject(new Error('unrecognized diagram encoding'))
+      }
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'))
+      return new Response(stream).text().then(
+        (xml) => { try { return decodeURIComponent(xml) } catch (e) { return xml } },
+        () => { throw new Error('could not inflate the diagram — re-save it uncompressed in draw.io') },
+      )
+    }
+
+    function styleMap(style) {
+      const out = {}
+      const parts = String(style === null || style === undefined ? '' : style).split(';')
+      for (const part of parts) {
+        if (part === '') continue
+        const eq = part.indexOf('=')
+        if (eq === -1) out[part] = '1'
+        else out[part.slice(0, eq)] = part.slice(eq + 1)
+      }
+      return out
+    }
+
+    function numOr(value, fallback) {
+      const n = typeof value === 'number' ? value : parseFloat(value)
+      return Number.isFinite(n) ? n : fallback
+    }
+
+    // A cell label is plain text or light HTML; keep the line structure, drop the markup.
+    function labelLines(value) {
+      if (value === null || value === undefined || value === '') return []
+      return String(value)
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<[^>]*>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#10;/g, '\n')
+        .replace(/&amp;/gi, '&')
+        .split('\n')
+    }
+
+    // mxGraph's default stroke, for a cell whose style names no strokeColor. It was a
+    // slate gray, which painted the 2 edges in this workspace's diagram that omit
+    // strokeColor in a different color from the other 25 (docs/oneline-diagram-process.md).
+    const DRAWIO_STROKE = '#000000'
+    const DRAWIO_TEXT = '#111827'
+    const DRAWIO_PAD = 20
+    const DRAWIO_MAX_CELLS = 2000
+    // Tooltip hit areas. A branch is a 1.5px line and a bus bar is 6px wide, so the drawn
+    // geometry is impractical to hover; each interactive cell also emits an invisible shape
+    // with this stroke width, or a transparent rect padded by this many scene units.
+    const DRAWIO_HIT_STROKE = 10
+    const DRAWIO_HIT_PAD = 4
+
+    // A draw.io model carries its own palette, and these one-line diagrams are ink on paper:
+    // white surfaces, black strokes and text, a few greys. Painting that literally drops a
+    // glaring white slab with black lines into the dark theme. The grayscale part of the
+    // palette is therefore re-expressed as theme tokens — paper -> the app surface, ink ->
+    // the app foreground, mid greys -> the secondary label colour — so the preview follows
+    // the active theme in both directions. Tokens rather than a computed colour on purpose:
+    // both palettes ship in the stylesheets, so this needs no theme detection, no extra
+    // service dependency, and it re-colours instantly when the theme switches.
+    //
+    // Only near-grayscale values are re-mapped. A saturated colour is left exactly as
+    // authored, because a deliberately coloured element (a red bus, a blue tie) must keep
+    // its identity in either theme.
+    const DRAWIO_PAPER = 'var(--dsw-alias-bg-layer-1)'
+    const DRAWIO_INK = 'var(--dsw-alias-label-primary)'
+    const DRAWIO_MID = 'var(--dsw-alias-label-secondary)'
+
+    function drawioHexBytes(color) {
+      if (typeof color !== 'string') return null
+      const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(color.trim())
+      if (m === null) return null
+      const h = m[1].length === 3 ? m[1].split('').map((c) => c + c).join('') : m[1]
+      return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]
+    }
+
+    // Grayscale in -> a theme token out; anything else (a colour, 'none', an already-token
+    // value) passes through untouched.
+    function drawioThemeColor(color) {
+      const rgb = drawioHexBytes(color)
+      if (rgb === null) return color
+      const r = rgb[0] / 255
+      const g = rgb[1] / 255
+      const b = rgb[2] / 255
+      const max = Math.max(r, g, b)
+      const min = Math.min(r, g, b)
+      const lum = (max + min) / 2
+      const sat = max === min ? 0 : (max - min) / (1 - Math.abs(2 * lum - 1))
+      // The extremes are decided by lightness ALONE, before the saturation test: HSL
+      // saturation is ill-conditioned near black and white, so draw.io's default near-black
+      // text colour #111827 computes as 39% "saturated" while reading as plain ink. Testing
+      // saturation first left every default label near-black on a dark canvas.
+      if (lum >= 0.9) return DRAWIO_PAPER
+      if (lum <= 0.18) return DRAWIO_INK
+      if (sat > 0.25) return color
+      return DRAWIO_MID
+    }
+
+    // mxGraphModel -> a flat, React-free scene description: { viewBox, nodes, edges }.
+    // Geometry is resolved to absolute coordinates so grouped cells (style=group, whose
+    // children carry relative="1" geometry) land in the right place.
+    function parseDrawioScene(xml) {
+      const doc = new DOMParser().parseFromString(xml, 'text/xml')
+      if (doc.getElementsByTagName('parsererror').length > 0) throw new Error('the file is not valid draw.io XML')
+      const cells = doc.getElementsByTagName('mxCell')
+      if (cells.length === 0) throw new Error('no diagram cells found')
+      if (cells.length > DRAWIO_MAX_CELLS) {
+        throw new Error('this diagram has ' + cells.length + ' cells (limit ' + DRAWIO_MAX_CELLS + ') and is too large to preview')
+      }
+
+      const byId = {}
+      for (let i = 0; i < cells.length; i += 1) byId[cells[i].getAttribute('id')] = cells[i]
+
+      // The mxGeometry a cell owns. A descendant search would be wrong here: a `group`
+      // cell has no geometry of its own but its children do, so the first descendant
+      // would be a child's box and every offset below it would be applied twice.
+      function ownGeometry(cell) {
+        const kids = cell.children
+        for (let i = 0; i < kids.length; i += 1) {
+          if (kids[i].tagName === 'mxGeometry') return kids[i]
+        }
+        return null
+      }
+
+      // Absolute offset of a cell: every ancestor's own x/y accumulates down the parent
+      // chain. The guard bounds a malformed/cyclic parent graph.
+      function originOf(cell) {
+        let x = 0
+        let y = 0
+        let cur = cell
+        let guard = 0
+        while (cur !== undefined && guard < 64) {
+          guard += 1
+          const parentId = cur.getAttribute('parent')
+          const parent = parentId === null ? undefined : byId[parentId]
+          if (parent === undefined || parent === cur) break
+          const pg = ownGeometry(parent)
+          if (pg === null) break
+          x += numOr(pg.getAttribute('x'), 0)
+          y += numOr(pg.getAttribute('y'), 0)
+          cur = parent
+        }
+        return { x: x, y: y }
+      }
+
+      const rects = {}
+      const nodes = []
+      for (let i = 0; i < cells.length; i += 1) {
+        const cell = cells[i]
+        if (cell.getAttribute('vertex') !== '1') continue
+        const g = ownGeometry(cell)
+        if (g === null) continue
+        const st = styleMap(cell.getAttribute('style'))
+        // A `group` is a container, not a shape: it draws nothing itself, and its children
+        // are positioned relative to it. Skipping it here is what keeps those children
+        // (this workspace's transformer symbols, two ellipses each) in place without a
+        // spurious box behind them.
+        if (st.group !== undefined) continue
+        const o = originOf(cell)
+        const x = o.x + numOr(g.getAttribute('x'), 0)
+        const y = o.y + numOr(g.getAttribute('y'), 0)
+        const w = Math.max(1, numOr(g.getAttribute('width'), 0) || 120)
+        const h = Math.max(1, numOr(g.getAttribute('height'), 0) || 60)
+        const style = st
+        const kind = style.ellipse !== undefined || style.shape === 'ellipse' ? 'ellipse' : (style.text !== undefined ? 'text' : 'rect')
+        const node = {
+          id: cell.getAttribute('id'),
+          // The parent cell. A transformer symbol is two ellipses inside a `style=group`
+          // cell, so the group id is what pairs them — not the `xfN`/`xfNb` spelling.
+          parent: cell.getAttribute('parent'),
+          // Document position. The renderer paints in this order — see DrawioDiagram.
+          order: i,
+          kind: kind,
+          x: x, y: y, w: w, h: h,
+          rounded: style.rounded !== undefined && kind === 'rect',
+          fill: style.fillColor !== undefined ? style.fillColor : null,
+          stroke: style.strokeColor !== undefined ? style.strokeColor : DRAWIO_STROKE,
+          strokeWidth: numOr(style.strokeWidth, 1),
+          dashed: style.dashed === '1',
+          fontColor: style.fontColor !== undefined ? style.fontColor : DRAWIO_TEXT,
+          fontSize: numOr(style.fontSize, 12),
+          bold: (numOr(style.fontStyle, 0) & 1) === 1,
+          italic: (numOr(style.fontStyle, 0) & 2) === 2,
+          lines: labelLines(cell.getAttribute('value')),
+        }
+        rects[node.id] = node
+        nodes.push(node)
+      }
+
+      const edges = []
+      for (let i = 0; i < cells.length; i += 1) {
+        const cell = cells[i]
+        if (cell.getAttribute('edge') !== '1') continue
+        const st = styleMap(cell.getAttribute('style'))
+        const g = ownGeometry(cell)
+        const src = rects[cell.getAttribute('source')]
+        const tgt = rects[cell.getAttribute('target')]
+        // exit/entry are fractions of the source/target box; absent means the centre, and
+        // nodes are painted over the edge ends so the overlap is invisible.
+        const sx = numOr(st.exitX, 0.5)
+        const sy = numOr(st.exitY, 0.5)
+        const tx = numOr(st.entryX, 0.5)
+        const ty = numOr(st.entryY, 0.5)
+        // `let`, not `const`: an edge that names no source/target CELL falls back to its
+        // own sourcePoint/targetPoint mxPoints below, and to its Array points after that.
+        // The workspace's diagram resolves every edge through a cell, so this branch is not
+        // exercised there — but a draw.io diagram with a free-floating edge would throw
+        // "Assignment to constant variable" and render no preview at all.
+        let from = src === undefined ? null : { x: src.x + src.w * sx, y: src.y + src.h * sy }
+        let to = tgt === undefined ? null : { x: tgt.x + tgt.w * tx, y: tgt.y + tgt.h * ty }
+        const pts = []
+        if (g !== null) {
+          const arrays = g.getElementsByTagName('Array')
+          for (let a = 0; a < arrays.length; a += 1) {
+            if (arrays[a].getAttribute('as') !== 'points') continue
+            const ps = arrays[a].getElementsByTagName('mxPoint')
+            for (let p = 0; p < ps.length; p += 1) {
+              pts.push({ x: numOr(ps[p].getAttribute('x'), 0), y: numOr(ps[p].getAttribute('y'), 0) })
+            }
+          }
+          if (from === null) {
+            const sp = g.getElementsByTagName('mxPoint')
+            for (let p = 0; p < sp.length; p += 1) {
+              if (sp[p].getAttribute('as') === 'sourcePoint') from = { x: numOr(sp[p].getAttribute('x'), 0), y: numOr(sp[p].getAttribute('y'), 0) }
+              else if (sp[p].getAttribute('as') === 'targetPoint') to = { x: numOr(sp[p].getAttribute('x'), 0), y: numOr(sp[p].getAttribute('y'), 0) }
+            }
+          }
+        }
+        if (from === null && pts.length > 0) from = pts.shift()
+        if (to === null && pts.length > 0) to = pts.pop()
+        const points = []
+        if (from !== null) points.push(from)
+        for (const p of pts) points.push(p)
+        if (to !== null) points.push(to)
+        if (points.length < 2) continue
+
+        let arrow = null
+        if (st.endArrow !== 'none' && points.length >= 2) {
+          const a = points[points.length - 2]
+          const b = points[points.length - 1]
+          const dx = b.x - a.x
+          const dy = b.y - a.y
+          const len = Math.sqrt(dx * dx + dy * dy)
+          if (len > 0.001) {
+            const ux = dx / len
+            const uy = dy / len
+            const size = 9
+            const wing = 4
+            arrow = [
+              b.x + ',' + b.y,
+              (b.x - ux * size - uy * wing) + ',' + (b.y - uy * size + ux * wing),
+              (b.x - ux * size + uy * wing) + ',' + (b.y - uy * size - ux * wing),
+            ].join(' ')
+          }
+        }
+        const mid = points[Math.floor(points.length / 2)]
+        edges.push({
+          id: cell.getAttribute('id'),
+          source: cell.getAttribute('source'),
+          target: cell.getAttribute('target'),
+          order: i,
+          points: points,
+          stroke: st.strokeColor !== undefined ? st.strokeColor : DRAWIO_STROKE,
+          strokeWidth: numOr(st.strokeWidth, 1),
+          dashed: st.dashed === '1',
+          arrow: arrow,
+          label: labelLines(cell.getAttribute('value')).join(' '),
+          labelAt: mid,
+        })
+      }
+
+      if (nodes.length === 0 && edges.length === 0) throw new Error('empty diagram — nothing to draw')
+
+      // Bounding box over every drawn coordinate; the shared modulo root cell has no
+      // geometry of its own, so it never contributes.
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      const extend = (x, y) => {
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+      }
+      for (const n of nodes) { extend(n.x, n.y); extend(n.x + n.w, n.y + n.h) }
+      for (const e of edges) { for (const p of e.points) extend(p.x, p.y) }
+      if (!Number.isFinite(minX)) throw new Error('empty diagram — nothing to draw')
+      return {
+        viewBox: {
+          x: minX - DRAWIO_PAD,
+          y: minY - DRAWIO_PAD,
+          w: Math.max(1, maxX - minX + DRAWIO_PAD * 2),
+          h: Math.max(1, maxY - minY + DRAWIO_PAD * 2),
+        },
+        nodes: nodes,
+        edges: edges,
+      }
+    }
+
+    function drawioLabel(lines, cx, cy, node, key) {
+      if (lines.length === 0) return null
+      const spans = lines.map((line, i) => React.createElement('tspan', {
+        key: 't' + i,
+        x: cx,
+        dy: i === 0 ? (lines.length > 1 ? (-(lines.length - 1) * 0.6) + 'em' : '0.32em') : '1.2em',
+      }, line))
+      return React.createElement('text', {
+        key: key,
+        x: cx, y: cy, textAnchor: 'middle',
+        fontSize: node.fontSize, fontWeight: node.bold ? 600 : 400,
+        fontStyle: node.italic ? 'italic' : 'normal', fill: drawioThemeColor(node.fontColor),
+      }, spans)
+    }
+
+    // Pan/zoom for the preview. The renderer always draws the whole scene and only the
+    // SVG viewBox moves, so a zoom step re-parses nothing and measures nothing. A
+    // `rect` below is the visible rectangle in scene coordinates ({x,y,w,h}); null means
+    // "fit", and a fit is simply the scene's own viewBox.
+    const DRAWIO_MIN_ZOOM = 0.1
+    const DRAWIO_MAX_ZOOM = 12
+
+    function drawioFitRect(vb) {
+      return { x: vb.x, y: vb.y, w: vb.w, h: vb.h }
+    }
+
+    // Bounds on the visible width, derived from the zoom limits. Expressed as widths
+    // because that is what the rect carries; the height follows the width.
+    function drawioZoomLimits(vb) {
+      const w = Number.isFinite(vb.w) && vb.w > 0 ? vb.w : 1
+      return { minW: w / DRAWIO_MAX_ZOOM, maxW: w / DRAWIO_MIN_ZOOM }
+    }
+
+    // Zoom by `factor` (>1 zooms in), holding the scene point at the window fractions
+    // (fx, fy) -- both in [0,1] -- in place, so one wheel notch zooms about the cursor.
+    // The height follows the width so the aspect ratio cannot drift, and an unmeasurable
+    // input falls back to a centre anchor rather than throwing mid-gesture.
+    function drawioZoomRect(rect, factor, fx, fy, limits) {
+      const f = Number.isFinite(factor) && factor > 0 ? factor : 1
+      const minW = limits && Number.isFinite(limits.minW) ? limits.minW : 1e-6
+      const maxW = limits && Number.isFinite(limits.maxW) ? limits.maxW : 1e9
+      let w = rect.w / f
+      if (!Number.isFinite(w) || w <= 0) w = rect.w
+      w = Math.min(maxW, Math.max(minW, w))
+      const h = rect.h * (w / rect.w)
+      const ax = Number.isFinite(fx) ? Math.min(1, Math.max(0, fx)) : 0.5
+      const ay = Number.isFinite(fy) ? Math.min(1, Math.max(0, fy)) : 0.5
+      return { x: rect.x + (rect.w - w) * ax, y: rect.y + (rect.h - h) * ay, w: w, h: h }
+    }
+
+    function drawioPanRect(rect, dx, dy) {
+      const sx = Number.isFinite(dx) ? dx : 0
+      const sy = Number.isFinite(dy) ? dy : 0
+      return { x: rect.x + sx, y: rect.y + sy, w: rect.w, h: rect.h }
+    }
+
+    // One wheel notch -> one zoom factor, kept apart from the event so the guard test can
+    // exercise the direction without a DOM.
+    function drawioWheelFactor(deltaY) {
+      const d = Number.isFinite(deltaY) ? deltaY : 0
+      if (d === 0) return 1
+      return d < 0 ? 1.15 : 1 / 1.15
+    }
+
+    // A bus bar's cell id is `busN` in the exported diagrams.
+    function drawioIsBusId(id) {
+      return typeof id === 'string' && /^bus\d+$/i.test(id)
+    }
+
+    // Map every interactive diagram element to the branch it belongs to, as a
+    // `busa|busb` key of lowercased bus cell ids (so they compare with the table's BusN).
+    //
+    // A branch is either ONE edge between two bus bars, or a transformer symbol drawn as TWO
+    // chained edges (\`bus4 -> xf8\` then \`xf8b -> bus7\`) joined through a group cell. So an
+    // edge with a single bus end is paired with its sibling — the other edge whose endpoint
+    // shares the same parent group — and both take the union of their bus ends. The
+    // transformer NODES take their group's key too, so the symbol itself is hoverable.
+    function drawioBranchPairs(scene) {
+      const edgePair = {}
+      const nodePair = {}
+      if (scene === null || scene === undefined) return { edgePair: edgePair, nodePair: nodePair }
+      const byId = {}
+      for (const n of scene.nodes) byId[n.id] = n
+      const busEndsOf = (e) => {
+        const out = []
+        for (const end of [e.source, e.target]) {
+          if (drawioIsBusId(end)) out.push(String(end).toLowerCase())
+        }
+        return out
+      }
+      const keyOf = (ends) => (ends.length < 2 ? null : ends.slice().sort().join('|'))
+      const groupOf = (cellId) => {
+        const n = byId[cellId]
+        return n === undefined ? null : n.parent
+      }
+      const edges = scene.edges
+      for (let i = 0; i < edges.length; i += 1) {
+        const e = edges[i]
+        if (edgePair[e.id] !== undefined) continue
+        const ends = busEndsOf(e)
+        if (ends.length === 2) {
+          edgePair[e.id] = keyOf(ends)
+          continue
+        }
+        if (ends.length !== 1) continue
+        const other = drawioIsBusId(e.source) ? e.target : e.source
+        const group = groupOf(other)
+        if (group === null || group === undefined) continue
+        const family = [e]
+        for (let j = 0; j < edges.length; j += 1) {
+          const c = edges[j]
+          if (c.id === e.id) continue
+          if (groupOf(c.source) === group || groupOf(c.target) === group) family.push(c)
+        }
+        const union = []
+        for (const f of family) for (const b of busEndsOf(f)) if (union.indexOf(b) === -1) union.push(b)
+        const key = keyOf(union)
+        if (key === null) continue
+        for (const f of family) edgePair[f.id] = key
+        for (const n of scene.nodes) if (n.parent === group) nodePair[n.id] = key
+      }
+      return { edgePair: edgePair, nodePair: nodePair }
+    }
+
+    // A bus label is the documented `Bus-N` text, so a label can stand in for its bar.
+    function drawioLabelBusId(lines) {
+      if (!Array.isArray(lines) || lines.length === 0) return null
+      const m = /^Bus-(\d+)$/.exec(String(lines[0]).trim())
+      return m === null ? null : 'bus' + m[1]
+    }
+
+    // What one diagram cell stands for: a bus (its bar, or the Bus-N label above it) or a
+    // branch (an edge, or a transformer symbol sitting on one). null for a cell that carries
+    // no data — the page background and the legend.
+    function drawioHoverTarget(node, pairs) {
+      if (drawioIsBusId(node.id)) return { kind: 'bus', id: node.id }
+      const fromLabel = drawioLabelBusId(node.lines)
+      if (fromLabel !== null) return { kind: 'bus', id: fromLabel }
+      if (pairs !== null && pairs.nodePair[node.id] !== undefined) {
+        return { kind: 'branch', key: pairs.nodePair[node.id] }
+      }
+      return null
+    }
+
+    // The Host matches a bus id EXACTLY against the table spelling (Bus1), while a diagram
+    // cell is bus1. The branch table names every bus it touches, so it supplies the canonical
+    // spelling; an isolated bus, which no branch mentions, falls back to capitalising the cell.
+    function drawioCanonicalBusId(canonical, nodeId) {
+      const lower = String(nodeId).toLowerCase()
+      if (canonical !== null && canonical !== undefined && canonical[lower] !== undefined) return canonical[lower]
+      return String(nodeId).replace(/^bus/i, 'Bus')
+    }
+
+    // A bus-pair key back to something a person reads: bus4|bus7 -> Bus 4 to Bus 7.
+    function drawioPairLabel(key) {
+      const parts = String(key).split('|')
+      const num = (id) => String(id).replace(/^bus/i, '')
+      return parts.length === 2 ? 'Bus ' + num(parts[0]) + ' to Bus ' + num(parts[1]) : 'Branch'
+    }
+
+    // The tooltip when there is nothing to quote: the element still identifies itself, and
+    // the second line says why there is no data rather than looking broken.
+    function drawioFallbackTip(label, hasData) {
+      return label + '\n' + (hasData ? '(not found in the case result tables)' : '(no result data — run ACLF)')
+    }
+
+    function drawioZoomPercent(scene, rect) {
+      if (scene === null || rect === null || !Number.isFinite(rect.w) || rect.w <= 0) return 100
+      const pct = Math.round((scene.viewBox.w / rect.w) * 100)
+      return Number.isFinite(pct) && pct > 0 ? pct : 100
+    }
+
+    function DrawioDiagram(props) {
+      const scene = props.scene
+      const vb = props.view || scene.viewBox
+      // Tooltips are opt-in: with no hover prop the renderer emits exactly what it always
+      // did — no hit areas and no handlers — so a diagram still renders on its own.
+      const hover = props.hover || null
+      // draw.io paints in the model's own document order, interleaving vertices and edges.
+      // That order is load-bearing: this workspace's diagram declares `bg`, an opaque
+      // 900x760 white rectangle, BEFORE its branches. Drawing every edge up front and every
+      // vertex afterwards therefore put the page fill on top of all 27 branches, and the
+      // preview showed a one-line diagram with no lines in it at all.
+      const painted = []
+      for (let i = 0; i < scene.edges.length; i += 1) {
+        const e = scene.edges[i]
+        const points = e.points.map((p) => p.x + ',' + p.y).join(' ')
+        const parts = []
+        // The invisible wide-stroke twin that makes a 1.5px branch hoverable.
+        if (hover !== null && hover.pairs !== undefined && hover.pairs.edgePair[e.id] !== undefined) {
+          parts.push(React.createElement('polyline', {
+            key: 'h',
+            points: points,
+            fill: 'none',
+            stroke: 'transparent',
+            strokeWidth: DRAWIO_HIT_STROKE,
+            pointerEvents: 'stroke',
+            onMouseEnter: (ev) => hover.onBranch(hover.pairs.edgePair[e.id], ev),
+            onMouseMove: hover.onMove,
+            onMouseLeave: hover.onLeave,
+          }))
+        }
+        parts.push(React.createElement('polyline', {
+          key: 'l',
+          points: points,
+          fill: 'none',
+          stroke: drawioThemeColor(e.stroke),
+          strokeWidth: e.strokeWidth,
+          strokeDasharray: e.dashed ? '6 4' : undefined,
+        }))
+        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: drawioThemeColor(e.stroke) }))
+        if (e.label !== '') {
+          parts.push(React.createElement('text', {
+            key: 't',
+            x: e.labelAt.x + 4, y: e.labelAt.y - 4,
+            fontSize: 10, fill: drawioThemeColor(DRAWIO_TEXT),
+          }, e.label))
+        }
+        painted.push({ order: e.order === undefined ? i : e.order, el: React.createElement('g', { key: 'e' + i }, parts) })
+      }
+      for (let i = 0; i < scene.nodes.length; i += 1) {
+        const n = scene.nodes[i]
+        const parts = []
+        if (n.kind === 'ellipse') {
+          parts.push(React.createElement('ellipse', {
+            key: 's',
+            cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2, ry: n.h / 2,
+            fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
+            stroke: drawioThemeColor(n.stroke), strokeWidth: n.strokeWidth,
+            strokeDasharray: n.dashed ? '6 4' : undefined,
+          }))
+        } else if (n.kind === 'rect') {
+          parts.push(React.createElement('rect', {
+            key: 's',
+            x: n.x, y: n.y, width: n.w, height: n.h,
+            rx: n.rounded ? Math.min(8, n.h / 2) : 0,
+            fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
+            stroke: drawioThemeColor(n.stroke), strokeWidth: n.strokeWidth,
+            strokeDasharray: n.dashed ? '6 4' : undefined,
+          }))
+        }
+        const label = drawioLabel(n.lines, n.x + n.w / 2, n.y + n.h / 2, n, 't')
+        if (label !== null) parts.push(label)
+        // A transparent padded rect, so a 6px bar or a 16px transformer ring is comfortable
+        // to hover. Added after the drawn geometry so it wins the hit test inside this group.
+        const target = hover === null ? null : drawioHoverTarget(n, hover.pairs === undefined ? null : hover.pairs)
+        if (target !== null) {
+          parts.push(React.createElement('rect', {
+            key: 'h',
+            x: n.x - DRAWIO_HIT_PAD, y: n.y - DRAWIO_HIT_PAD,
+            width: n.w + DRAWIO_HIT_PAD * 2, height: n.h + DRAWIO_HIT_PAD * 2,
+            fill: 'transparent', stroke: 'none', pointerEvents: 'all',
+            onMouseEnter: (ev) => (target.kind === 'bus' ? hover.onBus(target.id, ev) : hover.onBranch(target.key, ev)),
+            onMouseMove: hover.onMove,
+            onMouseLeave: hover.onLeave,
+          }))
+        }
+        painted.push({ order: n.order === undefined ? i : n.order, el: React.createElement('g', { key: 'n' + i }, parts) })
+      }
+      // A stable sort, so a model with no order recorded keeps edges before vertices.
+      painted.sort((a, b) => a.order - b.order)
+      const children = painted.map((p) => p.el)
+      return React.createElement('svg', {
+        viewBox: vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h,
+        preserveAspectRatio: 'xMidYMid meet',
+        style: { width: '100%', height: '100%', display: 'block' },
+      }, children)
+    }
+
     function InterPssView(props) {
       const sessionId = props && props.sessionId
       const callRemote = props && props.callRemote
@@ -792,6 +1460,9 @@ module.exports = {
 
       function onCaseChanged(input) {
         const seq = ++checkSeq
+        // This tab owns the current case; the Diagram tab reads the shared value when it
+        // mounts, so selecting a case here is what decides what that tab draws.
+        selectedCaseInput = input
         clearResults()
         setCaseLoaded(false)
         setCaseLoadError(null)
@@ -1527,7 +2198,8 @@ module.exports = {
         }
         if (connView === 'gen') {
           if (connResult.genRows && connResult.genRows.length > 0) {
-            return renderConnTable(connResult.genHeader, connResult.genRows, [3, 4, 6, 9, 10, 11, 12, 13, 14, 15])
+            // 12 = QGen, the only gen column the model returns as a full-precision float
+            return renderConnTable(connResult.genHeader, connResult.genRows, [3, 4, 6, 9, 10, 11, 12, 13, 14, 15], { 12: 4 })
           }
           return React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No generators connected to this bus.')
         }
@@ -1537,7 +2209,8 @@ module.exports = {
           }
           return React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'No loads connected to this bus.')
         }
-        return renderConnTable(connResult.header, connResult.rows)
+        // 19/20 = PFrom2To / QFrom2To; `idx` keeps its default column list
+        return renderConnTable(connResult.header, connResult.rows, null, { 19: 4, 20: 4 })
       }
 
       function connCountLabel() {
@@ -1961,6 +2634,492 @@ module.exports = {
       )
     }
 
+    // --- Diagram tab --------------------------------------------------------
+    // The one-line diagram of the case selected in the InterPSS tab, as its own
+    // conversation view (order 2, between InterPSS and Trajectory) — one `readDrawio` RPC,
+    // the self-contained SVG renderer, pan/zoom and the bus/branch tooltips, laid out
+    // full-size. Since 0.6.9 it is the ONLY preview surface: the InterPSS tab's action row
+    // no longer carries a **Diagram** button, and the modal that button opened is gone.
+    // The case is deliberately NOT chosen here: the view follows the shared selection, so
+    // the two tabs cannot disagree about the current case, and it adds no Host endpoint.
+    function DiagramView(props) {
+      const sessionId = props && props.sessionId
+      const callRemote = props && props.callRemote
+      const [caseInput, setCaseInput] = React.useState(selectedCaseInput)
+      const [files, setFiles] = React.useState(null)
+      const [filesLoading, setFilesLoading] = React.useState(false)
+      const [filesError, setFilesError] = React.useState(null)
+      const [path, setPath] = React.useState('')
+      const [xml, setXml] = React.useState('')
+      const [scene, setScene] = React.useState(null)
+      const [loading, setLoading] = React.useState(false)
+      const [error, setError] = React.useState(null)
+      const [view, setView] = React.useState('rendered')
+      const [resultDir, setResultDir] = React.useState(null)
+      const [branchFile, setBranchFile] = React.useState(null)
+      // Pan/zoom of the rendered pane: the visible rectangle in scene coordinates, or null
+      // for "fit the whole diagram". Declared with the other state, above every reader.
+      const [rect, setRect] = React.useState(null)
+      const [dragging, setDragging] = React.useState(false)
+      const [tip, setTip] = React.useState(null)
+      // The "edit in the local draw.io app" button: in flight while the Host launches, and the
+      // one-line outcome under the toolbar. Neither belongs to a case, so they are cleared when
+      // a different diagram is opened.
+      const [editBusy, setEditBusy] = React.useState(false)
+      const [editMsg, setEditMsg] = React.useState(null)
+      const canvasRef = React.useRef(null)
+      const dragRef = React.useRef(null)
+      // Tooltip data keyed to the SELECTED case: the branch
+      // table indexed by bus pair, the canonical BusN spelling the Host matches on, the bus
+      // records `busConnections` hands back (filled lazily, one call per bus hovered), the
+      // open scene's resolved branch pairs, and what is under the cursor right now so a
+      // late answer can be dropped.
+      const dataRef = React.useRef({ branch: null, canonical: null, busCache: {}, pairs: null, hovered: null })
+
+      // Follow a case the Host loaded from chat. One shot rather than a poll: this view is
+      // unmounted while the Chat view runs a tool, so a fresh mount is exactly the moment
+      // the bridge answer can have changed, and the tab needs no timer of its own.
+      React.useEffect(() => {
+        let alive = true
+        callRemote('getBridgeCase', { sessionId }).then(
+          (res) => {
+            if (!alive || res === null || res === undefined || res.ok !== true) return
+            const input = typeof res.case === 'string' ? res.case : ''
+            if (input === '' || input === bridgeCaseSeen) return
+            bridgeCaseSeen = input
+            if (input === selectedCaseInput) return
+            adoptSelectedCase(input)
+            setCaseInput(input)
+          },
+          () => {},
+        )
+        return () => { alive = false }
+      }, [])
+
+      // Everything the tab shows is keyed to the selected case: its `diagram/` folder for
+      // the picker, and the result tables the tooltips quote. `diagramSeq` drops an answer
+      // that arrives after the user has already moved off the case it belongs to.
+      React.useEffect(() => {
+        const seq = ++diagramSeq
+        dataRef.current = { branch: null, canonical: null, busCache: {}, pairs: null, hovered: null }
+        setFiles(null)
+        setFilesError(null)
+        setResultDir(null)
+        setBranchFile(null)
+        setTip(null)
+        setPath('')
+        setXml('')
+        setScene(null)
+        setError(null)
+        setRect(null)
+        if (typeof caseInput !== 'string' || caseInput === '') {
+          setFiles([])
+          setFilesLoading(false)
+          return undefined
+        }
+        setFilesLoading(true)
+        callRemote('listDrawioFiles', { case: caseInput, sessionId }).then(
+          (res) => {
+            if (seq !== diagramSeq) return
+            setFilesLoading(false)
+            if (res === null || res === undefined || res.ok !== true) {
+              setFiles([])
+              setFilesError(res && res.error ? res.error : 'failed to list the case diagrams')
+              return
+            }
+            const list = res.files || []
+            setFiles(list)
+            const next = drawioTabChoice(list, diagramChoice)
+            if (next !== null) openDiagram(next)
+          },
+          (err) => {
+            if (seq !== diagramSeq) return
+            setFilesLoading(false)
+            setFiles([])
+            setFilesError(String(err && err.message ? err.message : err))
+          },
+        )
+        callRemote('checkResult', { input: caseInput, sessionId }).then(
+          (res) => {
+            if (seq !== diagramSeq) return
+            if (res === null || res === undefined || res.ok !== true || res.exists !== true) return
+            setResultDir(typeof res.resultDir === 'string' ? res.resultDir : null)
+            const name = (res.files || []).find((f) => String(f).indexOf('_DF_branch.csv') !== -1)
+            setBranchFile(name === undefined ? null : name)
+          },
+          () => {},
+        )
+        return undefined
+      }, [caseInput])
+
+      // The tooltips quote `<case>/result/<stem>_DF_branch.csv`; index it by bus pair once
+      // per result. Read in pages, and the LINES are split here because `readCsv` hands back
+      // raw CSV rows while `branchTooltip` wants columns.
+      React.useEffect(() => {
+        dataRef.current.busCache = {}
+        dataRef.current.hovered = null
+        dataRef.current.branch = null
+        dataRef.current.canonical = null
+        if (branchFile === null || resultDir === null) return undefined
+        const pair = new Map()
+        const canonical = {}
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + branchFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (res === null || res === undefined || res.ok !== true) return
+              const rows = res.rows || []
+              for (const line of rows) {
+                const c = String(line).split(',')
+                const from = String(c[4] || '').trim()
+                const to = String(c[7] || '').trim()
+                if (from === '' || to === '') continue
+                canonical[from.toLowerCase()] = from
+                canonical[to.toLowerCase()] = to
+                const key = [from.toLowerCase(), to.toLowerCase()].sort().join('|')
+                if (!pair.has(key)) pair.set(key, [])
+                pair.get(key).push(c)
+              }
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              dataRef.current.branch = pair
+              dataRef.current.canonical = canonical
+            },
+            () => {},
+          )
+        }
+        page(0, 0)
+        return undefined
+      }, [branchFile, resultDir])
+
+      // The preview's read: fetch the .drawio, decode it
+      // (plain or compressed) and resolve element -> branch once, not on every repaint.
+      // `diagramLoadSeq` drops a diagram the user has already switched away from.
+      function openDiagram(next) {
+        if (typeof next !== 'string' || next === '') return
+        diagramChoice = next
+        const seq = ++diagramLoadSeq
+        setPath(next)
+        setXml('')
+        setScene(null)
+        setError(null)
+        setView('rendered')
+        setRect(null)
+        setEditMsg(null)
+        setLoading(true)
+        callRemote('readDrawio', { path: next, sessionId }).then(
+          (res) => {
+            if (res === null || res === undefined || res.ok !== true) {
+              throw new Error(res && res.error ? res.error : 'failed to read the diagram')
+            }
+            if (seq !== diagramLoadSeq) return null
+            setXml(res.xml)
+            return diagramXmlFrom(res.xml)
+          },
+        ).then(
+          (text) => {
+            if (text === null || seq !== diagramLoadSeq) return
+            const parsed = parseDrawioScene(text)
+            dataRef.current.pairs = drawioBranchPairs(parsed)
+            setScene(parsed)
+            setLoading(false)
+          },
+          (err) => {
+            if (seq !== diagramLoadSeq) return
+            setLoading(false)
+            setError(String(err && err.message ? err.message : err))
+          },
+        )
+      }
+
+      // --- Tooltips -----------------------------------------------------------
+      function branchPath() {
+        return branchFile === null || resultDir === null ? null : resultDir + '/' + branchFile
+      }
+
+      function showTip(text, e) {
+        setTip({ text: text, x: e.clientX, y: e.clientY })
+      }
+      function moveTip(e) {
+        setTip((t) => (t ? { text: t.text, x: e.clientX, y: e.clientY } : t))
+      }
+      function hideTip() {
+        setTip(null)
+      }
+
+      // Hand the open diagram to the local draw.io app. The browser cannot start a process, so
+      // the Host does it — and `open` reports success as soon as the OS has the file, so a
+      // success here means "launched", never "saved". A failure prints the Host's own reason
+      // (which launcher it tried, and what that launcher said) instead of a bare error.
+      function openInDrawio() {
+        if (path === '' || editBusy) return
+        setEditBusy(true)
+        setEditMsg(null)
+        const target = path
+        callRemote('openDrawio', { path: target, sessionId }).then(
+          (res) => {
+            setEditBusy(false)
+            if (res !== null && res !== undefined && res.ok === true) {
+              setEditMsg({ ok: true, text: 'Launched draw.io' + (res.launcher ? ' (' + res.launcher + ')' : '') })
+              return
+            }
+            setEditMsg({ ok: false, text: 'Could not launch draw.io: ' + (res && res.error ? res.error : 'unknown error') })
+          },
+          (err) => {
+            setEditBusy(false)
+            setEditMsg({ ok: false, text: 'Could not launch draw.io: ' + String(err && err.message ? err.message : err) })
+          },
+        )
+      }
+
+      // A cache hit answers instantly; otherwise the bus says who it is, one call fills the
+      // cache for it AND its branch neighbours, and the tip is rewritten only if that same
+      // bus is still under the cursor.
+      function diagramBusTip(nodeId, event) {
+        const data = dataRef.current
+        const busId = drawioCanonicalBusId(data.canonical, nodeId)
+        data.hovered = { kind: 'bus', id: busId }
+        const known = data.busCache[busId]
+        if (known !== undefined) {
+          showTip(busTooltip(known), event)
+          return
+        }
+        showTip(drawioFallbackTip(String(busId), data.branch !== null), event)
+        const target = branchPath()
+        if (target === null) return
+        callRemote('busConnections', { busId: busId, path: target, sessionId: sessionId }).then(
+          (res) => {
+            if (res === null || res === undefined || res.ok !== true) return
+            for (const rec of (res.busRecords || [])) data.busCache[rec.id] = rec
+            const now = data.hovered
+            const filled = data.busCache[busId]
+            if (filled === undefined || now === null || now.kind !== 'bus' || now.id !== busId) return
+            setTip((t) => (t === null ? t : { text: busTooltip(filled), x: t.x, y: t.y }))
+          },
+          () => {},
+        )
+      }
+
+      // An edge, either half of a transformer chain, or the symbol itself. Parallel circuits
+      // between one bus pair all match and are rendered one block each.
+      function diagramBranchTip(key, event) {
+        const data = dataRef.current
+        data.hovered = { kind: 'branch', key: key }
+        const rows = data.branch === null || data.branch === undefined ? undefined : data.branch.get(key)
+        showTip(rows === undefined || rows.length === 0
+          ? drawioFallbackTip(drawioPairLabel(key), data.branch !== null)
+          : rows.map((r) => branchTooltip(r)).join('\n\n'), event)
+      }
+
+      // --- Pan / zoom ---------------------------------------------------------
+      // One SVG with a moving viewBox: the wheel zooms about the
+      // cursor, dragging pans, and Fit returns to the scene's own viewBox.
+      function currentRect() {
+        if (scene === null) return null
+        return rect === null ? drawioFitRect(scene.viewBox) : rect
+      }
+
+      function metrics(r) {
+        const el = canvasRef.current
+        if (el === null || typeof el.getBoundingClientRect !== 'function') return null
+        const box = el.getBoundingClientRect()
+        if (!(box.width > 0) || !(box.height > 0)) return null
+        const scale = Math.min(box.width / r.w, box.height / r.h)
+        if (!Number.isFinite(scale) || scale <= 0) return null
+        return { box: box, scale: scale, offX: (box.width - r.w * scale) / 2, offY: (box.height - r.h * scale) / 2 }
+      }
+
+      // `preserveAspectRatio="xMidYMid meet"` letterboxes the scene inside the element, so
+      // the anchor is computed through the box actually drawn — the smaller of the two
+      // ratios, centred — not the element's own box.
+      function applyZoom(factor, clientX, clientY) {
+        const r = currentRect()
+        if (r === null) return
+        const limits = drawioZoomLimits(scene.viewBox)
+        const m = metrics(r)
+        if (m === null) { setRect(drawioZoomRect(r, factor, 0.5, 0.5, limits)); return }
+        const sx = r.x + (clientX - m.box.left - m.offX) / m.scale
+        const sy = r.y + (clientY - m.box.top - m.offY) / m.scale
+        setRect(drawioZoomRect(r, factor, (sx - r.x) / r.w, (sy - r.y) / r.h, limits))
+      }
+
+      function stepZoom(factor) {
+        const r = currentRect()
+        if (r === null) return
+        setRect(drawioZoomRect(r, factor, 0.5, 0.5, drawioZoomLimits(scene.viewBox)))
+      }
+
+      function fit() {
+        setRect(null)
+        dragRef.current = null
+        setDragging(false)
+      }
+
+      // Registered natively rather than as onWheel so preventDefault is permitted: React
+      // delegates wheel passively, which would scroll the panel while zooming.
+      React.useEffect(() => {
+        if (scene === null) return undefined
+        const el = canvasRef.current
+        if (el === null || typeof el.addEventListener !== 'function') return undefined
+        const onWheel = (e) => {
+          if (e.preventDefault) e.preventDefault()
+          applyZoom(drawioWheelFactor(e.deltaY), e.clientX, e.clientY)
+        }
+        el.addEventListener('wheel', onWheel, { passive: false })
+        return () => el.removeEventListener('wheel', onWheel)
+      }, [scene, rect])
+
+      // A tip must not outlive the diagram it describes.
+      React.useEffect(() => {
+        setTip(null)
+        dataRef.current.hovered = null
+        return undefined
+      }, [path])
+
+      function pointerDown(e) {
+        const r = currentRect()
+        if (r === null) return
+        const m = metrics(r)
+        if (m === null) return
+        dragRef.current = { x: e.clientX, y: e.clientY, scale: m.scale }
+        setDragging(true)
+        if (e.preventDefault) e.preventDefault()
+      }
+
+      function pointerMove(e) {
+        const r = currentRect()
+        const drag = dragRef.current
+        if (r === null || drag === null) return
+        const dx = (e.clientX - drag.x) / drag.scale
+        const dy = (e.clientY - drag.y) / drag.scale
+        dragRef.current = { x: e.clientX, y: e.clientY, scale: drag.scale }
+        setRect(drawioPanRect(r, -dx, -dy))
+      }
+
+      function pointerUp() {
+        dragRef.current = null
+        setDragging(false)
+      }
+
+      const fileCount = files === null ? 0 : files.length
+      const selectStyle = { padding: '0 10px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', height: '30px', boxSizing: 'border-box', maxWidth: '420px' }
+
+      // The tab's top row: the case it follows on the left, and the one control that leaves the
+      // app — the draw.io edit button — in the upper-right corner. The button is deliberately
+      // NOT in the toolbar below (that row is view/zoom only) and deliberately not on a row of
+      // its own at the bottom: the drawing is taller than the panel, so a bottom row lands below
+      // the fold and the button looks like it vanished (0.6.13) or has to be pinned with sticky
+      // (0.6.14). The header keeps it in view, beside the drawing's own controls.
+      const editControls = path !== ''
+        ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } },
+          editMsg !== null ? React.createElement('span', {
+            style: { fontSize: '12px', maxWidth: '360px', textAlign: 'right', color: editMsg.ok ? 'var(--dsw-alias-label-secondary)' : 'var(--dsw-alias-state-error-primary)' },
+          }, editMsg.text) : null,
+          React.createElement('button', {
+            onClick: openInDrawio,
+            disabled: editBusy,
+            title: 'Edit this diagram in the local draw.io app',
+            'aria-label': 'Edit this diagram in the local draw.io app',
+            style: { ...btn, padding: '4px 7px', display: 'inline-flex', alignItems: 'center', opacity: editBusy ? 0.6 : 1, cursor: editBusy ? 'progress' : 'pointer' },
+          }, drawioAppIcon),
+        )
+        : null
+
+      const caseRow = React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
+        React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
+          React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' } }, 'Simu Case'),
+          React.createElement('span', { style: { fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' } },
+            caseInput === '' ? '(none selected)' : caseInput),
+          caseInput === ''
+            ? React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '12px' } },
+              'Select a case in the InterPSS tab and this view follows it.')
+            : null,
+        ),
+        editControls,
+      )
+
+      // The picker only exists when there is something to pick: one diagram is already
+      // open, and none is a state the body explains.
+      const picker = fileCount > 1
+        ? React.createElement('select', {
+          value: path,
+          onChange: (e) => openDiagram(e.target.value),
+          style: selectStyle,
+        }, files.map((f) => React.createElement('option', { key: f.path, value: f.path },
+          f.path.slice(f.path.lastIndexOf('/') + 1) + (typeof f.size === 'number' ? '  (' + Math.max(1, Math.round(f.size / 1024)) + ' KB)' : ''))))
+        : null
+
+      const toolbar = (path !== '' || picker !== null)
+        ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
+          picker,
+          path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered') : null,
+          path !== '' ? React.createElement('button', { onClick: () => setView('source'), style: { ...btn, padding: '4px 10px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source') : null,
+          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
+          path !== '' && view === 'rendered' && scene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(scene, rect) + '%') : null,
+          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
+          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: fit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
+        )
+        : null
+
+      const body = caseInput === ''
+        ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } },
+          'No simulation case selected. Pick one in the InterPSS tab — its diagram folder is listed here automatically.')
+        : filesError !== null
+          ? React.createElement('pre', { style: { ...mono, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, filesError)
+          // `files === null` is "the listing has not answered yet", so the first paint of a
+          // selected case reads as a lookup rather than as a blank tab.
+          : (filesLoading || files === null)
+            ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Looking for .drawio files…')
+            : files.length === 0
+              ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } },
+                'No .drawio file in this case\'s diagram folder yet.')
+              : loading
+                ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading diagram…')
+                : error !== null
+                  ? React.createElement('pre', { style: { ...mono, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, error)
+                  : view === 'source'
+                    ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, xml || '')
+                    : scene !== null
+                      ? React.createElement('div', {
+                        ref: canvasRef,
+                        onPointerDown: pointerDown,
+                        onPointerMove: pointerMove,
+                        onPointerUp: pointerUp,
+                        onPointerCancel: pointerUp,
+                        onPointerLeave: pointerUp,
+                        style: { height: '70vh', minHeight: '320px', overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' },
+                      }, React.createElement(DrawioDiagram, {
+                        scene: scene,
+                        view: rect,
+                        hover: {
+                          pairs: dataRef.current.pairs,
+                          onBus: diagramBusTip,
+                          onBranch: diagramBranchTip,
+                          onMove: moveTip,
+                          onLeave: hideTip,
+                        },
+                      }))
+                      : null
+
+      const tipEl = tip ? React.createElement('div', {
+        style: {
+          position: 'fixed', left: tip.x + 12, top: tip.y + 12,
+          background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '6px',
+          padding: '8px 10px', fontSize: '11px', lineHeight: '1.5', whiteSpace: 'pre',
+          color: 'var(--dsw-alias-label-primary)', zIndex: 10000, pointerEvents: 'none',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.4)', maxWidth: '320px',
+        },
+      }, tip.text) : null
+
+      // No title and no subtitle: the tab bar already names this view, and the first row
+      // ("Simu Case <path>") says what is drawn. A heading here only pushed the diagram down.
+      return React.createElement('div', { style: { padding: '20px', display: 'flex', flexDirection: 'column', gap: '10px' } },
+        caseRow,
+        toolbar,
+        body,
+        tipEl,
+      )
+    }
+
     // --- ACLF tool-card result explorer ---------------------------------------
     // Owns the whole card for the `interpss_run_aclf` Tool through the
     // session-scoped `tool.call.toolview` slot (keyed by the wire Tool name).
@@ -1996,17 +3155,6 @@ module.exports = {
         files: files,
         converged: meta.converged === true,
       }
-    }
-
-    // Clicking a header sorts by it (ascending first); clicking the sorted one flips the
-    // direction. Pure, so the panel's state change stays a one-liner.
-    function nextCsvSort(column, desc, clicked) {
-      const name = String(clicked === null || clicked === undefined ? '' : clicked).trim()
-      if (name === '') return { column: column, desc: desc === true }
-      if (column !== null && String(column).toLowerCase() === name.toLowerCase()) {
-        return { column: column, desc: !(desc === true) }
-      }
-      return { column: name, desc: false }
     }
 
     function explorerPathForKind(meta, kind) {
@@ -2444,6 +3592,11 @@ module.exports = {
     slots.inject('conversation.view', () => slots.register(
       { name: 'conversation.view', id: 'interpss', order: 1, label: 'InterPSS' },
       (props) => React.createElement(InterPssView, { sessionId: props && props.sessionId, callRemote: callRemote }),
+    ))
+    // Order 2 puts the Diagram tab between InterPSS (1) and Trajectory (10).
+    slots.inject('conversation.view', () => slots.register(
+      { name: 'conversation.view', id: 'diagram', order: 2, label: 'Diagram' },
+      (props) => React.createElement(DiagramView, { sessionId: props && props.sessionId, callRemote: callRemote }),
     ))
     slots.inject('tool.call.toolview', () => slots.register(
       { name: 'tool.call.toolview', key: 'interpss_run_aclf' },

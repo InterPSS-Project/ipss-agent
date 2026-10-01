@@ -24,7 +24,7 @@ visible to the other.
 
 | Artifact | Description |
 | --- | --- |
-| `interpss-persistent/deepseek-ai-dsh-interpss-<version>.tgz` | npm-pack tarball of the plugin package — the primary distributable. Current: **0.5.0** (older 0.2.3 … 0.4.14 tarballs are kept alongside it). |
+| `interpss-persistent/deepseek-ai-dsh-interpss-<version>.tgz` | npm-pack tarball of the plugin package — the primary distributable. Current: **0.6.16** (older 0.2.3 … 0.6.15 tarballs are kept alongside it). |
 | `interpss-persistent/` (the unpacked package source) | Point an install at this directory instead of the tarball. |
 | `InstallDSHPlugin.md` | This file. |
 
@@ -35,9 +35,10 @@ it.
 
 Verified in this repository on **DSH Desktop 0.1.7-rc.2** (nightly, macOS arm64; the harness is
 bundled at `…/DeepSeek Harness.app/Contents/Resources/app.asar/dsh`) with `@deepseek-ai/dsh-interpss`
-**0.5.0**. The `dsh web` side runs its harness from `$DSH_HOME/profiles/node_modules` (0.1.5-rc.3
-here), so the two surfaces can differ in client features — check both before calling a UI
-difference a plugin bug.
+**0.6.16**, installed into `~/.dsh/profiles/desktop` — the profile the Desktop app serves the GUI
+from. **The Desktop profile is the only supported target at this stage.** The `dsh web` surface
+runs its harness from `$DSH_HOME/profiles/node_modules` with its own, older profile, so a UI
+difference seen there is not a plugin bug.
 
 ## Prerequisites
 
@@ -68,7 +69,7 @@ list the plugin bundles in this profile
 ```
 
 ```text
-install the bundle at /Users/<you>/Documents/wspace/gitRepo/ipss-agent/interpss-persistent/deepseek-ai-dsh-interpss-0.5.0.tgz
+install the bundle at /Users/<you>/Documents/wspace/gitRepo/ipss-agent/interpss-persistent/deepseek-ai-dsh-interpss-0.5.1.tgz
 ```
 
 The tool requires the full-access permission mode and asks for approval before it changes the
@@ -217,12 +218,13 @@ refresh the window first.
 - **`profile "desktop" is managed exclusively by the Electron application`** — expected for *any*
   `dsh` CLI command aimed at the app's profile, including `dsh plugin`. Use Method 1.
 - **The plugin stops loading after the repository moves or is renamed** — each profile pins an
-  absolute `file:` path (e.g. `file:/…/ipss-agent/interpss-persistent/deepseek-ai-dsh-interpss-0.5.0.tgz`).
+  absolute `file:` path (e.g. `file:/…/ipss-agent/interpss-persistent/deepseek-ai-dsh-interpss-0.6.16.tgz`).
   Reinstall from the new location after `git clone` to a different directory.
-- **Version skew between the two profiles** — the `desktop` profile currently pins 0.5.0 while
-  `web` still pins `…-0.4.12.tgz`, a tarball that no longer ships in `interpss-persistent/`. An
-  install into `web` fails until that dependency is re-pointed at an existing tarball (or the
-  registry), e.g. `dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.5.0.tgz`.
+- **Version skew between the two profiles** — the `desktop` profile pins 0.6.16. The `web`
+  profile is on **0.5.1** and is deliberately **out of scope at this stage**: it has no Diagram
+  tab and no sortable result tables, so do not read a difference there as a regression.
+  Bringing it forward needs its dependency re-pointed at an existing tarball, e.g.
+  `dsh plugin --profile web add /path/to/deepseek-ai-dsh-interpss-0.6.16.tgz`.
 - **Tab does not appear** — confirm the `interpss` row is present in
   `$DSH_HOME/profiles/<profile>/cordis.patch.yml` (or in `dsh.profile.bundles` in that profile's
   `package.json` after Method 1/2) and that the package files exist under

@@ -59,6 +59,19 @@ You can then run the power system simulation workflow or chat following the proc
 
 ---
 
+### Open the Diagram tab
+
+The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
+one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
+folder). Hover buses/branches for tooltips, zoom/pan with the toolbar, and use the **draw.io**
+button (0.6.12+; the desktop-app path is configurable per OS via `config/ipss_plugin_env.json`,
+0.6.16+) to edit in the desktop app. If the case has no diagram yet, generate one with
+`$ipss-case-diagram` after ACLF.
+
+Full how-to (generate, edit, troubleshoot): [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
+
+---
+
 
 
 ### Load a simulation case
@@ -318,9 +331,12 @@ For the full tool contract (inputs, cards, version history), see [interpss-tools
 | Adjust load Q to a voltage band   | `Adjust Bus14 load Q to bring it into [0.89, 0.90] pu`           | `$ipss-case-aclf-adjust` / `interpss_run_gvy` + `interpss_run_aclf` |
 | Case summary / top-N              | `Summarize the current case` / `Find the lowest voltage buses`   | `$ipss-case-summary` / `interpss_case_summary` |
 | What-if scenario script           | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve`             | `$ipss-case-script` / `interpss_run_gvy`       |
+| One-line diagram for the case     | `Draw the one-line diagram for the current case`                 | `$ipss-case-diagram` (script)                  |
 
 
-Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`. Plain natural language works the same when the agent picks those tools.
+Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`, `$ipss-case-diagram`. Plain natural language works the same when the agent picks those tools.
+
+For the Diagram tab, generation, and draw.io editing, see [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
 
 ### Case selection
 
@@ -434,6 +450,7 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 
 ### Related
 
+- Diagram tab / one-line generation — [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md)
 - InterPSS DSH Chat tools (developer reference) — [interpss-tools.md](../interpss-tools.md)
 - Batch Chat / `/ipss-sim` — [batch_chat_user_guide.md](batch_chat_user_guide.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)
