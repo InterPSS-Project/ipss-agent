@@ -1,0 +1,6 @@
+Based on the InterPSS_UAT_Process.md and the UAT env, Create 4 videos:
+1) Based on the InstallDSHPlugin.md and batch_chat_user_guide, to cover InterPSS DSH plugin installation and 
+   running power system simulation using the /ipss-sim skill.
+2) Based on the dsh_plugin_user_guide.md, to cover running power system simulation in the InterPSS Tab and in the Chat Tab;
+3) Based on the loadflow-adjustment-user-guide, to cover Loadflow adjustment functions
+4) Based on the online_diagram_user_guide.md, to cover View and generate one-line diagrams   
