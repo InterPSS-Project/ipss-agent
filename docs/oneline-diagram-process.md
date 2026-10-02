@@ -55,9 +55,9 @@ than reinventing.
 
 | Step | Detail |
 |------|--------|
-| Layout | all-pairs hop distances from the branch list -> stress majorization (SMACOF); a scale search with neighbour attraction and footprint collision repair compacts it; the drawing is reshaped towards a page-friendly aspect, oriented so the case's first bus sits at the upper-left corner, and snapped to a 10 px grid |
-| Footprint | one bus = bar 6x52 with its `Bus-N` label above; the repair keeps footprints from overlapping, so no two bars or labels collide |
-| Branches | straight black lines with staggered taps per bar side; a short local hop around a bar only when a straight line would cut through one |
+| Layout | **up to 250 buses** (`--layout force`, the default for small cases): all-pairs hop distances from the branch list -> stress majorization (SMACOF); a scale search with neighbour attraction and footprint collision repair compacts it; the drawing is reshaped towards a page-friendly aspect, oriented so the case's first bus sits at the upper-left corner, and snapped to a 10 px grid. **Above 250 buses** (`--layout lattice`, and `auto` above the threshold): the graph is partitioned into connected clusters of at most 48 buses, each cluster is laid out with that same pipeline at a size it is proven at, the clusters' blocks are shelf-packed (adjacency-ordered, tall blocks first, one cell of gutter), and every bus then takes its own 90 x 110 px lattice cell -- so separation, the page bound and the top-left anchor hold by construction rather than by a repair loop that can give up. Two cells are 1.73 x 1.53 footprints apart, which is why no two buses can overlap |
+| Footprint | one bus = bar 6x52 with its `Bus-N` label above; footprints never overlap (the repair enforces it on the force path, the lattice makes it structural on the lattice path), and the self-check now fails on an overlap instead of only printing the count |
+| Branches | straight black lines with staggered taps per bar side; on the force path a short local hop around a bar when a straight line would cut through one, and on the lattice path the branches are emitted **before** the bars so the bars mask the wires (no hop search over 3000 long lines) |
 | Transformers | `IsXfmr` branches -> two interlocking 16x16 rings inside **one** `style=group` cell, placed on the branch trunk -- along it first, then stepped aside -- so the pair stays inline and clear of every bar and label, chained by two stub edges |
 | Annotations | none: no bus data, no branch P/Q, no voltage colours |
 | Outputs | `<case>/diagram/<stem>-oneline.drawio` and `<stem>-oneline-preview.png` (a Pillow re-render of the same geometry) |
@@ -178,7 +178,8 @@ bus/branch tooltips resolve against.
   re-expressed as theme tokens; a deliberately coloured element keeps its colour), and
   shows bus/branch tooltips built from the case's result tables. It renders the subset these
   diagrams use — rounded rects, ellipses, text, groups, polylines through waypoints — and
-  caps a scene at 2000 cells. The **Diagram** tab (order 2, beside InterPSS) draws it full-size
+  caps a scene at 20000 cells and reads up to 4 MiB (0.6.20; the earlier 2000-cell / 2 MiB ceilings
+  refused a 2000-bus case). The **Diagram** tab (order 2, beside InterPSS) draws it full-size
   and follows whichever case
   the InterPSS tab has selected. Implementation notes:
   [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md).
@@ -217,6 +218,18 @@ bus/branch tooltips resolve against.
   two buses drawn side by side are a few branches apart, not a few miles.
 - **Wires still cross.** 186 branches over 118 bars cannot be crossing-free; the *geometry* is
   collision-free (bars, labels, transformer symbols), the routes are not.
+- **The force pipeline is proven to ~118 buses** (465 cells); past a few hundred footprints its
+  scale search finds no clean separation and the failure used to be silent. Measured on Texas 2K
+  (2000 buses / 3220 branches / 861 transformers) before the lattice path existed:
+  `wrote … (4000x4.9073e+06, … 2193 overlapping footprints)`, 127 self-check failures (the Bus-1
+  corner rule plus 126 transformer/bar-label overlaps — `xfg1` alone overlapped 18 buses), ~8
+  minutes.
+- **The lattice path places 2000 buses**: Texas 2K now reports `placed 2000 buses with the lattice
+  strategy in ~17s`, a **8000 x 6000** page (43% full, 87 x 53 cells), **0 overlapping footprints**,
+  0 transformer overlaps, all 861 symbols in reserved gaps, and a self-check `PASS` in ~18 s — with
+  10 671 cells / 2.95 MiB, inside the preview caps of 20000 cells / 4 MiB. Branch grid distance:
+  median 4 cells, p95 71 (the long tail is the tie lines between the case's many small islands,
+  which no placement can shorten).
 - **The preview is approximate.** No orthogonal auto-routing, no arrowheads, single font size; open
   the file in draw.io when exact geometry matters. A fitted 1900 x 1700 drawing makes 11 px labels
   small until you zoom in.

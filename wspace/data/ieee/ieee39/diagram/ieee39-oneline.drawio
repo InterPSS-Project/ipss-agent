@@ -1,6 +1,6 @@
 <mxfile host="Electron">
   <diagram id="ieee39-oneline" name="IEEE 39-Bus One-Line Diagram">
-    <mxGraphModel dx="994" dy="714" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="900" background="#ffffff" math="0" shadow="0">
+    <mxGraphModel dx="1308" dy="939" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="900" pageHeight="900" background="#ffffff" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -299,7 +299,7 @@
             <mxPoint x="497" y="735" as="sourcePoint" />
           </mxGeometry>
         </mxCell>
-        <mxCell id="e50" edge="1" parent="1" style="endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=1.5;exitX=0.5;exitY=0;entryX=0.5;entryY=1;entryDx=0;entryDy=0;" target="xf8b" value="">
+        <mxCell id="e50" edge="1" parent="1" source="bus36" style="endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=1.5;exitX=1;exitY=0.25;entryX=0.5;entryY=1;entryDx=0;entryDy=0;exitDx=0;exitDy=0;" target="xf8b" value="">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="439" y="770" as="sourcePoint" />
             <mxPoint x="456.80200000000013" y="743.2350000000001" as="targetPoint" />

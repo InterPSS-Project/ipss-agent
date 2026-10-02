@@ -90,8 +90,11 @@ async function scanCases(fs, dirTarget, relDir, out) {
   }
 }
 
-// The preview reads one diagram at a time, so this bounds what it accepts as text.
-const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
+// The preview reads one diagram at a time, so this bounds what it accepts as text. It is checked
+// BEFORE the read, so an oversized file never reaches the RPC payload. 4 MiB covers the largest
+// drawing this workspace produces -- a 2000-bus case is ~2.9 MiB of XML (Texas 2K) -- with room
+// for a hand-edited one on top; the 20000-cell preview cap is the other half of the bound.
+const MAX_DRAWIO_BYTES = 4 * 1024 * 1024
 
 // --- Launch the local draw.io app (shared, byte-identical in both hosts) -----
 // The browser cannot start a process, so the Diagram tab's edit button asks the Host — and the

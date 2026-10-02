@@ -54,12 +54,13 @@ The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram**
 
 ### Toolbar and interaction
 
-Toolbar (plugin **0.6.11+**, single-letter view toggle **0.6.17+**): **R · S · − · 100% · + · Fit**, plus the **draw.io** button in the tab’s upper-right corner (**0.6.12+**). `R` is the rendered drawing and `S` the raw XML — hover either for the full wording (`Rendered view` / `Source view — the raw draw.io XML`).
+Toolbar (plugin **0.6.11+**, single-letter view toggle **0.6.17+**, zoom picker **0.6.21+**): **R · S · − · [level ▾] · + · Fit**, plus the **draw.io** button in the tab’s upper-right corner (**0.6.12+**). `R` is the rendered drawing and `S` the raw XML — hover either for the full wording (`Rendered view` / `Source view — the raw draw.io XML`). The middle control is a **zoom picker**: it shows the current level and sets it from **25 / 50 / 75 / 100 / 125 / 150 / 200 / 300 / 400 %**, about the centre of what you are looking at. A level you reached with the wheel (say 745 %) is listed too and shown as the selection, so you can always come back to it.
 
 | Action | Effect |
 | ------ | ------ |
 | **hover** a bus bar (or its `Bus-N` label) or a branch | Same tooltip style as the InterPSS connection diagram; without a converged result: `no result data — run ACLF` |
 | **scroll** / **drag** | Zoom about the cursor / pan |
+| **the level ▾ picker** (**0.6.21+**) | Pick a zoom percentage (25–400 %) and the view zooms about its centre; the list also carries whatever level the wheel reached, selected |
 | **Fit** | Reset view to the page |
 | **R** / **S** | Rendered drawing / Source — the raw draw.io XML |
 | **a red bar + red `Bus-N`** (**0.6.18+**) | That bus's solved voltage magnitude is outside **0.9–1.1 pu** (checked strictly: the endpoints themselves are in band). Hover it for `⚠ |V| outside 0.9–1.1 pu`. Needs the case's ACLF result tables; a case with no results, or every bus in band, simply shows no red. **The `.drawio` file is not modified** — the colour is chosen when the tab renders the SVG, so the file, the desktop draw.io app and the generator's PNG preview stay exactly as generated |
@@ -146,6 +147,7 @@ Useful flags:
 | Flag | Detail |
 | ---- | ------ |
 | `--title TEXT` | Page title and diagram name |
+| `--layout auto\|force\|lattice` | Placement strategy. `auto` (default) uses the force pipeline up to **250 buses** and the lattice above it; `lattice` puts every bus on its own grid cell (the only path that can place a large case — Texas 2K, 2000 buses, produces an 8000 × 6000 page in ~18 s); `force` always uses the original pipeline |
 | `--seed N` | Another valid layout for the same topology (default `11`) |
 | `--no-png` | Skip the Pillow preview |
 | `--check FILE` | Validate an existing diagram; write nothing |
@@ -216,6 +218,8 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 | draw.io button does nothing / Host error | Install draw.io desktop app; point `exe` at your install in `config/ipss_plugin_env.json` (0.6.16+); restart `dsh web` after plugin Host updates (0.6.12+) |
 | Bus tooltips broken after hand edit | Keep cell ids `busN` and labels exactly `Bus-N`; keep each transformer’s two rings under one `style=group` cell |
 | Layout still ugly after generate | Try another `--seed`; for tiny teaching cases, prefer hand layout in draw.io |
+| “too large to preview” / “diagram too large” | The ceilings are **20000 cells** and **4 MiB** since **0.6.20** (they were 2000 cells / 2 MiB before 0.6.19, and 5 MiB in 0.6.19). **The byte ceiling is a Host limit, so it only changes after an app restart** — until then the running app keeps refusing with its old number. A 2000-bus case like Texas 2K now fits (~10.7k cells, ~3 MB); something far bigger — `OpenEInterconnect` is 78k buses — still will not, and is unreadable as one page anyway. The Host cap needs an app restart to take effect |
+| Generating a large case is slow or the self-check fails on overlaps | Use `--layout lattice` (or leave it `auto`, which switches at 250 buses). The force pipeline cannot separate a few thousand footprints: on Texas 2K it wrote a 4000 x 4 907 300 px page with 2193 overlapping footprints, while the lattice path writes an 8000 x 6000 page with none, in about 18 seconds. A large drawing is legible block by block but its long-range tie lines cross the page — that is the case's own structure, not a defect you can fix with another seed |
 | Hand edits disappeared | Regenerating overwrites the default `<stem>-oneline.drawio` — use a separate filename |
 
 

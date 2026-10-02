@@ -697,7 +697,10 @@ return {
     const DRAWIO_STROKE = '#000000'
     const DRAWIO_TEXT = '#111827'
     const DRAWIO_PAD = 20
-    const DRAWIO_MAX_CELLS = 2000
+    // The preview is O(cells) React elements, so this bounds what it will attempt. A 2000-bus case
+    // has to fit — Texas 2K is 2000 bars + 3220 branches + 861 transformer symbols = ~10.7k cells
+    // — and 20000 leaves room above that without letting a pathological file lock the tab up.
+    const DRAWIO_MAX_CELLS = 20000
     // Tooltip hit areas. A branch is a 1.5px line and a bus bar is 6px wide, so the drawn
     // geometry is impractical to hover; each interactive cell also emits an invisible shape
     // with this stroke width, or a transparent rect padded by this many scene units.
@@ -1030,6 +1033,10 @@ return {
     // "fit", and a fit is simply the scene's own viewBox.
     const DRAWIO_MIN_ZOOM = 0.1
     const DRAWIO_MAX_ZOOM = 12
+    // The percentages the zoom readout offers. Wheel and button zooming reach values in between
+    // (745%, say), so the control shows the current level as an extra entry when it is not one of
+    // these -- a readout that rounded to the nearest preset would be lying about the view.
+    const DRAWIO_ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300, 400]
 
     function drawioFitRect(vb) {
       return { x: vb.x, y: vb.y, w: vb.w, h: vb.h }
@@ -3043,6 +3050,24 @@ return {
         setRect(drawioZoomRect(r, factor, 0.5, 0.5, drawioZoomLimits(scene.viewBox)))
       }
 
+      // A percentage picked from the readout sets that zoom level about the centre of what is on
+      // screen. The height comes from the scene's own aspect (not the rect's), so a sequence of
+      // picks cannot drift the view into a letterbox, and the width is clamped by the same limits
+      // the wheel uses -- which is why an extreme pick lands on the limit and the readout then
+      // shows that limit rather than the number that was asked for.
+      function setZoomPercent(pct) {
+        if (scene === null || !Number.isFinite(pct) || pct <= 0) return
+        const r = currentRect()
+        if (r === null) return
+        const vb = scene.viewBox
+        const limits = drawioZoomLimits(vb)
+        const w = Math.min(limits.maxW, Math.max(limits.minW, vb.w * 100 / pct))
+        const h = w * (vb.h / vb.w)
+        const cx = r.x + r.w / 2
+        const cy = r.y + r.h / 2
+        setRect({ x: cx - w / 2, y: cy - h / 2, w: w, h: h })
+      }
+
       function fit() {
         setRect(null)
         dragRef.current = null
@@ -3152,7 +3177,24 @@ return {
           path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), title: 'Rendered view', 'aria-label': 'Rendered view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'R') : null,
           path !== '' ? React.createElement('button', { onClick: () => setView('source'), title: 'Source view — the raw draw.io XML', 'aria-label': 'Source view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'S') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(scene, rect) + '%') : null,
+          // The readout is the zoom picker (0.6.21): it shows the current level and sets it. A
+          // level reached with the wheel or a pinch is listed alongside the presets, so going to
+          // 100% and back to the old 745% is one click either way.
+          path !== '' && view === 'rendered' && scene !== null
+            ? (function () {
+              const pctNow = drawioZoomPercent(scene, rect)
+              const pcts = DRAWIO_ZOOM_PRESETS.indexOf(pctNow) >= 0
+                ? DRAWIO_ZOOM_PRESETS
+                : DRAWIO_ZOOM_PRESETS.concat([pctNow]).sort((a, b) => a - b)
+              return React.createElement('select', {
+                value: String(pctNow),
+                onChange: (e) => setZoomPercent(Number(e.target.value)),
+                title: 'Zoom level',
+                'aria-label': 'Zoom level',
+                style: { ...selectStyle, height: '28px', minWidth: '78px', maxWidth: '96px', padding: '0 4px', textAlign: 'center', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
+              }, pcts.map((p) => React.createElement('option', { key: p, value: String(p) }, p + '%')))
+            })()
+            : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: fit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
         )

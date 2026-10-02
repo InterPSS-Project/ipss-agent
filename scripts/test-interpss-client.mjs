@@ -108,6 +108,7 @@ function build(overrides) {
     slice + '\nreturn { InterPssView: InterPssView, DrawioDiagram: DrawioDiagram, parseDrawioScene: parseDrawioScene,'
       + ' diagramXmlFrom: diagramXmlFrom, styleMap: styleMap, labelLines: labelLines,'
       + ' drawioFitRect: drawioFitRect, drawioZoomLimits: drawioZoomLimits, drawioZoomRect: drawioZoomRect,'
+      + ' drawioZoomPercent: drawioZoomPercent, DRAWIO_ZOOM_PRESETS: DRAWIO_ZOOM_PRESETS,'
       + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
       + ' drawioThemeColor: drawioThemeColor,'
       + ' drawioBranchPairs: drawioBranchPairs, drawioIsBusId: drawioIsBusId, drawioLabelBusId: drawioLabelBusId,'
@@ -116,6 +117,7 @@ function build(overrides) {
       + ' drawioTabChoice: drawioTabChoice, DiagramView: DiagramView,'
       + ' drawioBusAlerts: drawioBusAlerts, drawioBusCellId: drawioBusCellId,'
       + ' drawioVoltOutsideBand: drawioVoltOutsideBand, drawioVoltColumns: drawioVoltColumns,'
+      + ' DRAWIO_MAX_CELLS: DRAWIO_MAX_CELLS,'
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip };');
 
 
@@ -174,11 +176,30 @@ if (scene) {
   check('15 bus bars / 15 text labels / 10 transformer ellipses',
     kinds.rect === 15 && kinds.text === 15 && kinds.ellipse === 10, JSON.stringify(kinds));
   // group children carry geometry relative to their group, so they must land at the
-  // group's own coordinates and not be offset twice
+  // group's own coordinates and not be offset twice. The group's position is read from the FILE
+  // rather than hard-coded: the point is the parser's rule, not where the diagram's author put the
+  // symbol — a case diagram is a file the draw.io button invites you to edit, and one such edit
+  // moved this very group (x=462 -> x=503), which used to fail a hard-coded check.
+  const groupGeometryOf = (src, id) => {
+    const cell = new RegExp('<mxCell id="' + id + '"[^>]*>([\\s\\S]*?)</mxCell>').exec(src);
+    if (cell === null) return null;
+    const geom = /<mxGeometry\b([^>]*?)\/?>/.exec(cell[1]);
+    if (geom === null) return null;
+    const attr = (name) => {
+      const m = new RegExp(name + '="([-\\d.]+)"').exec(geom[1]);
+      return m === null ? 0 : parseFloat(m[1]);
+    };
+    return { x: attr('x'), y: attr('y') };
+  };
   const xf15 = scene.nodes.find((n) => n.id === 'xf15');
   const xf15b = scene.nodes.find((n) => n.id === 'xf15b');
-  check('a group child lands at its group origin', xf15 && xf15.x === 462 && xf15.y === 306, xf15 && `${xf15.x},${xf15.y}`);
-  check('its pair applies the relative offset', xf15b && xf15b.x === 462 && xf15b.y === 314, xf15b && `${xf15b.x},${xf15b.y}`);
+  const group3 = groupGeometryOf(xml, '3');
+  check('a group child lands at its group origin',
+    xf15 !== undefined && group3 !== null && xf15.x === group3.x && xf15.y === group3.y,
+    (xf15 ? xf15.x + ',' + xf15.y : 'no xf15') + ' vs group ' + JSON.stringify(group3));
+  check('its pair applies the relative offset',
+    xf15b !== undefined && group3 !== null && xf15b.x === group3.x && xf15b.y === group3.y + 8,
+    (xf15b ? xf15b.x + ',' + xf15b.y : 'no xf15b') + ' vs group ' + JSON.stringify(group3));
   check('no group container is drawn', !scene.nodes.some((n) => n.id === '3' || n.id === '7'));
   // A one-line diagram is undirected: every branch carries endArrow=none. Anything with an
   // arrowhead here came from a stray edge, and 0.6.4 removed the last two (a transformer
@@ -588,19 +609,27 @@ check('the single-diagram shortcut helper went with the modal (no dead code left
 console.log('\n11. diagram bus/branch tooltips');
 const partsOf = (g) => (Array.isArray(g.kids[0]) ? g.kids[0] : g.kids);
 const groupsOf = (svg) => (svg.kids.length === 1 && Array.isArray(svg.kids[0]) ? svg.kids[0] : svg.kids);
-// The template is the style contract the case diagrams are copied from. draw.io
-// re-serialises a file it opens — viewport offsets, attribute order — so the two are no
-// longer byte-identical; what must hold is that they describe the same drawing.
+// The template is the style contract the case diagrams are drawn from, and the two must stay the
+// SAME DRAWING — same cells, same kinds, same edges. Geometry is deliberately NOT compared: a case
+// diagram is a file the draw.io button invites you to open and edit, and once a symbol is nudged in
+// draw.io (a local edit moved transformer group 3 from x=462 to x=503, leaving every id, kind and
+// edge intact) an equality of coordinates fails for a change the workflow intends. What must not
+// drift is the inventory the preview resolves against: the `busN` bars, `Bus-N` labels, the
+// group-wrapped transformer rings and the undirected edges.
 let templateScene = null;
 try {
   templateScene = api.parseDrawioScene(readFileSync(TEMPLATE_DIAGRAM, 'utf8'));
 } catch (e) {
   templateScene = null;
 }
-const sceneShape = (s) => JSON.stringify({ viewBox: s.viewBox, nodes: s.nodes, edges: s.edges });
-const sameDrawing = templateScene !== null && scene !== null && sceneShape(templateScene) === sceneShape(scene);
-check('the template and the live case diagram parse to the same drawing', sameDrawing,
-  sameDrawing ? undefined : (templateScene === null ? 'the template did not parse' : 'the two drawings differ'));
+const drawingInventory = (s) => JSON.stringify({
+  nodes: s.nodes.map((n) => n.id + ':' + n.kind).sort(),
+  edges: s.edges.map((e) => e.id).sort(),
+});
+const sameInventory = templateScene !== null && scene !== null
+  && drawingInventory(templateScene) === drawingInventory(scene);
+check('the template and the live case diagram are the same drawing, hand edits aside', sameInventory,
+  sameInventory ? undefined : (templateScene === null ? 'the template did not parse' : 'the two drawings differ'));
 
 if (scene) {
   // the parser must keep what a tooltip needs
@@ -837,6 +866,21 @@ check('rendering an open diagram does not throw', drawnFlat.indexOf('THREW') < 0
 check('the zoom toolbar and readout are present',
   drawnFlat.indexOf('"Fit"') >= 0 && drawnFlat.indexOf('"+"') >= 0
   && drawnFlat.indexOf('"' + String.fromCharCode(0x2212) + '"') >= 0 && drawnFlat.indexOf('"100%"') >= 0);
+// 0.6.21: that readout is a picker, so the render must carry its accessible name and every preset
+// as an option label -- a list that silently lost an entry would still pass a screenshot review.
+check('the readout renders as the zoom picker with its presets',
+  drawnFlat.indexOf('"Zoom level"') >= 0
+  && api.DRAWIO_ZOOM_PRESETS.every((p) => drawnFlat.indexOf('"' + p + '%"') >= 0),
+  JSON.stringify(api.DRAWIO_ZOOM_PRESETS));
+// The picker sets a width from a percentage; `drawioZoomPercent` reads it back. The two must agree
+// for every preset, or picking a level would land on a different one than it showed.
+check('every preset percent round-trips through the zoom rect width',
+  api.DRAWIO_ZOOM_PRESETS.every((p) => api.drawioZoomPercent(
+    { viewBox: { x: 0, y: 0, w: 1000, h: 800 } },
+    { x: 0, y: 0, w: 1000 * 100 / p, h: 800 * 100 / p }) === p));
+check('the preset list is the documented 25 to 400 percent',
+  JSON.stringify(api.DRAWIO_ZOOM_PRESETS) === JSON.stringify([25, 50, 75, 100, 125, 150, 200, 300, 400]),
+  JSON.stringify(api.DRAWIO_ZOOM_PRESETS));
 // Asked for in 0.6.11: the wheel and the drag are discoverable on their own, so the toolbar
 // ends at Fit.
 check('the toolbar carries no scroll/drag hint text',
@@ -928,6 +972,49 @@ check('each letter keeps its meaning in the tooltip and the accessible name',
   && sourceBtn !== null && String(sourceBtn.props['aria-label']).indexOf('Source view') >= 0
   && String(sourceBtn.props.title).indexOf('draw.io XML') >= 0,
   sourceBtn === null ? 'no S' : String(sourceBtn.props.title));
+
+// 0.6.21, the zoom picker, checked structurally: it is a `select` in the toolbar row, it sits
+// exactly between the two step buttons, and its handler exists (the harness's setState is a
+// no-op, so what is proved is that picking a level reaches a handler without throwing).
+const zoomSel = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'select'
+  && String(n.props['aria-label'] || '') === 'Zoom level');
+const zoomOutBtn = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'button' && n.props.title === 'Zoom out');
+const zoomInBtn = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'button' && n.props.title === 'Zoom in');
+const rowKids = toolbarRow === null ? [] : (toolbarRow.kids || []);
+// The options are passed to createElement as one array, which React flattens and this harness
+// keeps nested -- read both shapes, the way partsOf/groupsOf do.
+const optionKids = (sel) => (sel === null || sel.kids === undefined ? []
+  : (Array.isArray(sel.kids[0]) ? sel.kids[0] : sel.kids));
+const zoomOpts = optionKids(zoomSel).map((o) => String((o.kids || [])[0]));
+check('the level readout is a select labelled Zoom level, offering the presets',
+  zoomSel !== null && zoomSel.props.title === 'Zoom level' && zoomSel.props.value === '100'
+  && JSON.stringify(zoomOpts) === JSON.stringify(api.DRAWIO_ZOOM_PRESETS.map((p) => p + '%')),
+  JSON.stringify(zoomOpts));
+check('the picker sits between the - and + buttons',
+  zoomSel !== null && zoomOutBtn !== null && zoomInBtn !== null
+  && rowKids.indexOf(zoomSel) === rowKids.indexOf(zoomOutBtn) + 1
+  && rowKids.indexOf(zoomInBtn) === rowKids.indexOf(zoomSel) + 1,
+  JSON.stringify(rowKids.map((k) => (k === null ? 'null' : k.type + ':' + String(k.props.title || (k.kids || []).join(''))))));
+check('picking a level reaches a handler without throwing',
+  zoomSel !== null && typeof zoomSel.props.onChange === 'function'
+  && (() => { try { zoomSel.props.onChange({ target: { value: '25' } }); return true; } catch (e) { return false; } })());
+
+// A wheel-zoomed level is not one of the presets (the screenshot that asked for this was at
+// 745%), and the control must still show it -- and offer it back -- instead of rounding to 400.
+const zoomedRect = { x: 0, y: 0, w: scene.viewBox.w * 100 / 745, h: scene.viewBox.h * 100 / 745 };
+const zoomedTab = renderTab(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['rect', zoomedRect],
+]));
+const zoomedSel = findInTree(zoomedTab, (n) => n.type === 'select' && String(n.props['aria-label'] || '') === 'Zoom level');
+const zoomedOpts = optionKids(zoomedSel).map((o) => String((o.kids || [])[0]));
+check('a level the wheel reached is shown and offered back, in order',
+  zoomedSel !== null && zoomedSel.props.value === '745'
+  && JSON.stringify(zoomedOpts) === JSON.stringify(api.DRAWIO_ZOOM_PRESETS.concat([745]).map((p) => p + '%')),
+  zoomedSel === null ? 'no picker' : zoomedSel.props.value + ' / ' + JSON.stringify(zoomedOpts));
 if (editButton !== null) {
   editButton.props.onClick();
   check('the edit button asks the Host to launch draw.io for the open diagram',
@@ -1243,6 +1330,41 @@ check('the diagram path has no write RPC — the .drawio is only ever read',
 check('the tab wires the alert into the renderer from the bus result table',
   slice.indexOf('alert: busAlerts') >= 0 && slice.indexOf('setBusAlerts') >= 0
   && slice.indexOf('_DF_bus.csv') >= 0 && slice.indexOf('drawioBusAlerts(') >= 0);
+
+// --- 15. size limits --------------------------------------------------------
+console.log('\n15. size limits (20000 cells, 4 MiB)');
+// Raising ONE limit would leave the others blocking the same file, so the three move together: the
+// preview's cell cap (client), the Host's read cap (both halves) and the generator's own self-check.
+// A 2000-bus case — Texas 2K, ~10.7k cells and ~3 MB — has to fit all three.
+const GENERATOR = join(ROOT, 'wspace', 'script', 'gen_oneline_diagram.py');
+const generatorSrc = readFileSync(GENERATOR, 'utf8');
+check('the preview cap is 20000 cells', api.DRAWIO_MAX_CELLS === 20000, String(api.DRAWIO_MAX_CELLS));
+check('both hosts read up to 4 MiB of diagram',
+  rd(LIB_HOST).indexOf('MAX_DRAWIO_BYTES = 4 * 1024 * 1024') >= 0
+  && rd(DYN_HOST).indexOf('MAX_DRAWIO_BYTES = 4 * 1024 * 1024') >= 0
+  && rd(LIB_HOST).indexOf('MAX_DRAWIO_BYTES = 2 * 1024 * 1024') < 0);
+check('the generator self-check allows 20000 cells',
+  generatorSrc.indexOf('len(cells) > 20000') >= 0 && generatorSrc.indexOf('more than 2000 cells') < 0);
+
+// The boundary, both sides. The cells are geometry-less on purpose: the cap is counted before any
+// geometry is resolved, so this stays a ~0.5 MB string instead of a 20k-shape model. At the cap the
+// parse gets PAST the size check and then fails for being empty — which is the proof it passed; one
+// cell over, the size check is what fires.
+const manyCells = (n) => '<mxfile><diagram><mxGraphModel><root>'
+  + Array.from({ length: n }, (_, i) => '<mxCell id="c' + i + '"/>').join('')
+  + '</root></mxGraphModel></diagram></mxfile>';
+const capError = (n) => {
+  try {
+    api.parseDrawioScene(manyCells(n));
+    return '';
+  } catch (e) {
+    return String(e && e.message ? e.message : e);
+  }
+};
+const atCap = capError(20000);
+check('a scene of exactly 20000 cells is not rejected for its size', atCap.indexOf('cells (limit') < 0, atCap);
+check('one cell over the cap is rejected and the message quotes the new limit',
+  capError(20001).indexOf('20001 cells (limit 20000)') >= 0, capError(20001));
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

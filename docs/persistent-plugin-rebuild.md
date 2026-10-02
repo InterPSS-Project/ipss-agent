@@ -145,7 +145,7 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   backup, capped at depth 6 and 200 files); that scanner and its constants are **gone**, and
   the guard asserts neither host still carries them. `readDrawio` is unchanged: it takes a
   **workspace-relative** `.drawio` path — not the `data/…` form `readCsv` uses — and rejects
-  `..`, any non-`.drawio` name and anything over `MAX_DRAWIO_BYTES` (2 MiB) *before* reading,
+  `..`, any non-`.drawio` name and anything over `MAX_DRAWIO_BYTES` (4 MiB, 0.6.20; 2 MiB before 0.6.19) *before* reading,
   so an oversized file never reaches the RPC payload. `MAX_DRAWIO_BYTES` and `readDrawio` are
   byte-identical in the persistent Host and the two dynamic ones.
 - **Edit in the local draw.io app (Host half, since 0.6.12)**: `openDrawio` takes the same
@@ -432,10 +432,17 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     - Colour alone is not accessible, so the same fact rides the tooltip (`drawioBusText` appends
       `⚠ |V| outside 0.9–1.1 pu`), and the toolbar stays controls-only.
   - Guard §12 renders the view — idle, no case, no diagram, a listing failure, an open
-    diagram with a live scene, the tooltip element and the Source view — because a
-    reference error anywhere in it unmounts the tab. It also asserts the registration, the
-    `selectedCaseInput` wiring, the picker rule and that §7's regex parses **every** effect
-    of the new view. It is the replacement for the retired §8, which rendered the modal.
+    diagram with a live scene, a wheel-zoomed open diagram, the tooltip element and the Source
+    view — because a reference error anywhere in it unmounts the tab. It also asserts the
+    registration, the `selectedCaseInput` wiring, the picker rule and that §7's regex parses
+    **every** effect of the new view. It is the replacement for the retired §8, which rendered
+    the modal.
+  - The zoom picker is asserted structurally, not visually: it is a `select` in the toolbar row
+    whose options are exactly the presets (and the current non-preset level, in order, selected),
+    it sits at `−` + 1 and `+` − 1 in that row, and its handler exists and does not throw when
+    invoked. Three of those checks would pass on a screenshot that showed a stale label, which is
+    why the wheel-zoomed fixture is rendered too. The presets are also round-tripped through
+    `drawioZoomPercent`, so picking a level cannot land on a different one than it displayed.
 - **`interpss_case_summary`** ports `IpssAgentBridge.summarize()`. Java always returns
   every result section in full (only the requested one is ranked/limited) and
   `text` is a JSON string inside the envelope, so the tool does a second parse and
@@ -540,7 +547,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 188 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 200 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -610,6 +617,20 @@ mechanism caught the 0.6.0 modal defect as
   bus still on the theme tokens, red surviving `drawioThemeColor`), and — the constraint the whole
   design exists for — that the **parsed scene is unchanged** after an alerted render and that no
   write RPC exists anywhere in the diagram path.
+- §15 (since 0.6.19) pins the **size limits and their boundary**: the preview cap is 20000 cells, both
+  hosts read up to 4 MiB (4 194 304 bytes, 0.6.20 — raised 2 -> 5 MiB in 0.6.19, trimmed to 4 MiB in
+  0.6.20 because the largest drawing here is ~2.9 MiB), and the generator's own self-check allows
+  20000 — the three move together,
+  because raising one alone would leave the others refusing the same file (Texas 2K needs all three:
+  ~10.7k cells, ~3 MB). The boundary is exercised on both sides with a synthetic scene: exactly at
+  the cap the parse gets past the size check (and then fails for being empty, which is the proof),
+  and one cell over it fails with `20001 cells (limit 20000)`.
+  - Two §3/§11 assertions were made **fixture-relative** at the same time, because a case diagram is
+    a file the draw.io button invites you to edit: the group-origin check now reads the group's own
+    `mxGeometry` out of the file instead of hard-coding `462,306`, and the template comparison
+    compares the drawing's **inventory** (cell ids + kinds + edges) rather than its coordinates. A
+    local draw.io edit that nudged transformer group 3 to `x=503` failed both before this change
+    while breaking nothing the preview depends on.
 
 Since 0.6.3 **§9 asserts the two plugins are in sync**, which is what makes this rebuild
 guide trustworthy: the suite reads only the dynamic body, so silent drift had made it
@@ -677,8 +698,14 @@ Client-half change is served with the plugin bundle, so the reload is what picks
 - **Diagram tab** (since 0.6.8): the tab bar reads **Chat · InterPSS · Diagram · Trajectory**,
   and the InterPSS action row reads **ACLF · ⚙ · CA · Report** (the 0.6.9 change). The tab opens
   straight onto its **Simu Case** row — no heading, no subtitle (0.6.10) — with a toolbar of
-  controls that reads **R · S · − · 100% · + · Fit** (`R` / `S` since 0.6.17; hovering them says
-  `Rendered view` / `Source view — the raw draw.io XML`). Selecting a
+  controls that reads **R · S · − · [level ▾] · + · Fit** (`R` / `S` since 0.6.17; hovering them
+  says `Rendered view` / `Source view — the raw draw.io XML`). **The level readout is the zoom
+  picker since 0.6.21**: a `select` labelled *Zoom level* offering 25 / 50 / 75 / 100 / 125 / 150 /
+  200 / 300 / 400 %, sitting exactly between `−` and `+`, picking about the centre of what is on
+  screen and clamped by the same limits the wheel uses. A level reached with the wheel or a pinch
+  (the screenshot that asked for this was 745 %) is listed as an extra entry and shown as selected,
+  so the control never rounds the view to a preset it is not at — and getting back to it after
+  picking 100 % is one click. Selecting a
   case in the InterPSS tab (preset or custom row) and switching to *Diagram*
   draws that case's `<case>/diagram/*.drawio` full-size; with several files the picker lists
   them and reopens the one last viewed; a case with none says so instead of drawing an empty

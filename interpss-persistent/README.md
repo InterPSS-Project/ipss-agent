@@ -46,7 +46,8 @@ parameters and results, no build-time Typert compiler required.
   (Chat · InterPSS · **Diagram** · Trajectory) that draws the **selected case's**
   `diagram/*.drawio` full-size. It follows the InterPSS tab's *Simu Case* selection (and a case
   loaded from chat), offers a picker when the folder holds several files — reopening the one
-  last viewed — and gives the diagram pan / zoom / fit, an **R** / **S** toggle (Rendered / Source;
+  last viewed — and gives the diagram pan / zoom / fit, a **zoom picker** (25–400 %, and whatever level the
+  wheel reached, selected — 0.6.21), an **R** / **S** toggle (Rendered / Source;
   the words live in the tooltip and the accessible name since 0.6.17) and
   bus/branch tooltips, and (0.6.12; at the right end of the top row since 0.6.15) a
   draw.io button that opens the file in the **local draw.io
