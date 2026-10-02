@@ -810,6 +810,314 @@ return {
       return out
     }
 
+    // --- Search and filter (0.6.23) -------------------------------------------
+    // Both are paint-time overrides of the same kind as the voltage alert: a search paints what it
+    // found, a filter skips what does not match, and neither touches the .drawio file, the parsed
+    // scene or the draw.io desktop app. The rules live here, module-level and pure, because they
+    // are the only part of the feature with behaviour worth pinning down in the guard -- the rest
+    // is a dialog and a pair of buttons.
+    const DRAWIO_MATCH_FILL = '#1F6FEB'
+    const DRAWIO_MATCH_STROKE = '#0B4AA2'
+
+    const drawioIsBusCell = (id) => /^bus\d+$/i.test(String(id === null || id === undefined ? '' : id))
+
+    // Which cells are a transformer's two rings, and which group holds them. The generated file
+    // puts them in a `style=group` cell, and that is what a branch through a transformer has to be
+    // resolved against: its two stub edges each go bus -> ring, so neither is a bus pair on its own.
+    function drawioRingIndex(nodes) {
+      const groupOf = {}
+      const rings = {}
+      for (const n of nodes) {
+        if (n.parent !== undefined && n.parent !== null && n.parent !== '' && n.parent !== '1') groupOf[n.id] = n.parent
+      }
+      for (const n of nodes) {
+        const g = groupOf[n.id]
+        if (g !== undefined) {
+          if (rings[g] === undefined) rings[g] = []
+          rings[g].push(n.id)
+        }
+      }
+      return { groupOf: groupOf, rings: rings }
+    }
+
+    // The bus pair an edge connects, or null when it cannot be resolved. A plain branch is
+    // bus -> bus; a transformer branch is two stubs, so the ring's sibling stub supplies the other
+    // bus (without this, search and filter would miss every branch through a transformer).
+    function drawioEdgeBusPair(edge, edges, index) {
+      // The parsed scene names these `source` / `target` (the draw.io cell attributes).
+      if (drawioIsBusCell(edge.source) && drawioIsBusCell(edge.target)) {
+        return [String(edge.source).toLowerCase(), String(edge.target).toLowerCase()]
+      }
+      const busEnd = drawioIsBusCell(edge.source) ? edge.source : (drawioIsBusCell(edge.target) ? edge.target : null)
+      const ring = drawioIsBusCell(edge.source) ? edge.target : edge.source
+      if (busEnd === null || ring === null || ring === undefined) return null
+      const group = index.groupOf[ring]
+      if (group === undefined) return null
+      const siblings = index.rings[group] || []
+      for (const e of edges) {
+        if (e === edge) continue
+        const other = siblings.indexOf(e.source) >= 0 ? e.source : (siblings.indexOf(e.target) >= 0 ? e.target : null)
+        if (other === null) continue
+        if (drawioIsBusCell(e.source) && e.target === other) return [String(busEnd).toLowerCase(), String(e.source).toLowerCase()]
+        if (drawioIsBusCell(e.target) && e.source === other) return [String(busEnd).toLowerCase(), String(e.target).toLowerCase()]
+      }
+      return null
+    }
+
+    // What a search query matches, as cell-id lookups the renderer can paint from. The query is
+    // one of: a bus number (`1001`), a bus id (`Bus-1001`, `Bus1001`), part of a bus name
+    // (`ODESSA`, from the case's bus table), or a branch written with an arrow (`1001->1002`;
+    // `-`, `/` and the unicode arrow are accepted too). A bus and a branch are tried together,
+    // because `1001` is a valid bus on its own.
+    function drawioSearchHits(query, nodes, edges, busNames) {
+      const out = { buses: {}, edges: {}, nBus: 0, nBranch: 0, text: '' }
+      const q = String(query === null || query === undefined ? '' : query).trim().toLowerCase()
+      if (q === '') {
+        out.text = 'Type a bus number, a name, or a branch like 1001->1002.'
+        return out
+      }
+      const index = drawioRingIndex(nodes)
+      const labels = {}
+      for (const n of nodes) {
+        const bus = drawioBusCellId(n)
+        if (bus !== null && !drawioIsBusCell(n.id)) labels[String(bus).toLowerCase()] = n.id
+      }
+      const bars = {}
+      for (const n of nodes) {
+        if (drawioIsBusCell(n.id)) bars[String(n.id).toLowerCase()] = n.id
+      }
+      const hit = (busKey) => {
+        if (out.buses[busKey] === true) return
+        out.buses[busKey] = true
+        out.nBus += 1
+        if (bars[busKey] !== undefined) out.buses[bars[busKey]] = true
+        if (labels[busKey] !== undefined) out.buses[labels[busKey]] = true
+      }
+      const pair = /^(\d+)\s*(?:->|\u2192|[-\u2013/])\s*(\d+)$/.exec(q)
+      if (pair !== null) {
+        const a = 'bus' + pair[1]
+        const b = 'bus' + pair[2]
+        if (bars[a] === undefined || bars[b] === undefined) {
+          out.text = 'No branch between ' + pair[1] + ' and ' + pair[2] + ' in this diagram.'
+          return out
+        }
+        hit(a)
+        hit(b)
+        for (const e of edges) {
+          const ends = drawioEdgeBusPair(e, edges, index)
+          if (ends === null) continue
+          if ((ends[0] === a && ends[1] === b) || (ends[0] === b && ends[1] === a)) {
+            out.edges[e.id] = true
+            out.nBranch += 1
+          }
+        }
+        out.text = out.nBranch === 0
+          ? 'No branch drawn between ' + pair[1] + ' and ' + pair[2] + '.'
+          : out.nBranch + (out.nBranch === 1 ? ' branch' : ' branches') + ' between ' + pair[1] + ' and ' + pair[2] + '.'
+        return out
+      }
+      const num = /^bus-?(\d+)$/.exec(q)
+      if (num !== null) {
+        if (bars['bus' + num[1]] === undefined) {
+          out.text = 'No Bus-' + num[1] + ' in this diagram.'
+          return out
+        }
+        hit('bus' + num[1])
+        out.text = 'Bus-' + num[1] + ' found.'
+        return out
+      }
+      for (const key of Object.keys(bars)) {
+        if (key === 'bus' + q) hit(key)
+      }
+      if (out.nBus === 0 && busNames !== null && busNames !== undefined) {
+        for (const key of Object.keys(busNames)) {
+          if (String(busNames[key]).toLowerCase().indexOf(q) >= 0 && bars[key] !== undefined) hit(key)
+        }
+      }
+      out.text = out.nBus === 0
+        ? 'Nothing matches "' + query + '".'
+        : out.nBus + (out.nBus === 1 ? ' bus' : ' buses') + ' match "' + query + '".'
+      return out
+    }
+
+    // What a filter hides: every bus outside the chosen area/zone -- and, when asked, outside the
+    // |V| band -- plus the labels, branches and transformer symbols attached to those buses. A
+    // branch is hidden when EITHER end is hidden, so nothing is left dangling into nothing.
+    function drawioFilterHidden(filter, nodes, edges, meta, alerts) {
+      const out = { ids: {}, nBuses: 0, text: '' }
+      if (filter === null || filter === undefined) return out
+      const index = drawioRingIndex(nodes)
+      const bars = []
+      for (const n of nodes) {
+        if (drawioIsBusCell(n.id)) bars.push(String(n.id).toLowerCase())
+      }
+      const keep = {}
+      const area = String(filter.area === undefined || filter.area === null ? '' : filter.area)
+      const zone = String(filter.zone === undefined || filter.zone === null ? '' : filter.zone)
+      const band = filter.outOfBand === true
+      for (const key of bars) {
+        const info = meta !== null && meta !== undefined && meta.ofBus !== undefined ? meta.ofBus[key] : undefined
+        let ok = true
+        if (area !== '') ok = info !== undefined && String(info.area) === area
+        if (ok && zone !== '') ok = info !== undefined && String(info.zone) === zone
+        if (ok && band) ok = alerts !== null && alerts !== undefined && alerts[key] === true
+        keep[key] = ok
+        if (!ok) {
+          out.nBuses += 1
+          out.ids[key] = true
+        }
+      }
+      for (const n of nodes) {
+        const bus = drawioBusCellId(n)
+        if (bus !== null && keep[String(bus).toLowerCase()] === false) out.ids[n.id] = true
+      }
+      for (const e of edges) {
+        const ends = drawioEdgeBusPair(e, edges, index)
+        if (ends === null) continue
+        if (keep[ends[0]] === false || keep[ends[1]] === false) out.ids[e.id] = true
+      }
+      // a transformer's rings have no bus of their own: hide them with the stub that was hidden
+      for (const e of edges) {
+        if (out.ids[e.id] !== true) continue
+        const ring = drawioIsBusCell(e.source) ? e.target : e.source
+        if (ring === null || ring === undefined) continue
+        const group = index.groupOf[ring]
+        for (const r of (group === undefined ? [] : index.rings[group] || [])) out.ids[r] = true
+        if (group !== undefined) out.ids[group] = true
+      }
+      // The sentence names the area and zone the way the dialog's selects do; the toolbar's short
+      // label stays numeric, because that row has no space for names.
+      const nameOf = (list, num) => {
+        for (const item of (meta !== null && meta !== undefined && Array.isArray(list) ? list : [])) {
+          if (String(item.num) === String(num) && item.name !== '') return ' ' + item.name
+        }
+        return ''
+      }
+      const short = []
+      const parts = []
+      if (area !== '') {
+        short.push('area ' + area)
+        parts.push('area ' + area + nameOf(meta === null || meta === undefined ? null : meta.areas, area))
+      }
+      if (zone !== '') {
+        short.push('zone ' + zone)
+        parts.push('zone ' + zone + nameOf(meta === null || meta === undefined ? null : meta.zones, zone))
+      }
+      if (band) {
+        short.push('|V| outside 0.9-1.1 pu')
+        parts.push('|V| outside 0.9-1.1 pu')
+      }
+      out.label = short.join(', ')
+      out.criteria = parts.join(', ')
+      out.kept = bars.length - out.nBuses
+      out.total = bars.length
+      out.text = parts.length === 0
+        ? 'Nothing is filtered: every bus is shown.'
+        : 'Showing ' + out.kept + ' of ' + out.total + ' buses (' + out.criteria + ').'
+      return out
+    }
+
+    // The bus table's area/zone/name columns, folded into the lookups a filter needs: the distinct
+    // Area and Zone numbers with their names, and per bus its area, zone and name. Read by header
+    // name like the voltage columns -- `AreaNum` sits beside `AreaName`, and a positional read
+    // would silently filter on the wrong column. `into` lets the caller merge successive pages.
+    function drawioBusMeta(header, rows, into) {
+      const out = into || { areas: [], zones: [], ofBus: {} }
+      const seenArea = {}
+      const seenZone = {}
+      for (const a of out.areas) seenArea[a.num] = true
+      for (const z of out.zones) seenZone[z.num] = true
+      const cells = String(header === null || header === undefined ? '' : header).split(',')
+      const at = (name) => {
+        for (let i = 0; i < cells.length; i += 1) {
+          if (String(cells[i]).trim().toLowerCase() === name) return i
+        }
+        return -1
+      }
+      const iId = at('id')
+      if (iId < 0 || !Array.isArray(rows)) return out
+      const iName = at('name')
+      const iArea = at('areanum')
+      const iAreaName = at('areaname')
+      const iZone = at('zonenum')
+      const iZoneName = at('zonename')
+      const cell = (c, i) => (i < 0 ? '' : String(c[i] === undefined ? '' : c[i]).trim())
+      for (const line of rows) {
+        const c = String(line).split(',')
+        const key = String(c[iId] === undefined ? '' : c[iId]).trim().toLowerCase()
+        if (key === '') continue
+        const areaNum = cell(c, iArea)
+        const zoneNum = cell(c, iZone)
+        out.ofBus[key] = { area: areaNum, zone: zoneNum, name: cell(c, iName) }
+        if (areaNum !== '' && seenArea[areaNum] !== true) {
+          seenArea[areaNum] = true
+          out.areas.push({ num: areaNum, name: cell(c, iAreaName) })
+        }
+        if (zoneNum !== '' && seenZone[zoneNum] !== true) {
+          seenZone[zoneNum] = true
+          out.zones.push({ num: zoneNum, name: cell(c, iZoneName), area: areaNum })
+        }
+      }
+      out.areas.sort((x, y) => Number(x.num) - Number(y.num))
+      out.zones.sort((x, y) => Number(x.num) - Number(y.num))
+      return out
+    }
+
+    // What the search dialog tells the user, for THIS case (0.6.25): the bus count and the range
+    // the diagram actually draws, a branch example built from two of its own numbers, and -- when
+    // the case's result table carries names -- one of them to search on. Without that table it says
+    // so, instead of suggesting a name search that cannot work.
+    function drawioSearchHelp(scene, meta) {
+      const nums = []
+      if (scene !== null && scene !== undefined && Array.isArray(scene.nodes)) {
+        for (const n of scene.nodes) {
+          const m = /^bus(\d+)$/i.exec(String(n.id === null || n.id === undefined ? '' : n.id))
+          if (m !== null) nums.push(Number(m[1]))
+        }
+      }
+      nums.sort((a, b) => a - b)
+      const uniq = nums.filter((v, i) => i === 0 || v !== nums[i - 1])
+      let word = ''
+      if (meta !== null && meta !== undefined && meta.ofBus !== undefined) {
+        for (const key of Object.keys(meta.ofBus).sort()) {
+          const full = String(meta.ofBus[key].name === undefined ? '' : meta.ofBus[key].name).trim()
+          if (full !== '') {
+            word = full.split(/\s+/)[0]
+            break
+          }
+        }
+      }
+      if (uniq.length === 0) {
+        return {
+          placeholder: '1001, Bus-1001, 1001->1002',
+          hint: 'A number or id finds one bus, 1001->1002 the branches between two, and part of a name finds every bus whose name contains it.',
+        }
+      }
+      const first = uniq[0]
+      const second = uniq.length > 1 ? uniq[1] : uniq[0]
+      const pair = first + '->' + second
+      const range = uniq.length === 1 ? 'Bus-' + first : 'Bus-' + first + ' to Bus-' + uniq[uniq.length - 1]
+      const placeholder = [String(first), 'Bus-' + first].concat(word === '' ? [] : [word]).concat([pair]).join(', ')
+      const hint = uniq.length + (uniq.length === 1 ? ' bus here (' : ' buses here (') + range + '). '
+        + 'A number or id finds one bus, ' + pair + ' the branches between two'
+        + (word === '' ? '; bus names need this case\u2019s ACLF result table, which is not there.'
+          : ', and part of a name like "' + word + '" finds every bus whose name contains it.')
+        + ' Matches are highlighted in the drawing.'
+      return { placeholder: placeholder, hint: hint }
+    }
+
+    // The two toolbar icons, built the way the draw.io mark is: a small inline svg, so the buttons
+    // stay crisps at any size and need no icon font or image request.
+    const drawioSearchIcon = React.createElement('svg',
+      { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+      React.createElement('circle', { cx: 6.8, cy: 6.8, r: 4.6, fill: 'none', stroke: 'currentColor', strokeWidth: 1.6 }),
+      React.createElement('path', { d: 'M10.4 10.4 L14 14', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' }),
+    )
+    const drawioFilterIcon = React.createElement('svg',
+      { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+      React.createElement('path', { d: 'M1.6 2.2 H14.4 L9.4 8.2 V13.4 L6.6 12 V8.2 Z', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinejoin: 'round' }),
+    )
+
     // mxGraphModel -> a flat, React-free scene description: { viewBox, nodes, edges }.
     // Geometry is resolved to absolute coordinates so grouped cells (style=group, whose
     // children carry relative="1" geometry) land in the right place.
@@ -1197,6 +1505,10 @@ return {
       // Voltage alerts are opt-in in the same way: `alert` maps a lowercase bus id (`bus14`) to
       // true, and without it every colour below is exactly what it was before.
       const alert = props.alert || null
+      // Search and filter (0.6.23), opt-in the same way and also paint-time only: `hidden` skips a
+      // whole cell, `match` repaints one in the search colour. Absent, the tree is byte-identical.
+      const hidden = props.hidden || null
+      const match = props.match || null
       // draw.io paints in the model's own document order, interleaving vertices and edges.
       // That order is load-bearing: this workspace's diagram declares `bg`, an opaque
       // 900x760 white rectangle, BEFORE its branches. Drawing every edge up front and every
@@ -1205,6 +1517,8 @@ return {
       const painted = []
       for (let i = 0; i < scene.edges.length; i += 1) {
         const e = scene.edges[i]
+        if (hidden !== null && hidden[e.id] === true) continue
+        const matchedEdge = match !== null && match[e.id] === true
         const points = e.points.map((p) => p.x + ',' + p.y).join(' ')
         const parts = []
         // The invisible wide-stroke twin that makes a 1.5px branch hoverable.
@@ -1225,11 +1539,11 @@ return {
           key: 'l',
           points: points,
           fill: 'none',
-          stroke: drawioThemeColor(e.stroke),
-          strokeWidth: e.strokeWidth,
+          stroke: matchedEdge ? DRAWIO_MATCH_FILL : drawioThemeColor(e.stroke),
+          strokeWidth: matchedEdge ? e.strokeWidth + 1.5 : e.strokeWidth,
           strokeDasharray: e.dashed ? '6 4' : undefined,
         }))
-        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: drawioThemeColor(e.stroke) }))
+        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: matchedEdge ? DRAWIO_MATCH_FILL : drawioThemeColor(e.stroke) }))
         if (e.label !== '') {
           parts.push(React.createElement('text', {
             key: 't',
@@ -1241,6 +1555,8 @@ return {
       }
       for (let i = 0; i < scene.nodes.length; i += 1) {
         const n = scene.nodes[i]
+        if (hidden !== null && hidden[n.id] === true) continue
+        const matched = match !== null && match[n.id] === true
         const parts = []
         // An out-of-band bus is red: the bar's fill and outline, and the `Bus-N` text — but NOT
         // the label's white paper box, which must stay white so it keeps masking the wires under
@@ -1253,7 +1569,8 @@ return {
             key: 's',
             cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2, ry: n.h / 2,
             fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
-            stroke: drawioThemeColor(n.stroke), strokeWidth: n.strokeWidth,
+            stroke: matched ? DRAWIO_MATCH_STROKE : drawioThemeColor(n.stroke),
+            strokeWidth: matched ? n.strokeWidth + 1 : n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         } else if (n.kind === 'rect') {
@@ -1261,13 +1578,16 @@ return {
             key: 's',
             x: n.x, y: n.y, width: n.w, height: n.h,
             rx: n.rounded ? Math.min(8, n.h / 2) : 0,
-            fill: alerted && isBar ? DRAWIO_ALERT_FILL : (n.fill === null ? 'none' : drawioThemeColor(n.fill)),
-            stroke: alerted && isBar ? DRAWIO_ALERT_STROKE : drawioThemeColor(n.stroke),
+            fill: matched && isBar ? DRAWIO_MATCH_FILL
+              : (alerted && isBar ? DRAWIO_ALERT_FILL : (n.fill === null ? 'none' : drawioThemeColor(n.fill))),
+            stroke: matched && isBar ? DRAWIO_MATCH_STROKE
+              : (alerted && isBar ? DRAWIO_ALERT_STROKE : drawioThemeColor(n.stroke)),
             strokeWidth: n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         }
-        const labelNode = alerted && !isBar ? Object.assign({}, n, { fontColor: DRAWIO_ALERT_TEXT }) : n
+        const labelNode = matched && !isBar ? Object.assign({}, n, { fontColor: DRAWIO_MATCH_STROKE })
+          : (alerted && !isBar ? Object.assign({}, n, { fontColor: DRAWIO_ALERT_TEXT }) : n)
         const label = drawioLabel(labelNode.lines, n.x + n.w / 2, n.y + n.h / 2, labelNode, 't')
         if (label !== null) parts.push(label)
         // A transparent padded rect, so a 6px bar or a 16px transformer ring is comfortable
@@ -2719,6 +3039,19 @@ return {
       // a different diagram is opened.
       const [editBusy, setEditBusy] = React.useState(false)
       const [editMsg, setEditMsg] = React.useState(null)
+      // Search and filter (0.6.23). `dialog` is which modal is open; the dialog's own fields are
+      // separate from what is APPLIED, so Cancel really does cancel (the applied value is only
+      // written by OK). `busMeta` is the case's bus table (area/zone/name per bus), loaded on
+      // demand when a dialog opens -- the drawing path itself never waits for it.
+      const [dialog, setDialog] = React.useState(null)
+      const [searchText, setSearchText] = React.useState('')
+      const [searchQuery, setSearchQuery] = React.useState(null)
+      const [filterArea, setFilterArea] = React.useState('')
+      const [filterZone, setFilterZone] = React.useState('')
+      const [filterOutOfBand, setFilterOutOfBand] = React.useState(false)
+      const [filterApplied, setFilterApplied] = React.useState(null)
+      const [busMeta, setBusMeta] = React.useState(null)
+      const [busMetaLoading, setBusMetaLoading] = React.useState(false)
       const canvasRef = React.useRef(null)
       const dragRef = React.useRef(null)
       // Tooltip data keyed to the SELECTED case: the branch
@@ -3144,6 +3477,174 @@ return {
         )
         : null
 
+      // --- search and filter (0.6.23) -----------------------------------------
+      // Both dialogs need the case's bus table (area, zone, and a name to search on), so it is
+      // fetched once, on demand: opening either dialog starts the read and OK stays disabled until
+      // it lands. The drawing path itself never waits for it, so a 78k-bus case still opens fast.
+      function ensureBusMeta() {
+        if (busMeta !== null || busMetaLoading || busFile === null || resultDir === null) return
+        setBusMetaLoading(true)
+        let acc = { areas: [], zones: [], ofBus: {} }
+        const page = (start, guard) => {
+          if (guard > 20) {
+            setBusMeta(acc)
+            setBusMetaLoading(false)
+            return
+          }
+          callRemote('readCsv', { path: resultDir + '/' + busFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (res === null || res === undefined || res.ok !== true) { setBusMetaLoading(false); return }
+              const rows = res.rows || []
+              acc = drawioBusMeta(res.header, rows, acc)
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setBusMeta(acc)
+              setBusMetaLoading(false)
+            },
+            () => setBusMetaLoading(false),
+          )
+        }
+        page(0, 0)
+      }
+
+      function openSearch() {
+        setSearchText(searchQuery === null ? '' : searchQuery)
+        setDialog('search')
+        ensureBusMeta()
+      }
+
+      function openFilter() {
+        const f = filterApplied === null ? { area: '', zone: '', outOfBand: false } : filterApplied
+        setFilterArea(f.area === undefined || f.area === null ? '' : String(f.area))
+        setFilterZone(f.zone === undefined || f.zone === null ? '' : String(f.zone))
+        setFilterOutOfBand(f.outOfBand === true)
+        setDialog('filter')
+        ensureBusMeta()
+      }
+
+      function closeDialog() {
+        setDialog(null)
+      }
+
+      // OK is what applies: the dialog's fields are the draft, so closing with Cancel leaves the
+      // drawing exactly as it was.
+      function applySearch() {
+        const q = String(searchText).trim()
+        setSearchQuery(q === '' ? null : q)
+        setDialog(null)
+      }
+
+      function applyFilter() {
+        const next = { area: filterArea, zone: filterZone, outOfBand: filterOutOfBand }
+        setFilterApplied(next.area === '' && next.zone === '' && next.outOfBand !== true ? null : next)
+        setDialog(null)
+      }
+
+      function clearSearchFilter() {
+        setSearchQuery(null)
+        setSearchText('')
+        setFilterApplied(null)
+      }
+
+      // Both are pure functions of the scene plus the bus table, recomputed per render. Nothing
+      // here writes: the highlight and the hiding are paint-time, like the voltage alert.
+      const busNames = busMeta === null ? null : (function () {
+        const names = {}
+        for (const key of Object.keys(busMeta.ofBus)) names[key] = busMeta.ofBus[key].name
+        return names
+      })()
+      const searchHits = searchQuery === null || scene === null
+        ? null : drawioSearchHits(searchQuery, scene.nodes, scene.edges, busNames)
+      const filterHits = filterApplied === null || scene === null
+        ? null : drawioFilterHidden(filterApplied, scene.nodes, scene.edges, busMeta, busAlerts)
+      // The dialog's own message previews the DRAFT, so changing Area or Zone updates it immediately
+      // (0.6.24). The drawing still waits for OK: only the sentence is live.
+      const draftHits = scene === null
+        ? null : drawioFilterHidden({ area: filterArea, zone: filterZone, outOfBand: filterOutOfBand },
+          scene.nodes, scene.edges, busMeta, busAlerts)
+      const statusText = searchHits !== null
+        ? (searchHits.nBus + searchHits.nBranch === 0
+          ? 'no match'
+          : searchHits.nBus + (searchHits.nBus === 1 ? ' bus' : ' buses')
+            + (searchHits.nBranch > 0
+              ? ', ' + searchHits.nBranch + (searchHits.nBranch === 1 ? ' branch' : ' branches') : ''))
+        : (filterHits !== null && filterHits.label !== '' ? 'filter: ' + filterHits.label : null)
+      // A filter that names an area or a zone cannot be applied before the bus table arrives.
+      const filterNeedsMeta = filterArea !== '' || filterZone !== ''
+
+      const dialogShell = (title, bodyEl, onOk, okDisabled) => React.createElement('div', {
+        style: { position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 },
+      }, React.createElement('div', {
+        role: 'dialog',
+        'aria-label': title,
+        style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '18px', width: '100%', maxWidth: '440px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)' },
+      },
+        React.createElement('div', { style: { fontSize: '14px', fontWeight: 600 } }, title),
+        bodyEl,
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } },
+          React.createElement('button', { key: 'cancel', onClick: closeDialog, style: { ...btn, padding: '5px 14px' } }, 'Cancel'),
+          React.createElement('button', {
+            key: 'ok', onClick: onOk, disabled: okDisabled === true,
+            style: { ...btn, padding: '5px 14px', borderColor: 'var(--dsw-alias-brand-primary)', opacity: okDisabled === true ? 0.5 : 1 },
+          }, 'OK'),
+        ),
+      ))
+
+      const fieldRow = (label, control) => React.createElement('label', {
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', fontSize: '12px' },
+      }, React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, label), control)
+
+      const hintStyle = { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }
+      // The search dialog's help is about THIS case: how many buses it draws, the range, a branch
+      // example from its own numbers, and a name to try when its result table carries names.
+      const searchHelp = drawioSearchHelp(scene, busMeta)
+      const dialogEl = dialog === 'search'
+        ? dialogShell('Search the diagram', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+          React.createElement('input', {
+            value: searchText,
+            onChange: (e) => setSearchText(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter') applySearch() },
+            placeholder: searchHelp.placeholder,
+            'aria-label': 'Search the diagram',
+            style: { ...selectStyle, width: '100%', maxWidth: 'none', height: '30px' },
+          }),
+          React.createElement('div', { style: hintStyle },
+            busMetaLoading ? 'Loading the case\u2019s bus table\u2026 ' + searchHelp.hint : searchHelp.hint),
+        ), applySearch, false)
+        : dialog === 'filter'
+          ? dialogShell('Filter the diagram', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+            fieldRow('Area', React.createElement('select', {
+              value: filterArea,
+              'aria-label': 'Area',
+              onChange: (e) => { setFilterArea(e.target.value); setFilterZone('') },
+              style: { ...selectStyle, minWidth: '200px', maxWidth: '240px', height: '28px' },
+            }, [React.createElement('option', { key: 'all', value: '' }, 'All areas')].concat(
+              (busMeta === null ? [] : busMeta.areas).map((a) => React.createElement('option', { key: a.num, value: a.num }, a.num + '  ' + a.name))))),
+            fieldRow('Zone', React.createElement('select', {
+              value: filterZone,
+              'aria-label': 'Zone',
+              onChange: (e) => setFilterZone(e.target.value),
+              style: { ...selectStyle, minWidth: '200px', maxWidth: '240px', height: '28px' },
+            }, [React.createElement('option', { key: 'all', value: '' }, 'All zones')].concat(
+              (busMeta === null ? [] : busMeta.zones)
+                .filter((z) => filterArea === '' || String(z.area) === filterArea)
+                .map((z) => React.createElement('option', { key: z.num, value: z.num }, z.num + '  ' + z.name))))),
+            React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' } },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: filterOutOfBand,
+                'aria-label': 'Only buses outside the voltage band',
+                onChange: (e) => setFilterOutOfBand(e.target.checked),
+              }),
+              'Only buses with |V| outside 0.9\u20131.1 pu'),
+            React.createElement('div', { style: hintStyle },
+              busMetaLoading || (filterNeedsMeta && busMeta === null)
+                ? 'Loading the case\u2019s bus table\u2026'
+                : (draftHits !== null && draftHits.label !== ''
+                  ? draftHits.text
+                  : 'Anything that does not match is hidden, along with its branches and transformer symbols. All areas and All zones bring the whole diagram back.')),
+          ), applyFilter, busMetaLoading || (filterNeedsMeta && busMeta === null))
+          : null
+
       const caseRow = React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
         React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
           React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)', fontSize: '13px' } }, 'Simu Case'),
@@ -3177,26 +3678,55 @@ return {
           path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), title: 'Rendered view', 'aria-label': 'Rendered view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'R') : null,
           path !== '' ? React.createElement('button', { onClick: () => setView('source'), title: 'Source view — the raw draw.io XML', 'aria-label': 'Source view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'S') : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
-          // The readout is the zoom picker (0.6.21): it shows the current level and sets it. A
-          // level reached with the wheel or a pinch is listed alongside the presets, so going to
-          // 100% and back to the old 745% is one click either way.
+          // The readout is the zoom picker (0.6.21): it shows the current level and sets it, and
+          // since 0.6.22 it carries **Fit** as its last entry, so the row is `−`, the picker, `+`
+          // and nothing else. A level reached with the wheel or a pinch is listed alongside the
+          // presets, so going to 100% and back to the old 745% is one click either way.
           path !== '' && view === 'rendered' && scene !== null
             ? (function () {
               const pctNow = drawioZoomPercent(scene, rect)
-              const pcts = DRAWIO_ZOOM_PRESETS.indexOf(pctNow) >= 0
+              const fitted = rect === null
+              const pcts = DRAWIO_ZOOM_PRESETS.indexOf(pctNow) >= 0 || fitted
                 ? DRAWIO_ZOOM_PRESETS
                 : DRAWIO_ZOOM_PRESETS.concat([pctNow]).sort((a, b) => a - b)
+              const options = pcts.map((p) => React.createElement('option', { key: p, value: String(p) }, p + '%'))
+              // `Fit` shows the whole page from its origin; picking 100% only rescales about the
+              // current centre, which is a different view. While the view IS fitted (`rect === null`)
+              // this is the selected entry, and the readout says so instead of claiming 100%.
+              options.push(React.createElement('option', { key: 'fit', value: 'fit' }, 'Fit'))
               return React.createElement('select', {
-                value: String(pctNow),
-                onChange: (e) => setZoomPercent(Number(e.target.value)),
+                value: fitted ? 'fit' : String(pctNow),
+                onChange: (e) => (e.target.value === 'fit' ? fit() : setZoomPercent(Number(e.target.value))),
                 title: 'Zoom level',
                 'aria-label': 'Zoom level',
                 style: { ...selectStyle, height: '28px', minWidth: '78px', maxWidth: '96px', padding: '0 4px', textAlign: 'center', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
-              }, pcts.map((p) => React.createElement('option', { key: p, value: String(p) }, p + '%')))
+              }, options)
             })()
             : null,
           path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: fit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
+          // Search and filter (0.6.23): two icon buttons after the zoom controls. Each opens a
+          // dialog whose OK applies and whose Cancel throws the draft away. The filter button stays
+          // lit while a filter is applied, and the status text clears both (a span, not a button --
+          // the row's controls are the ones the mock specifies).
+          path !== '' && view === 'rendered' && scene !== null
+            ? React.createElement('button', {
+              onClick: openSearch, title: 'Search the diagram', 'aria-label': 'Search the diagram',
+              style: { ...btn, padding: '4px 8px', display: 'flex', alignItems: 'center' },
+            }, drawioSearchIcon)
+            : null,
+          path !== '' && view === 'rendered' && scene !== null
+            ? React.createElement('button', {
+              onClick: openFilter, title: 'Filter the diagram', 'aria-label': 'Filter the diagram',
+              style: { ...btn, padding: '4px 8px', display: 'flex', alignItems: 'center', borderColor: filterApplied === null ? 'var(--dsw-alias-border-l1)' : 'var(--dsw-alias-brand-primary)' },
+            }, drawioFilterIcon)
+            : null,
+          path !== '' && view === 'rendered' && scene !== null && statusText !== null
+            ? React.createElement('span', {
+              onClick: clearSearchFilter,
+              title: 'Clear the search and the filter',
+              style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' },
+            }, statusText + ' \u2715')
+            : null,
         )
         : null
 
@@ -3230,8 +3760,11 @@ return {
                       }, React.createElement(DrawioDiagram, {
                         scene: scene,
                         view: rect,
-                        // Render-time only: `busAlerts` never reaches the file.
+                        // Render-time only: neither the alert nor the search/filter overrides ever
+                        // reach the file.
                         alert: busAlerts,
+                        hidden: filterHits === null ? null : filterHits.ids,
+                        match: searchHits === null ? null : Object.assign({}, searchHits.buses, searchHits.edges),
                         hover: {
                           pairs: dataRef.current.pairs,
                           onBus: diagramBusTip,
@@ -3259,6 +3792,7 @@ return {
         toolbar,
         body,
         tipEl,
+        dialogEl,
       )
     }
 

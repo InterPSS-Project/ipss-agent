@@ -438,9 +438,10 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     **every** effect of the new view. It is the replacement for the retired §8, which rendered
     the modal.
   - The zoom picker is asserted structurally, not visually: it is a `select` in the toolbar row
-    whose options are exactly the presets (and the current non-preset level, in order, selected),
-    it sits at `−` + 1 and `+` − 1 in that row, and its handler exists and does not throw when
-    invoked. Three of those checks would pass on a screenshot that showed a stale label, which is
+    whose options are exactly the presets **plus `Fit` last** (and the current non-preset level, in
+    order, selected), it sits at `−` + 1 and `+` − 1 in that row, its handler routes both a
+    percentage and `fit` without throwing, the row ends at `+` with no separate Fit button, and a
+    fitted view shows `Fit` as the selected entry. Three of those checks would pass on a screenshot that showed a stale label, which is
     why the wheel-zoomed fixture is rendered too. The presets are also round-tripped through
     `drawioZoomPercent`, so picking a level cannot land on a different one than it displayed.
 - **`interpss_case_summary`** ports `IpssAgentBridge.summarize()`. Java always returns
@@ -547,7 +548,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 200 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 235 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -617,6 +618,15 @@ mechanism caught the 0.6.0 modal defect as
   bus still on the theme tokens, red surviving `drawioThemeColor`), and — the constraint the whole
   design exists for — that the **parsed scene is unchanged** after an alerted render and that no
   write RPC exists anywhere in the diagram path.
+- §16 (since 0.6.23; the draft-preview rule since 0.6.24) covers **diagram search and filter**: that
+  every edge resolves to a bus pair
+  through its transformer group's sibling ring (0 of 25 unresolved on the reference scene, and each
+  transformer's two stubs agree), the query forms (number, `Bus-N`, name substring, `A-B` pair, and
+  the cases that must say "no match"), the bus-table fold into area/zone lists with page merging,
+  the filter's hiding rules (nothing when it has no criteria; a bus by area; the band filter keeping
+  exactly the flagged buses; a branch hidden when either end is; rings and their group hidden with a
+  hidden stub), and the paint path itself -- a hidden cell leaves the tree, a matched bar, label and
+  branch take the search colour.
 - §15 (since 0.6.19) pins the **size limits and their boundary**: the preview cap is 20000 cells, both
   hosts read up to 4 MiB (4 194 304 bytes, 0.6.20 — raised 2 -> 5 MiB in 0.6.19, trimmed to 4 MiB in
   0.6.20 because the largest drawing here is ~2.9 MiB), and the generator's own self-check allows
@@ -698,14 +708,40 @@ Client-half change is served with the plugin bundle, so the reload is what picks
 - **Diagram tab** (since 0.6.8): the tab bar reads **Chat · InterPSS · Diagram · Trajectory**,
   and the InterPSS action row reads **ACLF · ⚙ · CA · Report** (the 0.6.9 change). The tab opens
   straight onto its **Simu Case** row — no heading, no subtitle (0.6.10) — with a toolbar of
-  controls that reads **R · S · − · [level ▾] · + · Fit** (`R` / `S` since 0.6.17; hovering them
-  says `Rendered view` / `Source view — the raw draw.io XML`). **The level readout is the zoom
-  picker since 0.6.21**: a `select` labelled *Zoom level* offering 25 / 50 / 75 / 100 / 125 / 150 /
-  200 / 300 / 400 %, sitting exactly between `−` and `+`, picking about the centre of what is on
-  screen and clamped by the same limits the wheel uses. A level reached with the wheel or a pinch
-  (the screenshot that asked for this was 745 %) is listed as an extra entry and shown as selected,
-  so the control never rounds the view to a preset it is not at — and getting back to it after
-  picking 100 % is one click. Selecting a
+  controls that reads **R · S · − · [level ▾] · + · 🔍 · ▼** (`R` / `S` since 0.6.17; hovering them says
+  `Rendered view` / `Source view — the raw draw.io XML`). **The level readout is the zoom picker
+  since 0.6.21, and it carries Fit since 0.6.22**: a `select` labelled *Zoom level* offering 25 / 50 /
+  75 / 100 / 125 / 150 / 200 / 300 / 400 % **and `Fit` as its last entry**, sitting exactly between
+  `−` and `+` — which is now the end of the row, since Fit's own button is gone. A percentage picks
+  that zoom about the centre of what is on screen, clamped by the same limits the wheel uses; `Fit`
+  shows the whole page from its origin, and while the view is fitted the readout says **Fit** rather
+  than claiming 100 % (picking 100 % only rescales about the current centre, which is a different
+  view). A level reached with the wheel or a pinch (the screenshot behind this was 745 %) is listed
+  as an extra entry and shown as selected, so the control never rounds the view to a preset it is
+  not at — and getting back to it after picking 100 % is one click.
+  - **Search and Filter (0.6.23)** are the two icon buttons after the zoom controls; each opens a
+    dialog whose **OK** applies and whose **Cancel** only closes (the fields are a draft, and the
+    applied value is written by OK alone, so Cancel really cancels).
+    - **Search the diagram** takes a bus number (`1001`), a bus id (`Bus-1001`), part of a case bus
+      name (`ODESSA`), or a branch written with an arrow (`1001->1002` since 0.6.25; `-`, `/` and the
+      unicode arrow still work). Its placeholder and help are **about the case in front of it**:
+      the bus count and range the diagram draws, a branch example from its own numbers, and a name
+      from its own table -- or, when the case has no result table, a statement that names cannot be
+      searched (rather than a suggestion that cannot work). Matches are
+      repainted in the search blue — bar, label text and branch (a thicker line) — the toolbar shows
+      a `N buses, M branches` count, and the bus table is fetched for the names only when the dialog
+      opens. A match outranks the violation red; the tooltip still reports the violation.
+    - **Filter the diagram** keeps one **area** and/or one **zone** (lists read from the case's bus
+      table, the zone list scoped to the chosen area) and/or only the buses outside the 0.9–1.1 pu
+      band. Everything else is **hidden** — bar, label, its branches *and* the transformer symbols on
+      them — so nothing is left dangling into nothing. The funnel button stays lit while a filter is
+      applied, and the status text (`filter: area 5`, `3 buses ✕`) clears the search and the filter.
+    - Both are paint-time overrides of the same kind as the voltage alert: `hidden` skips a cell,
+      `match` recolours one, and the `.drawio`, the parsed scene and the desktop app see neither.
+      The two hard parts are pure and pinned in §16: an edge through a transformer is *two* stubs
+      (`bus → ring`), so the bus pair comes from the group's sibling ring — every edge must resolve,
+      or those branches could never be searched or filtered — and a filter needs the area/zone
+      columns by **header name**, like the voltage columns. Selecting a
   case in the InterPSS tab (preset or custom row) and switching to *Diagram*
   draws that case's `<case>/diagram/*.drawio` full-size; with several files the picker lists
   them and reopens the one last viewed; a case with none says so instead of drawing an empty

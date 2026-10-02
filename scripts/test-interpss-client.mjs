@@ -109,6 +109,10 @@ function build(overrides) {
       + ' diagramXmlFrom: diagramXmlFrom, styleMap: styleMap, labelLines: labelLines,'
       + ' drawioFitRect: drawioFitRect, drawioZoomLimits: drawioZoomLimits, drawioZoomRect: drawioZoomRect,'
       + ' drawioZoomPercent: drawioZoomPercent, DRAWIO_ZOOM_PRESETS: DRAWIO_ZOOM_PRESETS,'
+      + ' drawioSearchHits: drawioSearchHits, drawioFilterHidden: drawioFilterHidden,'
+      + ' drawioBusMeta: drawioBusMeta, drawioEdgeBusPair: drawioEdgeBusPair, drawioRingIndex: drawioRingIndex,'
+      + ' drawioIsBusCell: drawioIsBusCell,'
+      + ' drawioSearchHelp: drawioSearchHelp,'
       + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
       + ' drawioThemeColor: drawioThemeColor,'
       + ' drawioBranchPairs: drawioBranchPairs, drawioIsBusId: drawioIsBusId, drawioLabelBusId: drawioLabelBusId,'
@@ -881,8 +885,8 @@ check('every preset percent round-trips through the zoom rect width',
 check('the preset list is the documented 25 to 400 percent',
   JSON.stringify(api.DRAWIO_ZOOM_PRESETS) === JSON.stringify([25, 50, 75, 100, 125, 150, 200, 300, 400]),
   JSON.stringify(api.DRAWIO_ZOOM_PRESETS));
-// Asked for in 0.6.11: the wheel and the drag are discoverable on their own, so the toolbar
-// ends at Fit.
+// Asked for in 0.6.11: the wheel and the drag are discoverable on their own, so the toolbar is
+// just the view toggle, the two step buttons and the picker (which carries Fit since 0.6.22).
 check('the toolbar carries no scroll/drag hint text',
   drawnFlat.indexOf('Scroll to zoom') < 0 && body.indexOf('Scroll to zoom') < 0);
 // The edit button is the one control that leaves the app: the Host launches the local draw.io
@@ -950,11 +954,20 @@ check('the button no longer needs the retired sticky-strip workaround',
   && slice.slice(slice.indexOf('function DiagramView(')).indexOf("position: 'sticky'") < 0);
 const toolbarRow = findInTree(editTree, (n) => n.type === 'div' && Array.isArray(n.kids)
   && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button' && (k.kids || []).indexOf('R') >= 0));
-check('the toolbar row ends at Fit and no longer carries the draw.io button',
+check('the toolbar row ends at the filter button, with no draw.io and no separate Fit button',
   toolbarRow !== null
   // the EDIT button's own title — the bare word `draw.io` now also appears in the Source tooltip
   && findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props.title || '').indexOf('local draw.io app') >= 0) === null
-  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Fit') >= 0) !== null);
+  // 0.6.22: Fit moved into the picker, so no Fit button survives there
+  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Fit') >= 0) === null
+  // and 0.6.23 put the two icon buttons last (counted last, not by length: the file picker and the
+  // status span share this row)
+  && (function () {
+    const kids = (toolbarRow.kids || []).filter((k) => k !== null && k !== undefined);
+    const last = kids[kids.length - 1];
+    return last !== undefined && last.type === 'button' && String(last.props.title) === 'Filter the diagram';
+  })());
+
 // Asked for in 0.6.17: the view toggle is `R` / `S`. The letters only work because the tooltip
 // and the accessible name still say the words, so assert both halves of that bargain — a bare
 // letter with no label would be a UI regression even though the pixels look right.
@@ -986,18 +999,28 @@ const rowKids = toolbarRow === null ? [] : (toolbarRow.kids || []);
 const optionKids = (sel) => (sel === null || sel.kids === undefined ? []
   : (Array.isArray(sel.kids[0]) ? sel.kids[0] : sel.kids));
 const zoomOpts = optionKids(zoomSel).map((o) => String((o.kids || [])[0]));
-check('the level readout is a select labelled Zoom level, offering the presets',
-  zoomSel !== null && zoomSel.props.title === 'Zoom level' && zoomSel.props.value === '100'
-  && JSON.stringify(zoomOpts) === JSON.stringify(api.DRAWIO_ZOOM_PRESETS.map((p) => p + '%')),
-  JSON.stringify(zoomOpts));
+check('the level readout is a select labelled Zoom level, offering the presets and Fit',
+  zoomSel !== null && zoomSel.props.title === 'Zoom level'
+  // the fixture is fitted (rect === null), so the control must say Fit, not claim a percentage
+  && zoomSel.props.value === 'fit'
+  && JSON.stringify(zoomOpts) === JSON.stringify(api.DRAWIO_ZOOM_PRESETS.map((p) => p + '%').concat(['Fit'])),
+  zoomSel === null ? 'no picker' : zoomSel.props.value + ' / ' + JSON.stringify(zoomOpts));
 check('the picker sits between the - and + buttons',
   zoomSel !== null && zoomOutBtn !== null && zoomInBtn !== null
   && rowKids.indexOf(zoomSel) === rowKids.indexOf(zoomOutBtn) + 1
   && rowKids.indexOf(zoomInBtn) === rowKids.indexOf(zoomSel) + 1,
   JSON.stringify(rowKids.map((k) => (k === null ? 'null' : k.type + ':' + String(k.props.title || (k.kids || []).join(''))))));
-check('picking a level reaches a handler without throwing',
+check('picking a level, and picking Fit, reach a handler without throwing',
   zoomSel !== null && typeof zoomSel.props.onChange === 'function'
-  && (() => { try { zoomSel.props.onChange({ target: { value: '25' } }); return true; } catch (e) { return false; } })());
+  && (() => {
+    try {
+      zoomSel.props.onChange({ target: { value: '25' } });
+      zoomSel.props.onChange({ target: { value: 'fit' } });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  })());
 
 // A wheel-zoomed level is not one of the presets (the screenshot that asked for this was at
 // 745%), and the control must still show it -- and offer it back -- instead of rounding to 400.
@@ -1013,8 +1036,110 @@ const zoomedSel = findInTree(zoomedTab, (n) => n.type === 'select' && String(n.p
 const zoomedOpts = optionKids(zoomedSel).map((o) => String((o.kids || [])[0]));
 check('a level the wheel reached is shown and offered back, in order',
   zoomedSel !== null && zoomedSel.props.value === '745'
-  && JSON.stringify(zoomedOpts) === JSON.stringify(api.DRAWIO_ZOOM_PRESETS.concat([745]).map((p) => p + '%')),
+  && JSON.stringify(zoomedOpts) === JSON.stringify(api.DRAWIO_ZOOM_PRESETS.concat([745]).map((p) => p + '%').concat(['Fit'])),
   zoomedSel === null ? 'no picker' : zoomedSel.props.value + ' / ' + JSON.stringify(zoomedOpts));
+// 0.6.23: the two icon buttons, and the fact that they open the dialogs. The harness's setState is
+// a no-op, so the CLICK cannot be observed in the tree -- the wiring is asserted on the source and
+// the dialogs are rendered directly from state below, which is what actually matters.
+const searchBtn = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props['aria-label'] || '') === 'Search the diagram');
+const filterBtn = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props['aria-label'] || '') === 'Filter the diagram');
+check('the toolbar carries Search and Filter buttons',
+  searchBtn !== null && filterBtn !== null && String(searchBtn.props.title) === 'Search the diagram'
+  && String(filterBtn.props.title) === 'Filter the diagram',
+  searchBtn === null ? 'no search button' : String(searchBtn.props.title));
+check('the buttons open their dialogs, and neither is a file write',
+  slice.indexOf('onClick: openSearch') >= 0 && slice.indexOf('onClick: openFilter') >= 0
+  && slice.indexOf('setDialog(\'search\')') >= 0 && slice.indexOf('setDialog(\'filter\')') >= 0);
+
+// The dialogs, rendered from the state the buttons set (the harness cannot click, so the fixture
+// supplies it). OK/Cancel, the field each one is for, and that Cancel is a plain close.
+const searchDialog = renderTab(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'search'],
+  ['searchText', '1001'],
+]));
+const searchDialogButtons = ['OK', 'Cancel'].map((label) => findInTree(searchDialog, (n) => n.type === 'button' && (n.kids || []).indexOf(label) >= 0));
+check('the search dialog has a field and OK / Cancel',
+  findInTree(searchDialog, (n) => n.type === 'input' && String(n.props['aria-label'] || '') === 'Search the diagram') !== null
+  && searchDialogButtons[0] !== null && searchDialogButtons[1] !== null
+  && findInTree(searchDialog, (n) => n.props !== undefined && n.props.role === 'dialog') !== null,
+  searchDialogButtons.map((b) => (b === null ? 'missing' : 'ok')).join('/'));
+const searchDialogFlat = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'search'],
+  ['busMeta', { areas: [], zones: [], ofBus: { bus1: { area: '', zone: '', name: 'ODESSA 2 0' } } }],
+]));
+check('the search dialog shows this case\'s help and an arrow placeholder',
+  searchDialogFlat.indexOf('14 buses here (Bus-1 to Bus-14)') > 0
+  && searchDialogFlat.indexOf('1->2') > 0 && searchDialogFlat.indexOf('ODESSA') > 0
+  && searchDialogFlat.indexOf('1001-1002') < 0,
+  searchDialogFlat.slice(searchDialogFlat.indexOf('14 buses'), searchDialogFlat.indexOf('14 buses') + 70));
+check('the search dialog keeps OK and Cancel wired, and Cancel only closes',
+  (function () {
+    try {
+      searchDialogButtons[0].props.onClick();
+      searchDialogButtons[1].props.onClick();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  })()
+  && slice.indexOf('setDialog(null)') >= 0 && slice.indexOf('applySearch') >= 0);
+
+const filterDialog = renderTab(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'filter'],
+  ['busMeta', { areas: [{ num: '1', name: 'NORTH' }], zones: [{ num: '9', name: 'FAR WEST TEX', area: '1' }], ofBus: {} }],
+]));
+const filterDialogButtons = ['OK', 'Cancel'].map((label) => findInTree(filterDialog, (n) => n.type === 'button' && (n.kids || []).indexOf(label) >= 0));
+const areaSelect = findInTree(filterDialog, (n) => n.type === 'select' && String(n.props['aria-label'] || '') === 'Area');
+const zoneSelect = findInTree(filterDialog, (n) => n.type === 'select' && String(n.props['aria-label'] || '') === 'Zone');
+check('the filter dialog offers area, zone, the band checkbox, and OK / Cancel',
+  areaSelect !== null && zoneSelect !== null && filterDialogButtons[0] !== null && filterDialogButtons[1] !== null
+  && findInTree(filterDialog, (n) => n.type === 'input' && n.props.type === 'checkbox') !== null,
+  JSON.stringify([optionKids(areaSelect).map((o) => String((o.kids || [])[0])), optionKids(zoneSelect).map((o) => String((o.kids || [])[0]))]));
+// 0.6.24: the message follows the DIALOG's fields, not the applied filter. This is the bug the
+// screenshot showed -- Area/Zone changed to 7 COAST / 1 BAY CITY while the line still read the
+// previous "area 1, zone 9" because it was computed from the applied value.
+const draftDialog = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'filter'],
+  ['filterArea', '2'],
+  ['filterZone', ''],
+  ['filterApplied', { area: '1', zone: '9', outOfBand: false }],
+  ['busMeta', {
+    areas: [{ num: '1', name: 'NORTH' }, { num: '2', name: 'SOUTH' }],
+    zones: [{ num: '9', name: 'FAR WEST TEX', area: '1' }, { num: '7', name: 'AGGIE', area: '2' }],
+    ofBus: { bus1: { area: '2', zone: '7', name: 'A' }, bus2: { area: '2', zone: '7', name: 'B' }, bus3: { area: '1', zone: '9', name: 'C' } },
+  }],
+]));
+// Only the MESSAGE is asserted here: the toolbar status legitimately still says `area 1` while the
+// dialog is open, because that one shows what is applied to the drawing.
+const draftMessage = draftDialog.slice(draftDialog.indexOf('Showing'), draftDialog.indexOf('Showing') + 80);
+check('the filter message previews the dialog fields, not the applied filter',
+  draftMessage.indexOf('area 2 SOUTH') >= 0 && draftMessage.indexOf('area 1') < 0
+  && draftMessage.indexOf('Showing 2 of 14 buses') >= 0,
+  draftMessage);
+check('the toolbar status keeps the APPLIED filter, so Cancel still cancels',
+  slice.indexOf('filterApplied === null || scene === null') >= 0
+  && slice.indexOf('const draftHits = scene === null') >= 0);
+
+check('the filter dialog offers the case\'s own areas and zones, plus All',
+  JSON.stringify(optionKids(areaSelect).map((o) => String((o.kids || [])[0]))) === JSON.stringify(['All areas', '1  NORTH'])
+  && JSON.stringify(optionKids(zoneSelect).map((o) => String((o.kids || [])[0]))) === JSON.stringify(['All zones', '9  FAR WEST TEX']));
+
 if (editButton !== null) {
   editButton.props.onClick();
   check('the edit button asks the Host to launch draw.io for the open diagram',
@@ -1365,6 +1490,164 @@ const atCap = capError(20000);
 check('a scene of exactly 20000 cells is not rejected for its size', atCap.indexOf('cells (limit') < 0, atCap);
 check('one cell over the cap is rejected and the message quotes the new limit',
   capError(20001).indexOf('20001 cells (limit 20000)') >= 0, capError(20001));
+
+// --- 16. diagram search and filter ------------------------------------------
+console.log('\n16. diagram search and filter (0.6.23)');
+// Search resolves a query to cells; filter resolves criteria to cells to hide. Both are pure, and
+// both lean on one hard part: an edge through a transformer is TWO stubs (bus -> ring), so the bus
+// pair has to come from the group's sibling ring. Every edge must resolve, or those branches could
+// never be searched or filtered.
+const ringIndex = api.drawioRingIndex(scene.nodes);
+const resolvedPairs = scene.edges.map((e) => api.drawioEdgeBusPair(e, scene.edges, ringIndex));
+check('every edge resolves to a bus pair, transformer stubs included',
+  resolvedPairs.every((p) => p !== null),
+  resolvedPairs.filter((p) => p === null).length + ' of ' + scene.edges.length + ' unresolved');
+check('a transformer branch resolves to the SAME pair as its two stubs',
+  (function () {
+    const stubs = scene.edges.filter((e) => ringIndex.groupOf[e.source] !== undefined || ringIndex.groupOf[e.target] !== undefined);
+    if (stubs.length === 0) return true;
+    for (let i = 0; i < stubs.length; i += 2) {
+      const a = api.drawioEdgeBusPair(stubs[i], scene.edges, ringIndex);
+      const b = api.drawioEdgeBusPair(stubs[i + 1], scene.edges, ringIndex);
+      if (a === null || b === null) return false;
+      if (a.slice().sort().join('|') !== b.slice().sort().join('|')) return false;
+    }
+    return true;
+  })());
+
+const hit = (q, names) => api.drawioSearchHits(q, scene.nodes, scene.edges, names === undefined ? null : names);
+check('a bus number highlights that bus bar AND its label',
+  hit('5').nBus === 1 && hit('5').buses.bus5 === true && hit('5').buses.nm5 === true, JSON.stringify(hit('5').buses));
+check('a bus id highlights the same bus, and Bus-14 reaches the last one',
+  hit('Bus-5').buses.bus5 === true && hit('Bus-14').buses.bus14 === true && hit('14').buses.bus14 === true);
+check('a name from the bus table matches, case-insensitively',
+  hit('odessa', { bus5: 'ODESSA 2 0' }).buses.bus5 === true && hit('ODESSA', { bus5: 'ODESSA 2 0' }).nBus === 1);
+check('a pair highlights the two buses and the branches between them',
+  hit('1-2').buses.bus1 === true && hit('1-2').buses.bus2 === true && hit('1-2').nBranch >= 1,
+  hit('1-2').text);
+// 0.6.25: `->` is how a branch is written now. The dash, the slash and the unicode arrow still mean
+// the same thing, and all four must resolve to the same two buses.
+check('a branch written with an arrow is the documented form',
+  hit('1->2').nBranch >= 1 && hit('1->2').text.indexOf('branch') >= 0, hit('1->2').text);
+check('the arrow spellings are equivalent, and a branch says which one it found',
+  ['1->2', '1-2', '1/2', '1\u21922', '1 -> 2'].every((q) => hit(q).nBranch >= 1
+    && hit(q).buses.bus1 === true && hit(q).buses.bus2 === true),
+  ['1->2', '1-2', '1/2', '1\u21922'].map((q) => q + ':' + hit(q).nBranch).join(' '));
+check('a pair with no branch says so instead of highlighting nothing',
+  hit('1-99').nBus === 0 && hit('1-99').text.indexOf('99') >= 0, hit('1-99').text);
+check('an unknown query says nothing matches, and an empty one asks for input',
+  hit('9999').nBus === 0 && hit('9999').text.indexOf('Nothing matches') >= 0 && hit('').text.indexOf('Type a bus number') >= 0);
+check('a bus number that is also a name substring is still one hit per bus',
+  hit('1', { bus1: 'X', bus10: 'Y' }).nBus === 1, 'a bare number is a number, not a substring');
+
+// Filtering: keep what matches, hide the rest, and never leave a branch dangling into a hidden bus.
+const meta = api.drawioBusMeta('ID,Name,AreaNum,AreaName,ZoneNum,ZoneName',
+  ['Bus1,A,1,NORTH,9,FAR WEST TEX', 'Bus2,B,1,NORTH,8,TYLER', 'Bus3,C,2,SOUTH,7,AGGIE'], null);
+check('the bus table folds into area/zone lists and per-bus lookups',
+  JSON.stringify(meta.areas) === JSON.stringify([{ num: '1', name: 'NORTH' }, { num: '2', name: 'SOUTH' }])
+  && JSON.stringify(meta.zones.map((z) => z.num)) === JSON.stringify(['7', '8', '9'])
+  && meta.ofBus.bus1.area === '1' && meta.ofBus.bus1.zone === '9' && meta.ofBus.bus3.area === '2',
+  JSON.stringify(meta.areas) + ' / ' + JSON.stringify(meta.zones));
+check('merging pages keeps the lists and the per-bus lookups',
+  (function () {
+    const first = api.drawioBusMeta('ID,Name,AreaNum,ZoneNum', ['Bus1,A,1,9'], null);
+    const both = api.drawioBusMeta('ID,Name,AreaNum,ZoneNum', ['Bus2,B,2,7'], first);
+    return both.areas.length === 2 && both.ofBus.bus1 !== undefined && both.ofBus.bus2 !== undefined;
+  })());
+check('a filter with no criteria hides nothing',
+  Object.keys(api.drawioFilterHidden(null, scene.nodes, scene.edges, meta, null).ids).length === 0
+  && Object.keys(api.drawioFilterHidden({ area: '', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).ids).length === 0);
+check('filtering by area hides the buses outside it, with their labels',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null);
+    return h.ids.bus1 !== true && h.ids.nm1 !== true && h.nBuses > 0;
+  })());
+check('the band filter keeps exactly the buses the voltage alert flagged',
+  (function () {
+    const alerts = { bus1: true };
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: true }, scene.nodes, scene.edges, meta, alerts);
+    return h.ids.bus1 !== true && h.ids.nm1 !== true && h.ids.bus2 === true;
+  })());
+check('a branch with a hidden end is hidden, and a visible-visible branch is not',
+  (function () {
+    const alerts = { bus1: true, bus2: true };
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: true }, scene.nodes, scene.edges, meta, alerts);
+    const pairs = scene.edges.map((e) => api.drawioEdgeBusPair(e, scene.edges, ringIndex));
+    return pairs.every((p, i) => {
+      if (p === null) return true;
+      const bothKept = alerts[p[0]] === true && alerts[p[1]] === true;
+      return bothKept ? h.ids[scene.edges[i].id] !== true : h.ids[scene.edges[i].id] === true;
+    });
+  })());
+check('a hidden transformer stub hides its rings and their group too',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: true }, scene.nodes, scene.edges, meta, { bus1: true });
+    for (const e of scene.edges) {
+      if (h.ids[e.id] !== true) continue;
+      const ring = api.drawioIsBusCell(e.source) ? e.target : e.source;
+      const group = ringIndex.groupOf[ring];
+      if (group !== undefined && h.ids[group] !== true) return false;
+    }
+    return true;
+  })());
+// The search dialog's help is about the case in front of it (0.6.25): its own bus count and range,
+// a branch example from its own numbers, and a name from its own table -- or a plain statement that
+// there is no table to get names from.
+const helpWithNames = api.drawioSearchHelp(scene, { ofBus: { bus1: { name: 'ODESSA 2 0' }, bus2: { name: 'PRESIDIO' } } });
+check('the search help names this case\'s bus count, range and branch example',
+  helpWithNames.hint.indexOf('14 buses here (Bus-1 to Bus-14)') === 0
+  && helpWithNames.hint.indexOf('1->2 the branches between two') > 0
+  && helpWithNames.hint.indexOf('"ODESSA"') > 0
+  && helpWithNames.placeholder === '1, Bus-1, ODESSA, 1->2',
+  helpWithNames.placeholder + ' | ' + helpWithNames.hint);
+const helpNoNames = api.drawioSearchHelp(scene, null);
+check('without a bus table the help says names cannot be searched',
+  helpNoNames.hint.indexOf('need this case\u2019s ACLF result table') > 0
+  && helpNoNames.placeholder.indexOf('Bus-1') > 0 && helpNoNames.placeholder.indexOf('1->2') > 0,
+  helpNoNames.placeholder + ' | ' + helpNoNames.hint);
+check('the search help survives having no scene at all',
+  api.drawioSearchHelp(null, null).hint.indexOf('1001->1002') > 0
+  && api.drawioSearchHelp({ nodes: [] }, null).placeholder.indexOf('1001') >= 0,
+  JSON.stringify([api.drawioSearchHelp(null, null), api.drawioSearchHelp({ nodes: [] }, null)]));
+
+// The paint path itself: `hidden` must remove a cell from the tree entirely (not merely recolour
+// it) and `match` must be the search colour, for a bus bar, its label text and a branch.
+const radiusIndex = scene.nodes.findIndex((n) => n.id === 'bus5');
+const hiddenSvg = api.DrawioDiagram({ scene: scene, hidden: { bus5: true, nm5: true } });
+const hiddenKeys = groupsOf(hiddenSvg).map((g) => String(g.props.key));
+check('a hidden cell is not painted at all',
+  hiddenKeys.indexOf('n' + scene.nodes.findIndex((n) => n.id === 'nm5')) < 0
+  && hiddenKeys.indexOf('n' + radiusIndex) < 0
+  && groupsOf(hiddenSvg).length === groupsOf(api.DrawioDiagram({ scene: scene })).length - 2,
+  hiddenKeys.length + ' groups painted');
+const matchSvg = api.DrawioDiagram({ scene: scene, match: { bus5: true, nm5: true } });
+const matchByKey = {};
+for (const g of groupsOf(matchSvg)) matchByKey[g.props.key] = partsOf(g);
+const matchBar = (matchByKey['n' + radiusIndex] || []).filter((part) => part.type === 'rect')[0];
+const matchLabel = (matchByKey['n' + scene.nodes.findIndex((n) => n.id === 'nm5')] || []).filter((part) => part.type === 'text')[0];
+check('a matched bar and its label take the search colour',
+  matchBar !== undefined && matchBar.props.fill === '#1F6FEB' && matchBar.props.stroke === '#0B4AA2'
+  && matchLabel !== undefined && matchLabel.props.fill === '#0B4AA2',
+  (matchBar === undefined ? 'no bar' : matchBar.props.fill) + ' / ' + (matchLabel === undefined ? 'no label' : matchLabel.props.fill));
+check('a matched branch is thicker and in the search colour',
+  (function () {
+    const e = scene.edges[0];
+    const svg = api.DrawioDiagram({ scene: scene, match: Object.assign({}, { [e.id]: true }) });
+    const g = groupsOf(svg).filter((x) => String(x.props.key) === 'e0')[0];
+    const line = g === undefined ? undefined : partsOf(g).filter((part) => part.props.key === 'l')[0];
+    return line !== undefined && line.props.stroke === '#1F6FEB'
+      && line.props.strokeWidth > (scene.edges[0].strokeWidth || 1);
+  })());
+
+check('the sentence names the area and zone, the toolbar label stays numeric',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '1', zone: '9', outOfBand: false }, scene.nodes, scene.edges, meta, null);
+    return h.text.indexOf('area 1 NORTH') >= 0 && h.text.indexOf('zone 9 FAR WEST TEX') >= 0
+      && h.label === 'area 1, zone 9' && h.kept === h.total - h.nBuses;
+  })());
+check('the filter reports what it kept, in words',
+  api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).text.indexOf('Showing') === 0
+  && api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).label === 'area 1');
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);
