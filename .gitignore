@@ -30,3 +30,4 @@ temp/*
 wspace/data/**/diagram/*.png
 wspace/data/**/diagram/*.bkp
 wspace/data/**/diagram/*.dtmp
+**/__pycache__/*.pyc
