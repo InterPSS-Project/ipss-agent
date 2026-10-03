@@ -1660,7 +1660,12 @@ module.exports = {
           order: i,
           kind: kind,
           x: x, y: y, w: w, h: h,
-          rounded: style.rounded !== undefined && kind === 'rect',
+          // `rounded` carries a VALUE, and draw.io's default (and this workspace's every file) is
+          // `rounded=0`: the presence of the key used to mean "round", which turned every 6x52 bus
+          // bar into a pill where draw.io draws a square (0.6.33).
+          rounded: kind === 'rect' && style.rounded !== undefined && style.rounded !== '0',
+          // draw.io rounds by `min(w, h) * arcSize`, arcSize defaulting to 15% -- not by a fixed 8.
+          arcSize: Math.min(0.5, Math.max(0, numOr(style.arcSize, 15) / 100)),
           fill: style.fillColor !== undefined ? style.fillColor : null,
           stroke: style.strokeColor !== undefined ? style.strokeColor : DRAWIO_STROKE,
           strokeWidth: numOr(style.strokeWidth, 1),
@@ -1670,6 +1675,15 @@ module.exports = {
           bold: (numOr(style.fontStyle, 0) & 1) === 1,
           italic: (numOr(style.fontStyle, 0) & 2) === 2,
           lines: labelLines(cell.getAttribute('value')),
+          // Where the label sits inside its own box, as draw.io's style says. Absent keys keep
+          // draw.io's own defaults (centre / middle), so untagged text cells do not move.
+          align: style.align === 'left' || style.align === 'right' ? style.align : 'center',
+          vAlign: style.verticalAlign === 'top' || style.verticalAlign === 'bottom' ? style.verticalAlign : 'middle',
+          spacing: Math.max(0, numOr(style.spacing, 2)),
+          // A `text` cell has no fill of its own; `labelBackgroundColor` is the mask draw.io paints
+          // behind the glyphs, and reading it is what keeps wires out of the text (0.6.33).
+          labelBg: style.labelBackgroundColor !== undefined && style.labelBackgroundColor !== 'none'
+            ? style.labelBackgroundColor : null,
         }
         rects[node.id] = node
         nodes.push(node)
@@ -1786,17 +1800,44 @@ module.exports = {
       }
     }
 
-    function drawioLabel(lines, cx, cy, node, key) {
+    // A label sits inside its own box the way draw.io's style says: `align` and `verticalAlign`
+    // pick the corner or the centre, `spacing` insets it from that edge (draw.io's default 2).
+    // Text is never measured here -- the vertical anchors use the usual font metrics (ascent 0.8em,
+    // descent 0.2em, line height 1.2em, the spacing the previous version already used per line) --
+    // so a top-aligned line starts a hair inside the box rather than exactly on the glyph grid.
+    // `middle` + `center` is byte-for-byte the old behaviour, which is what every bus label uses.
+    function drawioLabel(node, key) {
+      const lines = node.lines
       if (lines.length === 0) return null
+      const spacing = Number.isFinite(node.spacing) ? node.spacing : 2
+      const size = node.fontSize
+      let x = node.x + node.w / 2
+      let anchor = 'middle'
+      if (node.align === 'left') {
+        x = node.x + spacing
+        anchor = 'start'
+      } else if (node.align === 'right') {
+        x = node.x + node.w - spacing
+        anchor = 'end'
+      }
+      let y = node.y + node.h / 2
+      let firstDy = lines.length > 1 ? (-(lines.length - 1) * 0.6) + 'em' : '0.32em'
+      if (node.vAlign === 'top') {
+        y = node.y + spacing + size * 0.8
+        firstDy = '0'
+      } else if (node.vAlign === 'bottom') {
+        y = node.y + node.h - spacing - size * 0.2 - (lines.length - 1) * size * 1.2
+        firstDy = '0'
+      }
       const spans = lines.map((line, i) => React.createElement('tspan', {
         key: 't' + i,
-        x: cx,
-        dy: i === 0 ? (lines.length > 1 ? (-(lines.length - 1) * 0.6) + 'em' : '0.32em') : '1.2em',
+        x: x,
+        dy: i === 0 ? firstDy : '1.2em',
       }, line))
       return React.createElement('text', {
         key: key,
-        x: cx, y: cy, textAnchor: 'middle',
-        fontSize: node.fontSize, fontWeight: node.bold ? 600 : 400,
+        x: x, y: y, textAnchor: anchor,
+        fontSize: size, fontWeight: node.bold ? 600 : 400,
         fontStyle: node.italic ? 'italic' : 'normal', fill: drawioThemeColor(node.fontColor),
       }, spans)
     }
@@ -2042,15 +2083,26 @@ module.exports = {
           parts.push(React.createElement('rect', {
             key: 's',
             x: n.x, y: n.y, width: n.w, height: n.h,
-            rx: n.rounded ? Math.min(8, n.h / 2) : 0,
+            rx: n.rounded ? Math.min(n.w, n.h) * (Number.isFinite(n.arcSize) ? n.arcSize : 0.15) : 0,
             fill: marked && isBar ? colour : (n.fill === null ? 'none' : drawioThemeColor(n.fill)),
             stroke: marked && isBar ? colour : drawioThemeColor(n.stroke),
             strokeWidth: n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         }
+        // A `text` cell draws no box of its own, so draw.io's `labelBackgroundColor` is the only
+        // mask behind its glyphs -- and without it the wires run straight through the text. Painted
+        // before the label and never tinted: a flag or a search colours the glyphs, not the mask,
+        // exactly as the `rect`-kind paper box behaves.
+        if (n.kind === 'text' && n.lines.length > 0 && n.labelBg !== null && n.labelBg !== undefined) {
+          parts.push(React.createElement('rect', {
+            key: 'bg',
+            x: n.x, y: n.y, width: n.w, height: n.h,
+            fill: drawioThemeColor(n.labelBg), stroke: 'none',
+          }))
+        }
         const labelNode = marked && !isBar ? Object.assign({}, n, { fontColor: colour }) : n
-        const label = drawioLabel(labelNode.lines, n.x + n.w / 2, n.y + n.h / 2, labelNode, 't')
+        const label = drawioLabel(labelNode, 't')
         if (label !== null) parts.push(label)
         // A transparent padded rect, so a 6px bar or a 16px transformer ring is comfortable
         // to hover. Added after the drawn geometry so it wins the hit test inside this group.

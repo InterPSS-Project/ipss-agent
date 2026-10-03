@@ -359,6 +359,21 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     is switched, and a late `busConnections` answer is applied only if that bus is still under the
     cursor. Guard §11 covers the pairing (all 25 edges resolve, and the 20 resolved pairs agree
     with the result table), the hit areas, the wiring and the tooltip wording.
+- **Style fidelity (0.6.33).** The preview is compared against the draw.io app by eye, so the parser
+  reads each style key the workspace's diagrams actually use. Honoured: `rounded` (a VALUE —
+  `rounded=0`, which every workspace file writes, is square; `rounded=1` rounds by `arcSize`, default
+  15 %), `align` / `verticalAlign` / `spacing` (a label's place inside its own box),
+  `labelBackgroundColor` (the mask behind a `text` cell's glyphs, without which the wires cross the
+  text), `fillColor`, `strokeColor` (including `none`), `strokeWidth`, `dashed`, `fontSize`,
+  `fontColor`, `fontStyle` (bold/italic), `ellipse`, `group` (a container, never a shape),
+  `exitX`/`exitY`/`entryX`/`entryY`, edge waypoints, `endArrow`, and `<br>` / `&#10;` in labels.
+  **Ignored, deliberately and documented** (none of them present in the tracked diagrams): `html=1`
+  inline markup, `rotation` / `flipH` / `flipV`, `startArrow` and the arrow shapes (`oval`,
+  `diamond`, `open`) with `endSize`, `opacity`, `gradientColor`, `shadow`, `dashPattern`,
+  `fontFamily`, `whiteSpace=wrap`, `exitDx`/`exitDy`/`entryDx`/`entryDy`, `edgeStyle` routing for a
+  file with no waypoints, image/stencil shapes, `absoluteArcSize`, and a text-measured
+  `labelBackgroundColor` (the mask covers the cell's box, which is text-sized in these files).
+  Guard §19 pins all of it, on a fixture and on the tracked reference diagrams.
 - **Diagram tab** (Client half, since 0.6.8; the only preview surface since 0.6.9): a
   **second `conversation.view`** entry —
   `{ id: 'diagram', order: 2, label: 'Diagram' }`, which lands between InterPSS (1) and
@@ -549,7 +564,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 295 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 309 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -562,6 +577,15 @@ ordering defect is re-introduced, so a green run is meaningful.
 Two fixture notes, both from the same rename (commit e1075429 moved the reference to
 `wspace/template/oneline-diagram.drawio`, and a stray `xf10b -> bg` edge — the only one of
 its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
+- §19 (since 0.6.33) covers **preview fidelity**: `rounded` as a value (0 square, 1 rounded, a bare
+  key rounded) with `arcSize` read and defaulting to 15 %, the label layout keys with draw.io's
+  defaults when absent, `labelBackgroundColor` present vs null, the group cell still not being a
+  shape, and the already-honoured keys unchanged beside them; then the same in the rendered SVG
+  (`rx` 0 / 12 / 3, `text-anchor` start/middle/end with the `spacing` inset, the first baseline from
+  the box edge with the 1.2 em step, the mask painted before the text and only where asked for).
+  It also asserts the **tracked reference diagrams**: ieee14's 14 labels are masked `text` cells and
+  its 14 bars are square, its legend text is anchored to its top-left, and ieee39's title is
+  left-aligned in its 440-unit box.
 - §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
   draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
   was never going to survive a round trip through the editor.

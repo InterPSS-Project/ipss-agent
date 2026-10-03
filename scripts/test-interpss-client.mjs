@@ -1616,13 +1616,15 @@ if (scene) {
     bar === undefined ? 'no bar' : bar.props.fill + ' / ' + bar.props.stroke);
   check('its Bus-N label text takes the colour too', labelText !== undefined && labelText.props.fill === 'red',
     labelText === undefined ? 'no label' : String(labelText.props.fill));
-  // The label's paper box, when the file paints one, must stay white: it is what masks the wires
-  // under the text. (The older hand-laid files use a `text;` cell with `labelBackgroundColor`, so
-  // they paint no box at all — the generated format paints a real white rect. Both are asserted.)
+  // The label's mask must stay white while the glyphs take the flag: it is what keeps the wires out
+  // of the text. Two shapes carry it — a `rect` cell with `fillColor` (the regenerated format) and a
+  // `text` cell with `labelBackgroundColor` (the hand-laid files, since 0.6.33) — and the mask is
+  // always painted before the text.
   const labelNode = scene.nodes[iLabel];
-  check('the label keeps a white paper box wherever the file draws one',
+  check('the label keeps its white mask, painted before the text, whatever the file uses',
     labelText !== undefined && labelText.props.fill === 'red'
-    && (labelNode.kind === 'text' ? labelBox === undefined : labelBox !== undefined && labelBox.props.fill === 'var(--dsw-alias-bg-layer-1)'),
+    && labelBox !== undefined && labelBox.props.fill === 'var(--dsw-alias-bg-layer-1)'
+    && labelParts.indexOf(labelBox) < labelParts.indexOf(labelText),
     labelNode === undefined ? 'no node' : labelNode.kind + ' / ' + (labelBox === undefined ? 'no box' : String(labelBox.props.fill)));
   const boxed = api.parseDrawioScene('<mxfile><diagram><mxGraphModel><root>'
     + '<mxCell id="bus7" value="" vertex="1" parent="1" style="rounded=0;fillColor=#666666;strokeColor=#333333;">'
@@ -1639,6 +1641,8 @@ if (scene) {
   const boxedText = boxedParts.filter((part) => part.type === 'text')[0];
   check('a generated-format label keeps its white box and colours only the text',
     boxedBar !== undefined && boxedBar.props.fill === 'red'
+    // and `rounded=0` is a VALUE: this bar is square, not a pill (0.6.33)
+    && boxedBar.props.rx === 0
     && boxedBox !== undefined && boxedBox.props.fill === 'var(--dsw-alias-bg-layer-1)'
     && boxedText !== undefined && boxedText.props.fill === 'red',
     (boxedBox === undefined ? 'no box' : String(boxedBox.props.fill)) + ' / ' + (boxedText === undefined ? 'no text' : String(boxedText.props.fill)));
@@ -2134,6 +2138,144 @@ check('a window as large as the drawing cannot be moved, and fraction drift is c
   })());
 check('a missing scene or rect passes through unchanged',
   api.drawioBirdseyeRect(null, half, 0.5, 0.5) === half && api.drawioBirdseyeRect(scene, null, 0.5, 0.5) === null);
+
+// --- 19. preview fidelity: the style keys the workspace's diagrams use ---------
+console.log('\n19. preview fidelity (what draw.io shows, the preview shows)');
+// 0.6.33. Three keys were misread: `rounded` (a value, not a presence), `align`/`verticalAlign`
+// (a label's place in its box, with `spacing`), and `labelBackgroundColor` (the mask behind a
+// `text` cell's glyphs). One fixture exercises them next to the keys that were already honoured, so
+// a future regression shows up as a failing cell rather than as a screenshot nobody compared.
+const fid = api.parseDrawioScene('<mxfile><diagram><mxGraphModel><root>'
+  + '<mxCell id="r0" value="" vertex="1" parent="1" style="rounded=0;fillColor=#666666;strokeColor=#333333;">'
+  + '<mxGeometry x="0" y="0" width="6" height="52" as="geometry"/></mxCell>'
+  + '<mxCell id="r1" value="" vertex="1" parent="1" style="rounded=1;arcSize=30;fillColor=#666666;strokeColor=none;">'
+  + '<mxGeometry x="100" y="0" width="40" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="r2" value="" vertex="1" parent="1" style="rounded;fillColor=#666666;strokeColor=none;">'
+  + '<mxGeometry x="200" y="0" width="40" height="20" as="geometry"/></mxCell>'
+  + '<mxCell id="tL" value="Left" vertex="1" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;spacing=5;fontColor=#000000;">'
+  + '<mxGeometry x="300" y="0" width="100" height="20" as="geometry"/></mxCell>'
+  + '<mxCell id="tC" value="Top" vertex="1" parent="1" style="text;html=1;align=center;verticalAlign=top;fontSize=20;fontColor=#000000;">'
+  + '<mxGeometry x="0" y="100" width="120" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="tR" value="Bottom" vertex="1" parent="1" style="text;html=1;align=right;verticalAlign=bottom;fontSize=10;fontColor=#000000;">'
+  + '<mxGeometry x="200" y="100" width="120" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="tB" value="Masked" vertex="1" parent="1" style="text;html=1;labelBackgroundColor=#FFFFFF;align=center;verticalAlign=middle;fontSize=11;fontColor=#000000;">'
+  + '<mxGeometry x="0" y="200" width="80" height="18" as="geometry"/></mxCell>'
+  + '<mxCell id="tN" value="Bare" vertex="1" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=11;fontColor=#000000;">'
+  + '<mxGeometry x="200" y="200" width="80" height="18" as="geometry"/></mxCell>'
+  // a numeric newline: valid XML, decoded by a real parser, and `labelLines` maps `&#10;` itself
+  + '<mxCell id="tM" value="A&#10;B" vertex="1" parent="1" style="text;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;">'
+  + '<mxGeometry x="400" y="200" width="90" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="el0" value="" vertex="1" parent="1" style="ellipse;fillColor=none;strokeColor=#CCCCCC;strokeWidth=1.5;">'
+  + '<mxGeometry x="500" y="0" width="16" height="16" as="geometry"/></mxCell>'
+  + '<mxCell id="g0" value="" vertex="1" parent="1" style="group;">'
+  + '<mxGeometry x="600" y="0" width="40" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="g0a" value="" vertex="1" parent="g0" style="ellipse;fillColor=none;strokeColor=#333333;">'
+  + '<mxGeometry x="0" y="0" width="16" height="16" as="geometry"/></mxCell>'
+  + '<mxCell id="e0" value="" edge="1" parent="1" source="r0" target="r1" style="endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=1.5;exitX=0.5;exitY=0.5;entryX=0;entryY=0.5;">'
+  + '<mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="60" y="26"/><mxPoint x="80" y="26"/></Array></mxGeometry></mxCell>'
+  + '<mxCell id="e1" value="" edge="1" parent="1" source="r1" target="el0" style="html=1;strokeColor=#FF0000;dashed=1;endArrow=classic;">'
+  + '<mxGeometry relative="1" as="geometry"/></mxCell>'
+  + '</root></mxGraphModel></diagram></mxfile>');
+const fidNode = (id) => fid.nodes.filter((n) => n.id === id)[0];
+const fidEdge = (id) => fid.edges.filter((e) => e.id === id)[0];
+check('rounded is read as a value: 0 is square, 1 rounds, a bare key rounds',
+  fidNode('r0').rounded === false && fidNode('r1').rounded === true && fidNode('r2').rounded === true
+  && fidNode('el0').rounded === false,
+  [fidNode('r0').rounded, fidNode('r1').rounded, fidNode('r2').rounded].join(','));
+check('arcSize is read, defaulting to draw.io\'s 15 per cent',
+  fidNode('r1').arcSize === 0.3 && fidNode('r0').arcSize === 0.15,
+  fidNode('r1').arcSize + ' / ' + fidNode('r0').arcSize);
+check('the label layout keys are read, with draw.io\'s defaults when absent',
+  fidNode('tL').align === 'left' && fidNode('tL').spacing === 5
+  && fidNode('tC').vAlign === 'top' && fidNode('tC').spacing === 2
+  && fidNode('tR').align === 'right' && fidNode('tR').vAlign === 'bottom'
+  && fidNode('tN').align === 'center' && fidNode('tN').vAlign === 'middle');
+check('labelBackgroundColor is read, and its absence is null',
+  fidNode('tB').labelBg === '#FFFFFF' && fidNode('tN').labelBg === null && fidNode('tC').labelBg === null);
+check('the group cell is still not a shape, but its children are',
+  fidNode('g0') === undefined && fidNode('g0a') !== undefined && fidNode('g0a').x === 600 && fidNode('g0a').y === 0);
+check('the already-honoured keys are unchanged in the same fixture',
+  fidNode('el0').kind === 'ellipse' && fidNode('el0').fill === 'none'
+  && fidEdge('e0').points.length === 4 && fidEdge('e0').arrow === null
+  && fidEdge('e1').dashed === true && fidEdge('e1').arrow !== null
+  && fidEdge('e1').stroke === '#FF0000');
+
+const fidSvg = api.DrawioDiagram({ scene: fid });
+const fidByKey = {};
+const fidOrder = {};
+for (const g of groupsOf(fidSvg)) {
+  fidByKey[g.props.key] = partsOf(g);
+  fidOrder[g.props.key] = groupsOf(fidSvg).map((x) => x.props.key).indexOf(g.props.key);
+}
+const fidIndexOf = (id) => fid.nodes.map((n) => n.id).indexOf(id);
+const fidParts = (id) => fidByKey['n' + fidIndexOf(id)] || [];
+const fidRect = (id) => fidParts(id).filter((part) => part.type === 'rect')[0];
+const fidText = (id) => fidParts(id).filter((part) => part.type === 'text')[0];
+// a <text>'s children are its tspans, wrapped once (see partsOf)
+const fidSpans = (id) => (Array.isArray(fidText(id).kids[0]) ? fidText(id).kids[0] : fidText(id).kids);
+check('a rounded=0 bar renders square and a rounded=1 bar rounds by arcSize',
+  fidRect('r0').props.rx === 0 && fidRect('r1').props.rx === 12 && fidRect('r2').props.rx === 3,
+  [fidRect('r0').props.rx, fidRect('r1').props.rx, fidRect('r2').props.rx].join(','));
+check('align picks the anchor and the edge, inset by spacing',
+  fidText('tL').props.textAnchor === 'start' && fidText('tL').props.x === 305
+  && fidText('tR').props.textAnchor === 'end' && fidText('tR').props.x === 318
+  && fidText('tC').props.textAnchor === 'middle' && fidText('tC').props.x === 60,
+  [fidText('tL').props.x, fidText('tC').props.x, fidText('tR').props.x].join(','));
+check('verticalAlign anchors the first baseline to the box, keeping the 1.2em line step',
+  fidText('tC').props.y === 100 + 2 + 20 * 0.8
+  && fidSpans('tC')[0].props.dy === '0'
+  && fidText('tR').props.y === 100 + 40 - 2 - 10 * 0.2
+  && fidText('tL').props.y === 10
+  && fidText('tB').props.y === 209,
+  [fidText('tC').props.y, fidText('tL').props.y, fidText('tR').props.y].join(','));
+check('a two-line top-aligned label starts at the box top and steps 1.2em',
+  fidSpans('tM').length === 2 && fidSpans('tM')[0].props.dy === '0'
+  && fidSpans('tM')[1].props.dy === '1.2em'
+  && fidText('tM').props.y === 200 + 6 + 12 * 0.8,
+  String(fidText('tM').props.y));
+check('labelBackgroundColor paints the mask, and only where the file asks for it',
+  (function () {
+    const mask = fidParts('tB').filter((part) => part.props.key === 'bg')[0];
+    const bare = fidParts('tN').filter((part) => part.props.key === 'bg');
+    return mask !== undefined && mask.props.fill === 'var(--dsw-alias-bg-layer-1)'
+      && mask.props.width === 80 && mask.props.height === 18
+      && fidParts('tB').indexOf(mask) < fidParts('tB').indexOf(fidText('tB'))
+      && bare.length === 0;
+  })());
+
+// Reference files: the tracked diagrams carry the shapes the workspace really uses -- `text` labels
+// masked by labelBackgroundColor, square bars, and a left-aligned header -- so they are asserted
+// directly rather than only through a fixture.
+const refScene = (rel) => api.parseDrawioScene(readFileSync(join(ROOT, rel), 'utf8'));
+const ref14 = refScene('wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio');
+const ref14Labels = ref14.nodes.filter((n) => /^nm\d+$/.test(n.id));
+const ref14Bars = ref14.nodes.filter((n) => api.drawioIsBusId(n.id));
+check('the reference diagram\'s labels are masked text cells, and its bars are square',
+  ref14Labels.length === 14 && ref14Bars.length === 14
+  && ref14Labels.every((n) => n.kind === 'text' && n.labelBg === '#FFFFFF' && n.align === 'center' && n.vAlign === 'middle')
+  && ref14Bars.every((n) => n.rounded === false && n.arcSize === 0.15),
+  ref14Labels.length + ' labels / ' + ref14Bars.length + ' bars');
+const ref14Legend = ref14.nodes.filter((n) => n.id === 'legend')[0];
+const ref14Svg = api.DrawioDiagram({ scene: ref14 });
+const ref14LegendText = (function () {
+  const idx = ref14.nodes.map((n) => n.id).indexOf('legend');
+  for (const g of groupsOf(ref14Svg)) {
+    if (g.props.key !== 'n' + idx) continue;
+    return partsOf(g).filter((part) => part.type === 'text')[0];
+  }
+  return undefined;
+})();
+check('the reference diagram\'s legend text is anchored to its top-left, as draw.io draws it',
+  ref14Legend !== undefined && ref14Legend.align === 'left' && ref14Legend.vAlign === 'top'
+  && ref14LegendText !== undefined && ref14LegendText.props.textAnchor === 'start'
+  && ref14LegendText.props.x === ref14Legend.x + ref14Legend.spacing,
+  ref14Legend === undefined ? 'no legend' : ref14LegendText.props.x + ' of ' + ref14Legend.w);
+const ref39Title = refScene('wspace/data/ieee/ieee39/diagram/ieee39-oneline.drawio')
+  .nodes.filter((n) => n.id === 'title')[0];
+check('the other reference diagram\'s title is left-aligned with a wide box, so centring would show',
+  ref39Title !== undefined && ref39Title.align === 'left' && ref39Title.vAlign === 'middle'
+  && ref39Title.w > 400,
+  ref39Title === undefined ? 'no title' : ref39Title.w + ' wide');
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

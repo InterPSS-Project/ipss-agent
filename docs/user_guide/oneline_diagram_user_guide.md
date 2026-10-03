@@ -19,6 +19,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 | Case has ACLF results but no diagram yet | Ask Chat to draw it (`$ipss-case-diagram`), or run the generator script |
 | Layout looks wrong after generation | Re-run with another `--seed`, or open the file in draw.io and edit |
 | You need the authoritative PNG | Use the Diagram tab’s draw.io button (desktop app), not only the Pillow preview |
+| You are comparing the preview with the draw.io app | Geometry and styles match since **0.6.33** (square bars, label alignment, label masks). These differences are deliberate: near-grey colours become theme tokens (dark mode), flagged buses/branches take the flag colours, a search hit turns blue, a filter hides what does not match, and the hover areas are padded |
 
 
 ---

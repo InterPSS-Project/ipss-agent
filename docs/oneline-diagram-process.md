@@ -177,7 +177,8 @@ bus/branch tooltips resolve against.
   SVG with a **Source** toggle, pans/zooms/fits, follows the app theme (near-grey colours are
   re-expressed as theme tokens; a deliberately coloured element keeps its colour), and
   shows bus/branch tooltips built from the case's result tables. It renders the subset these
-  diagrams use — rounded rects, ellipses, text, groups, polylines through waypoints — and
+  diagrams use — square rects (`rounded=0`, honoured since 0.6.33), ellipses, text with its
+  `align`/`verticalAlign`/`spacing`/`labelBackgroundColor` mask, groups, polylines through waypoints — and
   caps a scene at 20000 cells and reads up to 4 MiB (0.6.20; the earlier 2000-cell / 2 MiB ceilings
   refused a 2000-bus case). The **Diagram** tab (order 2, beside InterPSS) draws it full-size
   and follows whichever case
