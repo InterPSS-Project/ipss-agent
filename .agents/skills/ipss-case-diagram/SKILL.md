@@ -66,7 +66,7 @@ failed.
 | Branches | one line per `_DF_branch` row, undirected; parallel circuits bow slightly apart |
 | Transformers | `IsXfmr = true` rows as two interlocking rings in one group cell, inline on the branch and clear of every bar and label |
 | Loads / generators | not drawn — the template shows topology only |
-| Voltage | not drawn: every bar uses the template's single grey. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix, else the bus table's `NomVolt` when that is a real voltage, else nothing |
+| Voltage | Not drawn **in the file**: every bar uses the template's single grey. The Diagram tab paints a bus whose solved `|V|` is outside **0.9–1.1 pu** red when it renders (0.6.18) — render-time only, so never bake a colour in for it. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix, else the bus table's `NomVolt` when that is a real voltage, else nothing |
 | Orientation | the case's first bus (**Bus 1**) is the top-left-most bus: the layout is rotated, then eased, until every other bar is right of and below it |
 | Header | title, subtitle (counts and voltage levels), and a symbol legend box |
 
@@ -89,8 +89,16 @@ failed.
   the two stub edges through that group, so hovering any part of a transformer gives one branch
   tooltip.
 - Every edge needs `endArrow=none` (a one-line diagram is undirected) and an explicit `strokeColor`.
-- Keep the file uncompressed XML under `<mxfile>`, and under 2000 cells (the preview's cap; the
-  118-bus diagram uses 465).
+- Keep the file uncompressed XML under `<mxfile>`, and under **20000 cells** and **4 MiB** — the
+  preview's caps since 0.6.19 (the 118-bus diagram uses 465 cells / 137 KB, so the ceiling is only
+  relevant for a case like Texas 2K: ~10.7k cells / ~3 MB, which now fits).
+- **The flag colours live in a config, not in the file.** `config/net_diagram.json` (edited from the Diagram tab's gear dialog,
+  0.6.26) sets the bus band/colour and the two branch flow-flag percents/colours; the tab paints them at render time. The generator
+  still writes one grey per bar and no branch colour.
+- **Do not bake voltage colour into the file.** The Diagram tab reads the case's
+  `result/<stem>_DF_bus.csv` and paints out-of-band buses (`|V|` outside 0.9–1.1 pu) red as it
+  renders (0.6.18); the `.drawio` itself stays one grey per bar, and the generator has no colour
+  flag on purpose. A bar cell id that does not resolve to a table row simply stays grey.
 
 ## Flags
 
@@ -102,6 +110,7 @@ failed.
 | `--png PATH` | write the preview elsewhere |
 | `--scale N` | preview scale factor (default 1.0; use 2 for a closer look) |
 | `--seed N` | layout seed (default 11) |
+| `--layout auto\|force\|lattice` | placement strategy. `auto` (default) = the force pipeline up to 250 buses, the lattice above; `force` = always the original pipeline; `lattice` = always one cell per bus with the branches drawn under the bars. A large case **must** use the lattice path — the force one cannot separate it |
 | `--check FILE` | validate an existing diagram against the same case, writing nothing |
 | `--open` | after a passing self-check, hand the diagram to the draw.io editor through the draw.io MCP server |
 | `--app-export [PNG]` | render it with the local draw.io **desktop app** (authoritative output; default `<stem>-oneline-drawio.png`). `--app PATH` points at another install |
@@ -157,6 +166,8 @@ resources.
 | `no *_DF_bus.csv / *_DF_branch.csv under … -- run ACLF first` | Solve the case (`$ipss-case-aclf`), then re-run |
 | `ModuleNotFoundError: No module named 'PIL'` | Use the harness interpreter shown above, or pass `--no-png` |
 | `layout did not separate for any attraction setting` | Rare; retry with another `--seed` and report it rather than hand-editing coordinates |
+| `note: transformer X-Y: no clear spot on the branch` (many) | On the **force** path this is the earliest sign that a case is past what it handles: expect the self-check to `FAIL` on overlaps. Re-run with `--layout lattice` (or `auto`) instead of burning seeds |
+| Self-check `FAIL … overlapping bus footprints` | The layout shipped a collision. On the lattice path this should be impossible (cells are 1.73 x 1.53 footprints apart) — report it as a bug with the case and seed |
 | Self-check prints `FAIL …` | Report the failing line: an id/parent convention above was broken, a transformer symbol could not be placed clear of a bar/label, or the first bus is not the top-left-most (the run also prints a `note:` line for the last two) |
 | `--check` reports the Bus 1 corner rule on a hand-*laid* file | Expected: the hand-laid IEEE 14-bus template predates the rule. It is a generated-diagram convention |
 | The diagram is for the wrong case | `case_dir` is what decides — pass it explicitly |
@@ -168,6 +179,22 @@ resources.
   branches apart, not a few miles.
 - **Wires still cross.** 186 branches over 118 bars cannot be crossing-free; the geometry (bars,
   labels, transformer symbols) is collision-free, the routes are not.
+- **Two placement strategies, chosen by size.** `--layout auto` (the default) uses the **force**
+  pipeline up to 250 buses — proven to ~118 buses / 465 cells — and the **lattice** path above it.
+  The force path searched for a separation and could fail silently: Texas 2K (2000 buses / 3220
+  branches / 861 transformers) produced a **4000 x 4 907 300 px** page with **2193 overlapping
+  footprints** and 127 self-check failures, and the crowding announced itself first as
+  `note: transformer X-Y: no clear spot on the branch` lines.
+- **The lattice path places 2000 buses** (measured on Texas 2K): `placed 2000 buses with the lattice
+  strategy in ~17s`, **8000 x 6000** page at 43% fill, **0 overlapping footprints**, 0 transformer
+  overlaps, all 861 symbols in reserved gaps, self-check `PASS` in ~18 s, 10 671 cells / 2.95 MiB
+  (inside the preview caps). The graph is clustered (≤48 buses each), every cluster is laid out with
+  the force pipeline at a size it is proven at, and every bus then owns one lattice cell, so
+  separation and the top-left anchor hold by construction. Branch grid distance: median 4 cells,
+  p95 71 — the tail is the tie lines between the case's many small islands.
+- **Large cases get a schematic look.** On the lattice path the buses sit on a regular grid and the
+  branches are drawn *under* the bars (the bars mask the wires, so no hop is needed), which is what
+  makes 2000 bars and 3220 branches legible. Small cases keep the force look unchanged.
 - **The preview is approximate** — no orthogonal auto-routing, no arrowheads, one font size — and a
   fitted 1900 x 1700 page makes 11 px labels small until you zoom. Open the file in draw.io when
   exact geometry matters.

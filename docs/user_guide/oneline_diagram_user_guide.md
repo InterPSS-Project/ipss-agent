@@ -19,6 +19,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 | Case has ACLF results but no diagram yet | Ask Chat to draw it (`$ipss-case-diagram`), or run the generator script |
 | Layout looks wrong after generation | Re-run with another `--seed`, or open the file in draw.io and edit |
 | You need the authoritative PNG | Use the Diagram tab’s draw.io button (desktop app), not only the Pillow preview |
+| You are comparing the preview with the draw.io app | Geometry and styles match since **0.6.33** (square bars, label alignment, label masks). These differences are deliberate: near-grey colours become theme tokens (dark mode), flagged buses/branches take the flag colours, a search hit turns blue, a filter hides what does not match, and the hover areas are padded |
 
 
 ---
@@ -27,7 +28,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 
 ## Prerequisites
 
-- DeepSeek Harness with the InterPSS plugin installed (Diagram tab: **0.6.8+**; draw.io button: **0.6.12+**, improved **0.6.15+**, configurable launcher **0.6.16+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
+- DeepSeek Harness with the InterPSS plugin installed (Diagram tab: **0.6.8+**; draw.io button: **0.6.12+**, improved **0.6.15+**, configurable launcher **0.6.16+**, red out-of-band buses **0.6.18+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 - An **iPSS Agent** workspace (same activation gate as the InterPSS tab)
 - A selected / loaded simulation case under `wspace/data/**`
 - For **generation**: converged ACLF outputs `<case>/result/<stem>_DF_bus.csv` and `_DF_branch.csv` (run ACLF first if missing)
@@ -54,17 +55,23 @@ The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram**
 
 ### Toolbar and interaction
 
-Toolbar (plugin **0.6.11+**): **Rendered · Source · − · 100% · + · Fit**, plus the **draw.io** button at the right end (**0.6.12+**).
+Toolbar (plugin **0.6.11+**, single-letter view toggle **0.6.17+**, zoom picker **0.6.21+**, Fit in the picker **0.6.22+**, search + filter **0.6.23+**): **R · S · − · [level ▾] · + · 🔍 · ▼**, plus the **draw.io** button and the **gear** (config options, **0.6.26+**) in the tab’s upper-right corner (**0.6.12+**). `R` is the rendered drawing and `S` the raw XML — hover either for the full wording (`Rendered view` / `Source view — the raw draw.io XML`). The middle control is a **zoom picker**: it shows the current level and sets it from **25 / 50 / 75 / 100 / 125 / 150 / 200 / 300 / 400 %**, about the centre of what you are looking at. A level you reached with the wheel (say 745 %) is listed too and shown as the selection, so you can always come back to it.
 
 | Action | Effect |
 | ------ | ------ |
-| **hover** a bus bar (or its `Bus-N` label) or a branch | Same tooltip style as the InterPSS connection diagram; without a converged result: `no result data — run ACLF` |
+| **hover** a bus bar (or its `Bus-N` label) or a branch | Same tooltip style as the InterPSS connection diagram; without a converged result: `no result data — run ACLF`. A branch adds its flow loadings (**0.6.30+**): `Basecase Loading(%): 13.4%` from the branch table, and `Contingency Loading(%): …` when the CA result table lists that branch — that table holds only branches at or above the CA's `overloadThreshold` (the case's `config/ca_run.json`, 90 % by default), so lower-loaded branches have no contingency line. Lower the threshold and re-run CA to see more (**0.6.31+** lists the table even when it holds few rows) |
 | **scroll** / **drag** | Zoom about the cursor / pan |
+| **🔍 Search the diagram** (**0.6.23+**, `->` since **0.6.25**) | Opens a dialog (OK / Cancel): a bus number (`1001`), a bus id (`Bus-1001`), part of a bus name (`ODESSA`), or a branch written as `1001->1002`. The placeholder and help describe *this* case — its bus count and range, a branch example from its own numbers, and a name from its own table. Matches are highlighted in the drawing and counted next to the buttons; **Cancel** changes nothing |
+| **▼ Filter the diagram** (**0.6.23+**, live message **0.6.24+**, band wording from the config **0.6.27+**, branch loading filters **0.6.32+**) | Opens a dialog (OK / Cancel) that keeps one **area** and/or **zone** (from the case's own bus table) and/or only the buses outside the band `config/net_diagram.json` sets (0.9–1.1 pu by default), and/or only the branches at or above a flow flag (**0.6.32+**) — base-case and/or contingency, each labelled with the threshold from that same config. Its message previews your selection live — `Showing 91 of 2000 buses (area 7 COAST, zone 1 BAY CITY).` — while the drawing itself changes only on **OK**. Everything that does not match is hidden, with its branches and transformer symbols; a branch-loading criterion also hides the buses that are not an end of a branch that stays, and the message then counts **branches** (`Showing 144 of 2000 buses and 86 of 2678 branches (base-case loading ≥ 70%).`). A loading box is disabled while its result table is missing (`no branch table yet` / `no CA table yet`). The funnel stays lit while a filter is on, and the status text (`filter: area 5 ✕`) clears it |
+| **⚙ config options** (**0.6.26+**) | Opens the settings — bus limit/colour, base-case branch flow %/colour, contingency branch flow %/colour, and **Show the birdseye view** (**0.6.29+**) — and writes [`config/net_diagram.json`](../../config/net_diagram.json) on **OK** (**Cancel** changes nothing). The flags are what colours the drawing: buses outside the band in `Bus_flag_color`, branches at or above a flow percent in their colour. A **flags:** summary next to the toolbar shows how many of each, and clicking it reopens this dialog. The `.drawio` file itself keeps no colour, so the desktop app and the PNG stay plain |
+| **the birdseye** (**0.6.28+**, switch **0.6.29+**) | The thumbnail in the canvas's bottom-right corner shows the whole drawing with the part you are looking at outlined. Turn it off with **Show the birdseye view** in the gear dialog (the setting lives in `config/net_diagram.json`). **Click or drag inside it** to move the view there; it is handy the moment you zoom past fit on a large case |
+| **the level ▾ picker** (**0.6.21+**, Fit since **0.6.22+**) | Pick a zoom percentage (25–400 %) and the view zooms about its centre, or pick **Fit** (the list’s last entry) to show the whole page — while fitted the control reads `Fit`. The list also carries whatever level the wheel reached, selected |
 | **Fit** | Reset view to the page |
-| **Source** | Raw draw.io XML |
+| **R** / **S** | Rendered drawing / Source — the raw draw.io XML |
+| **a red bar + red `Bus-N`** (**0.6.18+**) | That bus's solved voltage magnitude is outside **0.9–1.1 pu** (checked strictly: the endpoints themselves are in band). Hover it for `⚠ |V| outside 0.9–1.1 pu`. Needs the case's ACLF result tables; a case with no results, or every bus in band, simply shows no red. **The `.drawio` file is not modified** — the colour is chosen when the tab renders the SVG, so the file, the desktop draw.io app and the generator's PNG preview stay exactly as generated |
 | **draw.io** button (upper-right, **0.6.15+**) | Opens the current file in the local draw.io desktop app, using the launcher configured in `config/ipss_plugin_env.json` (**0.6.16+**; `open -a draw.io` on macOS by default). Status text appears to the left of the button (`Launched draw.io…` or the Host error). Restart `dsh web` after a Host change so the button works. |
 
-(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS tab’s old **Diagram** dialog button; **0.6.10** gave the drawing more space; **0.6.11** dropped the zoom/pan hint text; **0.6.12** added the draw.io button; **0.6.15** moved it to the tab’s upper-right corner; **0.6.16** made the desktop-app path configuration.)
+(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS tab’s old **Diagram** dialog button; **0.6.10** gave the drawing more space; **0.6.11** dropped the zoom/pan hint text; **0.6.12** added the draw.io button; **0.6.15** moved it to the tab’s upper-right corner; **0.6.16** made the desktop-app path configuration; **0.6.17** shortened the view toggle to `R` / `S`; **0.6.18** paints buses outside 0.9–1.1 pu red at render time.)
 
 ### Configure the draw.io launcher (0.6.16+)
 
@@ -145,6 +152,7 @@ Useful flags:
 | Flag | Detail |
 | ---- | ------ |
 | `--title TEXT` | Page title and diagram name |
+| `--layout auto\|force\|lattice` | Placement strategy. `auto` (default) uses the force pipeline up to **250 buses** and the lattice above it; `lattice` puts every bus on its own grid cell (the only path that can place a large case — Texas 2K, 2000 buses, produces an 8000 × 6000 page in ~18 s); `force` always uses the original pipeline |
 | `--seed N` | Another valid layout for the same topology (default `11`) |
 | `--no-png` | Skip the Pillow preview |
 | `--check FILE` | Validate an existing diagram; write nothing |
@@ -209,11 +217,15 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 | Diagram tab says there is no diagram | No `.drawio` under `<case>/diagram/` — run `$ipss-case-diagram` (after ACLF) |
 | Preview shows nothing / wrong case | File must sit in the **selected** case’s `diagram/` folder; only `.drawio` is listed (PNG is ignored) |
 | Tooltips say `no result data — run ACLF` | Run ACLF so bus/branch result CSVs exist for the case |
+| Search finds nothing, or the filter hides everything | Search understands a bus number, `Bus-N`, part of a name, or `A->B` (a dash or slash works too); a filter that matches no bus hides the whole drawing — pick **All areas** and **All zones** in the filter dialog (or click the status text) to bring it back. Both read the selected case's `result/<stem>_DF_bus.csv`, so run ACLF first |
+| No red buses, or the wrong ones | The colouring needs `<case>/result/<stem>_DF_bus.csv` for the **selected** case and a `VoltMag` column in it — run ACLF, and re-select the case. It reads the table by column **name**, so a hand-edited table with renamed columns colours nothing rather than guessing. Nothing red is normal when every bus is inside 0.9–1.1 pu |
 | Generator: `no *_DF_bus.csv / *_DF_branch.csv` | Solve ACLF first (`$ipss-case-aclf`), then re-run |
 | `ModuleNotFoundError: No module named 'PIL'` | Use the harness Python path above, or pass `--no-png` |
 | draw.io button does nothing / Host error | Install draw.io desktop app; point `exe` at your install in `config/ipss_plugin_env.json` (0.6.16+); restart `dsh web` after plugin Host updates (0.6.12+) |
 | Bus tooltips broken after hand edit | Keep cell ids `busN` and labels exactly `Bus-N`; keep each transformer’s two rings under one `style=group` cell |
 | Layout still ugly after generate | Try another `--seed`; for tiny teaching cases, prefer hand layout in draw.io |
+| “too large to preview” / “diagram too large” | The ceilings are **20000 cells** and **4 MiB** since **0.6.20** (they were 2000 cells / 2 MiB before 0.6.19, and 5 MiB in 0.6.19). **The byte ceiling is a Host limit, so it only changes after an app restart** — until then the running app keeps refusing with its old number. A 2000-bus case like Texas 2K now fits (~10.7k cells, ~3 MB); something far bigger — `OpenEInterconnect` is 78k buses — still will not, and is unreadable as one page anyway. The Host cap needs an app restart to take effect |
+| Generating a large case is slow or the self-check fails on overlaps | Use `--layout lattice` (or leave it `auto`, which switches at 250 buses). The force pipeline cannot separate a few thousand footprints: on Texas 2K it wrote a 4000 x 4 907 300 px page with 2193 overlapping footprints, while the lattice path writes an 8000 x 6000 page with none, in about 18 seconds. A large drawing is legible block by block but its long-range tie lines cross the page — that is the case's own structure, not a defect you can fix with another seed |
 | Hand edits disappeared | Regenerating overwrites the default `<stem>-oneline.drawio` — use a separate filename |
 
 

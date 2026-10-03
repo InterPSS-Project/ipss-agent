@@ -55,9 +55,9 @@ than reinventing.
 
 | Step | Detail |
 |------|--------|
-| Layout | all-pairs hop distances from the branch list -> stress majorization (SMACOF); a scale search with neighbour attraction and footprint collision repair compacts it; the drawing is reshaped towards a page-friendly aspect, oriented so the case's first bus sits at the upper-left corner, and snapped to a 10 px grid |
-| Footprint | one bus = bar 6x52 with its `Bus-N` label above; the repair keeps footprints from overlapping, so no two bars or labels collide |
-| Branches | straight black lines with staggered taps per bar side; a short local hop around a bar only when a straight line would cut through one |
+| Layout | **up to 250 buses** (`--layout force`, the default for small cases): all-pairs hop distances from the branch list -> stress majorization (SMACOF); a scale search with neighbour attraction and footprint collision repair compacts it; the drawing is reshaped towards a page-friendly aspect, oriented so the case's first bus sits at the upper-left corner, and snapped to a 10 px grid. **Above 250 buses** (`--layout lattice`, and `auto` above the threshold): the graph is partitioned into connected clusters of at most 48 buses, each cluster is laid out with that same pipeline at a size it is proven at, the clusters' blocks are shelf-packed (adjacency-ordered, tall blocks first, one cell of gutter), and every bus then takes its own 90 x 110 px lattice cell -- so separation, the page bound and the top-left anchor hold by construction rather than by a repair loop that can give up. Two cells are 1.73 x 1.53 footprints apart, which is why no two buses can overlap |
+| Footprint | one bus = bar 6x52 with its `Bus-N` label above; footprints never overlap (the repair enforces it on the force path, the lattice makes it structural on the lattice path), and the self-check now fails on an overlap instead of only printing the count |
+| Branches | straight black lines with staggered taps per bar side; on the force path a short local hop around a bar when a straight line would cut through one, and on the lattice path the branches are emitted **before** the bars so the bars mask the wires (no hop search over 3000 long lines) |
 | Transformers | `IsXfmr` branches -> two interlocking 16x16 rings inside **one** `style=group` cell, placed on the branch trunk -- along it first, then stepped aside -- so the pair stays inline and clear of every bar and label, chained by two stub edges |
 | Annotations | none: no bus data, no branch P/Q, no voltage colours |
 | Outputs | `<case>/diagram/<stem>-oneline.drawio` and `<stem>-oneline-preview.png` (a Pillow re-render of the same geometry) |
@@ -153,7 +153,7 @@ bus/branch tooltips resolve against.
 
 | Rule | Detail |
 |------|--------|
-| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus, whatever its voltage |
+| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus **in the file**, whatever its voltage. The Diagram tab paints an out-of-band bus red *while it renders* (0.6.18, see "How the app reads a diagram") — that colour is never written to the `.drawio` |
 | Labels | `Bus-N` only (no name, no data), centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
 | Branches | thin black (`strokeWidth 1.5`), **undirected** (`endArrow=none`), no edge text, staggered taps so parallel lines leave a bar at different heights |
 | Transformers | two interlocking 16 x 16 rings (`fillColor=none`, centres 8 px apart) inside one `style=group` cell, sitting inline on the branch |
@@ -177,8 +177,10 @@ bus/branch tooltips resolve against.
   SVG with a **Source** toggle, pans/zooms/fits, follows the app theme (near-grey colours are
   re-expressed as theme tokens; a deliberately coloured element keeps its colour), and
   shows bus/branch tooltips built from the case's result tables. It renders the subset these
-  diagrams use — rounded rects, ellipses, text, groups, polylines through waypoints — and
-  caps a scene at 2000 cells. The **Diagram** tab (order 2, beside InterPSS) draws it full-size
+  diagrams use — square rects (`rounded=0`, honoured since 0.6.33), ellipses, text with its
+  `align`/`verticalAlign`/`spacing`/`labelBackgroundColor` mask, groups, polylines through waypoints — and
+  caps a scene at 20000 cells and reads up to 4 MiB (0.6.20; the earlier 2000-cell / 2 MiB ceilings
+  refused a 2000-bus case). The **Diagram** tab (order 2, beside InterPSS) draws it full-size
   and follows whichever case
   the InterPSS tab has selected. Implementation notes:
   [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md).
@@ -198,7 +200,7 @@ bus/branch tooltips resolve against.
 | Collision repair left pairs exactly at the threshold, so grid snapping broke them again | Split the comfort target used by the relaxation from the hard no-overlap test used for snapping and validation |
 | Force-directed spreading flattened the topology into a hairball | Layout is stress majorization on hop distances; force spreading is only used to compact it |
 | Transformer symbols floated up to ~160 px off their branch | Each symbol is placed on the branch trunk and slid along that line when the spot is taken; both stubs stay straight and collinear |
-| Voltage colours (tried, then removed on request) | Every bar uses the template grey; the name suffix only feeds the subtitle |
+| Voltage colours (tried in the generator, then removed on request) | The file keeps one grey per bar and the `Vn` suffix feeds only the subtitle. Since 0.6.18 the **Diagram tab** overlays the one colour that earns its keep — a bus whose solved `|V|` is outside **0.9–1.1 pu** is red at render time (bar, outline and `Bus-N`), with the violation spelled out in its tooltip. Nothing is baked into the `.drawio`, so the desktop app and the PNG preview stay as generated |
 | Legend collapsed to one long line in draw.io | The legend used a literal newline in an `html=1` label; draw.io treats that as a space, so the two lines merged. The break is now an escaped `<br>`, which both draw.io and the plugin preview render as a line break |
 | Legend painted over the title, page widened by 441 units | On the 600-unit pages the legend sat at `page_w - 370` and the title/subtitle cells were a fixed 800/1000 wide, so they ran under the legend and past the page edge; the exporter then widened the page to fit. Header cells are now measured against the page and the legend stacks under the subtitle when the title column would be under 340 units |
 | Transformer symbol clipped by a bus label | Labels paint last, so a symbol that overlapped one lost part of a ring (the Bus-7 cluster in the 14-bus cases). Placement now searches outward from the branch trunk -- along it, then stepping aside, avoiding bars **and** labels -- and the self-check fails on any overlap that remains |
@@ -217,6 +219,18 @@ bus/branch tooltips resolve against.
   two buses drawn side by side are a few branches apart, not a few miles.
 - **Wires still cross.** 186 branches over 118 bars cannot be crossing-free; the *geometry* is
   collision-free (bars, labels, transformer symbols), the routes are not.
+- **The force pipeline is proven to ~118 buses** (465 cells); past a few hundred footprints its
+  scale search finds no clean separation and the failure used to be silent. Measured on Texas 2K
+  (2000 buses / 3220 branches / 861 transformers) before the lattice path existed:
+  `wrote … (4000x4.9073e+06, … 2193 overlapping footprints)`, 127 self-check failures (the Bus-1
+  corner rule plus 126 transformer/bar-label overlaps — `xfg1` alone overlapped 18 buses), ~8
+  minutes.
+- **The lattice path places 2000 buses**: Texas 2K now reports `placed 2000 buses with the lattice
+  strategy in ~17s`, a **8000 x 6000** page (43% full, 87 x 53 cells), **0 overlapping footprints**,
+  0 transformer overlaps, all 861 symbols in reserved gaps, and a self-check `PASS` in ~18 s — with
+  10 671 cells / 2.95 MiB, inside the preview caps of 20000 cells / 4 MiB. Branch grid distance:
+  median 4 cells, p95 71 (the long tail is the tie lines between the case's many small islands,
+  which no placement can shorten).
 - **The preview is approximate.** No orthogonal auto-routing, no arrowheads, single font size; open
   the file in draw.io when exact geometry matters. A fitted 1900 x 1700 drawing makes 11 px labels
   small until you zoom in.

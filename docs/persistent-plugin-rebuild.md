@@ -110,11 +110,12 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
 
 - `inject: ['typert']` on the default export (else `apply()` runs before the
   typert registry and `/api` endpoints silently 404)
-- `METHODS` matches the dynamic list (21): `isActivated, checkResult,
+- `METHODS` matches the dynamic list (23): `isActivated, checkResult,
   checkResultFiles, listCases, readCsv, busConnections, runAclf, runCa,
   runReport, getAclfOptions, saveAclfOptions, listCaFiles, getCaOptions,
-  saveCaOptions, loadCase, summarizeResult, getNetworkInfo, getBridgeCase,
-  listDrawioFiles, readDrawio, openDrawio`
+  saveCaOptions, getNetDiagramOptions, saveNetDiagramOptions, loadCase,
+  summarizeResult, getNetworkInfo, getBridgeCase, listDrawioFiles, readDrawio,
+  openDrawio`
 - `readCsv` whitelist includes `contingency`: `_DF_(bus|branch|gen|load|contingency)\.csv`
 - **Shared Host features (both halves, since 0.6.3)**: `applyCsvSort(rows, header, column,
   desc)` — byte-identical in both hosts, so the sorted order cannot drift; `readCsv` applies
@@ -145,7 +146,7 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   backup, capped at depth 6 and 200 files); that scanner and its constants are **gone**, and
   the guard asserts neither host still carries them. `readDrawio` is unchanged: it takes a
   **workspace-relative** `.drawio` path — not the `data/…` form `readCsv` uses — and rejects
-  `..`, any non-`.drawio` name and anything over `MAX_DRAWIO_BYTES` (2 MiB) *before* reading,
+  `..`, any non-`.drawio` name and anything over `MAX_DRAWIO_BYTES` (4 MiB, 0.6.20; 2 MiB before 0.6.19) *before* reading,
   so an oversized file never reaches the RPC payload. `MAX_DRAWIO_BYTES` and `readDrawio` are
   byte-identical in the persistent Host and the two dynamic ones.
 - **Edit in the local draw.io app (Host half, since 0.6.12)**: `openDrawio` takes the same
@@ -358,13 +359,29 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     is switched, and a late `busConnections` answer is applied only if that bus is still under the
     cursor. Guard §11 covers the pairing (all 25 edges resolve, and the 20 resolved pairs agree
     with the result table), the hit areas, the wiring and the tooltip wording.
+- **Style fidelity (0.6.33).** The preview is compared against the draw.io app by eye, so the parser
+  reads each style key the workspace's diagrams actually use. Honoured: `rounded` (a VALUE —
+  `rounded=0`, which every workspace file writes, is square; `rounded=1` rounds by `arcSize`, default
+  15 %), `align` / `verticalAlign` / `spacing` (a label's place inside its own box),
+  `labelBackgroundColor` (the mask behind a `text` cell's glyphs, without which the wires cross the
+  text), `fillColor`, `strokeColor` (including `none`), `strokeWidth`, `dashed`, `fontSize`,
+  `fontColor`, `fontStyle` (bold/italic), `ellipse`, `group` (a container, never a shape),
+  `exitX`/`exitY`/`entryX`/`entryY`, edge waypoints, `endArrow`, and `<br>` / `&#10;` in labels.
+  **Ignored, deliberately and documented** (none of them present in the tracked diagrams): `html=1`
+  inline markup, `rotation` / `flipH` / `flipV`, `startArrow` and the arrow shapes (`oval`,
+  `diamond`, `open`) with `endSize`, `opacity`, `gradientColor`, `shadow`, `dashPattern`,
+  `fontFamily`, `whiteSpace=wrap`, `exitDx`/`exitDy`/`entryDx`/`entryDy`, `edgeStyle` routing for a
+  file with no waypoints, image/stencil shapes, `absoluteArcSize`, and a text-measured
+  `labelBackgroundColor` (the mask covers the cell's box, which is text-sized in these files).
+  Guard §19 pins all of it, on a fixture and on the tracked reference diagrams.
 - **Diagram tab** (Client half, since 0.6.8; the only preview surface since 0.6.9): a
   **second `conversation.view`** entry —
   `{ id: 'diagram', order: 2, label: 'Diagram' }`, which lands between InterPSS (1) and
   Trajectory (10) — showing the preview full-size. It has **no heading and no subtitle** (0.6.10):
   the tab bar names the view and the first row (`Simu Case <path>`) says what is drawn, so a
   title block only pushed the diagram down. Its toolbar is controls only — the picker (when the
-  case has several files), `Rendered` / `Source`, `−` / percent / `+`, `Fit`; the
+  case has several files), `R` / `S` (the Rendered / Source toggle, spelled out only in the
+  tooltip and the accessible name since 0.6.17), `−` / percent / `+`, `Fit`; the
   `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped
   in 0.6.11, because the gestures are discoverable without a sentence in the control row.
   The **draw.io-marked edit button** (since 0.6.12) that hands the open file to the local
@@ -409,11 +426,40 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
     "no diagram yet" rather than an empty pane. The wheel/pan handlers keep the geometry the
     modal used, on this view's own state, and the wheel listener is still registered natively
     so `preventDefault` is permitted.
+  - **Render-time voltage annotation (since 0.6.18)**: a bus whose solved `VoltMag` is outside
+    **[0.9, 1.1] pu** is painted **red** — the bar's fill (`#CC0000`) and outline (`#7F0000`) plus
+    its `Bus-N` text — and nothing is written: the `.drawio` file stays the authored artifact and
+    so do the desktop app, the generator's PNG preview and the parsed scene (`DrawioDiagram` reads
+    an optional `alert` map of lowercase `busN` ids and chooses colours at paint time; with no
+    `alert` prop the emitted tree is byte-identical to before, which §14 asserts).
+    - The band is a client constant (`DRAWIO_V_BAND`), checked strictly (`0.9`/`1.1` are in band)
+      and only for buses present in the case's `<stem>_DF_bus.csv`; a blank or non-numeric
+      `VoltMag` is never annotated. Colours are **saturated on purpose**: `drawioThemeColor`
+      passes a saturated value through, so a violation reads the same in the light and dark theme.
+    - The data comes over the existing `interpss/readCsv` (`_DF_bus.csv` is already whitelisted),
+      page by page, with the columns located by **header name** — `VoltAng` and `NomVolt` sit right
+      beside `VoltMag`, so a positional read would paint the wrong buses — and paging stops once the
+      open scene's buses are answered (which is what keeps a 2000- or 78k-bus table cheap). No ACLF
+      results, no bus table or a failed read simply means no colouring.
+    - The label's white paper box is **not** recoloured: it is what masks the wires under the text.
+      Note the two label spellings in the wild — the generated files paint a real white rect
+      (`rounded=0;fillColor=#FFFFFF`), the older hand-laid ones use a `text;` cell with
+      `labelBackgroundColor` and paint no box — §14 covers both.
+    - Colour alone is not accessible, so the same fact rides the tooltip (`drawioBusText` appends
+      `⚠ |V| outside 0.9–1.1 pu`), and the toolbar stays controls-only.
   - Guard §12 renders the view — idle, no case, no diagram, a listing failure, an open
-    diagram with a live scene, the tooltip element and the Source view — because a
-    reference error anywhere in it unmounts the tab. It also asserts the registration, the
-    `selectedCaseInput` wiring, the picker rule and that §7's regex parses **every** effect
-    of the new view. It is the replacement for the retired §8, which rendered the modal.
+    diagram with a live scene, a wheel-zoomed open diagram, the tooltip element and the Source
+    view — because a reference error anywhere in it unmounts the tab. It also asserts the
+    registration, the `selectedCaseInput` wiring, the picker rule and that §7's regex parses
+    **every** effect of the new view. It is the replacement for the retired §8, which rendered
+    the modal.
+  - The zoom picker is asserted structurally, not visually: it is a `select` in the toolbar row
+    whose options are exactly the presets **plus `Fit` last** (and the current non-preset level, in
+    order, selected), it sits at `−` + 1 and `+` − 1 in that row, its handler routes both a
+    percentage and `fit` without throwing, the row ends at `+` with no separate Fit button, and a
+    fitted view shows `Fit` as the selected entry. Three of those checks would pass on a screenshot that showed a stale label, which is
+    why the wheel-zoomed fixture is rendered too. The presets are also round-tripped through
+    `drawioZoomPercent`, so picking a level cannot land on a different one than it displayed.
 - **`interpss_case_summary`** ports `IpssAgentBridge.summarize()`. Java always returns
   every result section in full (only the requested one is ranked/limited) and
   `text` is a JSON string inside the envelope, so the tool does a second parse and
@@ -518,7 +564,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 168 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 309 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -531,6 +577,15 @@ ordering defect is re-introduced, so a green run is meaningful.
 Two fixture notes, both from the same rename (commit e1075429 moved the reference to
 `wspace/template/oneline-diagram.drawio`, and a stray `xf10b -> bg` edge — the only one of
 its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
+- §19 (since 0.6.33) covers **preview fidelity**: `rounded` as a value (0 square, 1 rounded, a bare
+  key rounded) with `arcSize` read and defaulting to 15 %, the label layout keys with draw.io's
+  defaults when absent, `labelBackgroundColor` present vs null, the group cell still not being a
+  shape, and the already-honoured keys unchanged beside them; then the same in the rendered SVG
+  (`rx` 0 / 12 / 3, `text-anchor` start/middle/end with the `spacing` inset, the first baseline from
+  the box edge with the 1.2 em step, the mask painted before the text and only where asked for).
+  It also asserts the **tracked reference diagrams**: ieee14's 14 labels are masked `text` cells and
+  its 14 bars are square, its legend text is anchored to its top-left, and ieee39's title is
+  left-aligned in its 440-unit box.
 - §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
   draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
   was never going to survive a round trip through the editor.
@@ -553,7 +608,11 @@ mechanism caught the 0.6.0 modal defect as
   regex to parse every one of its effects. Verified by mutation: adding a dep declared below
   its effect makes §7 report `fileCount is declared 936 chars after the effect` and §12's
   renders throw `Cannot access 'fileCount' before initialization` — the blank-tab defect,
-  twice over.
+  twice over. It also holds the **toolbar's shape**: the edit button's ancestor chain (the
+  upper-right corner), that the toolbar row still ends at **Fit** and carries no edit button, and
+  — since 0.6.17 — that the view toggle is the letters `R` / `S` **with** their tooltip and
+  accessible name still saying `Rendered view` / `Source view — the raw draw.io XML`, because a
+  bare letter with no label would be a regression even though the pixels look right.
 - §10 asserts the shape of the tab bar's data instead of the button it lost: the host listing
   stays scoped to the case's `diagram/` folder, the action row still carries ACLF / CA /
   Report, it has **no** Diagram button, and `drawioFiles` / `drawioOpen` /
@@ -576,6 +635,44 @@ mechanism caught the 0.6.0 modal defect as
 
   The real service exists only inside the Host, so this is as close as a dependency-free suite
   gets to the button.
+- §14 (since 0.6.18) covers the **render-time voltage annotation**: the band rule (exclusive at both
+  ends, blank/non-numeric never flagged), the reader (columns by header name — proved with a
+  shuffled header — scene-limited answers, a header without `ID`/`VoltMag` yielding nothing,
+  lowercase ids), the painting on the real IEEE 14-bus scene plus a synthetic generated-format label
+  (bar fill/stroke, red label text, the white paper box preserved or absent per format, an in-band
+  bus still on the theme tokens, red surviving `drawioThemeColor`), and — the constraint the whole
+  design exists for — that the **parsed scene is unchanged** after an alerted render and that no
+  write RPC exists anywhere in the diagram path.
+- §18 (since 0.6.28) covers the **birdseye**: one subpath per bar and per branch (every bar closed,
+  branch polylines followed so a hop shows in the thumbnail), an empty scene yielding empty paths, and
+  the geometry — a middle click centring the window, a corner click held inside the drawing, a window
+  as large as the drawing being immovable, out-of-range fractions clamped, and a missing scene or rect
+  passing through untouched. §12 renders the thumbnail and asserts it carries the whole scene and the
+  viewport frame, that it is absolutely positioned inside a `relative` canvas, and that its pointer
+  handlers do not throw.
+- §16 (since 0.6.23; the draft-preview rule since 0.6.24) covers **diagram search and filter**: that
+  every edge resolves to a bus pair
+  through its transformer group's sibling ring (0 of 25 unresolved on the reference scene, and each
+  transformer's two stubs agree), the query forms (number, `Bus-N`, name substring, `A-B` pair, and
+  the cases that must say "no match"), the bus-table fold into area/zone lists with page merging,
+  the filter's hiding rules (nothing when it has no criteria; a bus by area; the band filter keeping
+  exactly the flagged buses; a branch hidden when either end is; rings and their group hidden with a
+  hidden stub), and the paint path itself -- a hidden cell leaves the tree, a matched bar, label and
+  branch take the search colour.
+- §15 (since 0.6.19) pins the **size limits and their boundary**: the preview cap is 20000 cells, both
+  hosts read up to 4 MiB (4 194 304 bytes, 0.6.20 — raised 2 -> 5 MiB in 0.6.19, trimmed to 4 MiB in
+  0.6.20 because the largest drawing here is ~2.9 MiB), and the generator's own self-check allows
+  20000 — the three move together,
+  because raising one alone would leave the others refusing the same file (Texas 2K needs all three:
+  ~10.7k cells, ~3 MB). The boundary is exercised on both sides with a synthetic scene: exactly at
+  the cap the parse gets past the size check (and then fails for being empty, which is the proof),
+  and one cell over it fails with `20001 cells (limit 20000)`.
+  - Two §3/§11 assertions were made **fixture-relative** at the same time, because a case diagram is
+    a file the draw.io button invites you to edit: the group-origin check now reads the group's own
+    `mxGeometry` out of the file instead of hard-coding `462,306`, and the template comparison
+    compares the drawing's **inventory** (cell ids + kinds + edges) rather than its coordinates. A
+    local draw.io edit that nudged transformer group 3 to `x=503` failed both before this change
+    while breaking nothing the preview depends on.
 
 Since 0.6.3 **§9 asserts the two plugins are in sync**, which is what makes this rebuild
 guide trustworthy: the suite reads only the dynamic body, so silent drift had made it
@@ -643,15 +740,90 @@ Client-half change is served with the plugin bundle, so the reload is what picks
 - **Diagram tab** (since 0.6.8): the tab bar reads **Chat · InterPSS · Diagram · Trajectory**,
   and the InterPSS action row reads **ACLF · ⚙ · CA · Report** (the 0.6.9 change). The tab opens
   straight onto its **Simu Case** row — no heading, no subtitle (0.6.10) — with a toolbar of
-  controls that ends at **Fit** (0.6.11). Selecting a
+  controls that reads **R · S · − · [level ▾] · + · 🔍 · ▼** (`R` / `S` since 0.6.17; hovering them says
+  `Rendered view` / `Source view — the raw draw.io XML`). **The level readout is the zoom picker
+  since 0.6.21, and it carries Fit since 0.6.22**: a `select` labelled *Zoom level* offering 25 / 50 /
+  75 / 100 / 125 / 150 / 200 / 300 / 400 % **and `Fit` as its last entry**, sitting exactly between
+  `−` and `+` — which is now the end of the row, since Fit's own button is gone. A percentage picks
+  that zoom about the centre of what is on screen, clamped by the same limits the wheel uses; `Fit`
+  shows the whole page from its origin, and while the view is fitted the readout says **Fit** rather
+  than claiming 100 % (picking 100 % only rescales about the current centre, which is a different
+  view). A level reached with the wheel or a pinch (the screenshot behind this was 745 %) is listed
+  as an extra entry and shown as selected, so the control never rounds the view to a preset it is
+  not at — and getting back to it after picking 100 % is one click.
+  - **Search and Filter (0.6.23)** are the two icon buttons after the zoom controls; each opens a
+    dialog whose **OK** applies and whose **Cancel** only closes (the fields are a draft, and the
+    applied value is written by OK alone, so Cancel really cancels).
+    - **Search the diagram** takes a bus number (`1001`), a bus id (`Bus-1001`), part of a case bus
+      name (`ODESSA`), or a branch written with an arrow (`1001->1002` since 0.6.25; `-`, `/` and the
+      unicode arrow still work). Its placeholder and help are **about the case in front of it**:
+      the bus count and range the diagram draws, a branch example from its own numbers, and a name
+      from its own table -- or, when the case has no result table, a statement that names cannot be
+      searched (rather than a suggestion that cannot work). Matches are
+      repainted in the search blue — bar, label text and branch (a thicker line) — the toolbar shows
+      a `N buses, M branches` count, and the bus table is fetched for the names only when the dialog
+      opens. A match outranks the violation red; the tooltip still reports the violation.
+    - **Filter the diagram** keeps one **area** and/or one **zone** (lists read from the case's bus
+      table, the zone list scoped to the chosen area) and/or only the buses outside the 0.9–1.1 pu
+      band. Everything else is **hidden** — bar, label, its branches *and* the transformer symbols on
+      them — so nothing is left dangling into nothing. The funnel button stays lit while a filter is
+      applied, and the status text (`filter: area 5`, `3 buses ✕`) clears the search and the filter.
+    - Both are paint-time overrides of the same kind as the voltage alert: `hidden` skips a cell,
+      `paint` recolours one, and the `.drawio`, the parsed scene and the desktop app see neither.
+  - **The birdseye view (0.6.28)** is a thumbnail of the whole drawing in the canvas's bottom-right
+    corner, with the visible rectangle drawn on it — at 200 % on a 2000-bus drawing there is otherwise
+    nothing to say where you are. It is deliberately **not** a second `DrawioDiagram` (that would
+    double the DOM of a 10k-cell scene): `drawioBirdseyePaths` flattens the scene into **two** `<path>`
+    strings, one for every branch and one for every bar, which the browser paints as one shape each
+    (measured on the 2000-bus Texas 2K scene: 2 ms, 180 KB of path data, 2 DOM elements). The
+    viewport frame is a real `rect` on top, `vectorEffect="non-scaling-stroke"` keeps every line
+    visible at thumbnail scale, and clicking or dragging the thumbnail moves the view
+    (`drawioBirdseyeRect` centres the same-size window and holds it inside the drawing). The
+    thumbnail captures its own pointer events and stops them, so dragging it never pans the canvas
+    underneath.
+  - **The gear, and `config/net_diagram.json` (0.6.26)**. A gear button beside the draw.io button
+    opens a dialog for the diagram's **flag thresholds and colours** (and, since 0.6.29, the **birdseye
+    switch**), read and written through
+    `getNetDiagramOptions` / `saveNetDiagramOptions` (Host, workspace-level file). Three families
+    are painted from the case's own tables, keyed by cell id in one map that the renderer applies
+    (`paint`):
+    - **bus flags** — `VoltMag` outside `Bus_flag_lower_limit .. Bus_flag_upper_limit`, in
+      `Bus_flag_color` (`red` by default), on the bar *and* its `Bus-N` label text;
+    - **base-case branch flags** — pairs whose highest `Loading%` reaches
+      `Basecase_branch_flow_flag_percent` (`green` by default);
+    - **the birdseye switch** (`Show_birdseye_view`, a checkbox in the dialog's *View* group) turns the
+      thumbnail off and on; it is on unless it was explicitly turned off, and the canvas simply does not
+      render the overlay rather than hiding it with CSS;
+    - **contingency branch flags** — pairs whose worst `LoadingPercent` in the CA result table (`checkResult`
+      must list `_DF_contingency.csv`: that list is the only way the tab finds a result file, and leaving it out
+      made the whole family silently invisible until 0.6.31)
+      reaches `Contingency_branch_flow_flag_percent` (`blue` by default), and a contingency flag
+      outranks a base-case one on the same branch.
+    A search's blue still outranks every flag, because a search is the deliberate act. The dialog's
+    form is a draft (OK saves, Cancel cancels); the Host sanitizes again on save, merges over what
+    is on disk (unknown keys survive) and never writes an out-of-range value. Flags are a **preview**
+    concern: no colour reaches the `.drawio`, so the desktop app and the PNG stay plain.
+      The two hard parts are pure and pinned in §16: an edge through a transformer is *two* stubs
+      (`bus → ring`), so the bus pair comes from the group's sibling ring — every edge must resolve,
+      or those branches could never be searched or filtered — and a filter needs the area/zone
+      columns by **header name**, like the voltage columns. Selecting a
   case in the InterPSS tab (preset or custom row) and switching to *Diagram*
   draws that case's `<case>/diagram/*.drawio` full-size; with several files the picker lists
   them and reopens the one last viewed; a case with none says so instead of drawing an empty
   pane, and a case never touched shows the InterPSS preset's diagram. Hovering a bar or a
   branch shows the connection diagram's tooltip (without a result table it says
-  `no result data — run ACLF`), the wheel zooms about the cursor, dragging pans, **Fit**
-  resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
+  `no result data — run ACLF`), and a branch's tooltip ends with its flow loadings since 0.6.30 —
+  `Basecase Loading(%): …` from the branch table's own `Loading%` (the field the base-case flags
+  compare against), plus `Contingency Loading(%): …` when the CA result table lists that branch
+  (which it only does at or above the CA's `overloadThreshold`). The wheel zooms about the cursor,
+  dragging pans, **Fit** resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
   the regression symptom is a Diagram tab that keeps drawing the previous case.
+  **Since 0.6.18 a bus whose `|V|` is outside 0.9–1.1 pu is red** (bar, outline and `Bus-N`), and
+  hovering it adds `⚠ |V| outside 0.9–1.1 pu` to its tooltip. The check is
+  `Ieee14Bus_LargeLoadQ` (Bus-14 = 0.8714): exactly one red bar, the other thirteen grey — and
+  `git status` must still show **no** modification to any `.drawio`, because the annotation is
+  paint-time only. A case with no ACLF results (or in-band voltages, e.g. `Ieee118Bus` and
+  `ieee39`) shows no red at all, which is not an error.
   **Since 0.6.12 the draw.io-marked button opens the same file in the local draw.io desktop
   app**; which executable that is comes from `config/ipss_plugin_env.json` (0.6.16), so on macOS
   it is `open -a draw.io` and on a Windows or Linux box it is whatever that file names. It is at

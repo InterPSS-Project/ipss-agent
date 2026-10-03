@@ -113,7 +113,7 @@ Raise V(Bus14) into **[0.89, 0.90]** pu by reducing Bus14 load Q only.
 
 | File                                                            | Role                                                              |
 | --------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`           | Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
+|  Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window | Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
 | `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_adjBus14Q_0p89to0p90.gvy` | Mutating. Sets Bus14 load to 14.9 MW + j46.0 MVAr                 |
 
 
@@ -190,6 +190,82 @@ the working target is the midpoint of [0.89, 0.90].
 
 
 
+## Example B′ — the coupled pair, band one tenth higher: [0.90, 0.91]
+
+Same two buses, same case, target moved up — and now **both** buses must rise, so the band midpoint
+(0.905 pu for each) is the target rather than a maximum-load corner. The coupling is what makes this
+a matrix problem: at the solution the measured `dV/dQ` Jacobian is
+
+```text
+        dQ13      dQ14
+Bus13  -0.49     -0.37
+Bus14  -0.38     -0.54      [pu/pu, by finite differences]
+```
+
+so each bus's load moves the other's voltage by ~0.76 of its own — a scalar `dV/dQ` sized per bus
+would overshoot one of them straight out of the band.
+
+
+|         |                                                                                            |
+| ------- | ------------------------------------------------------------------------------------------ |
+| Case    | `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee`                                        |
+| Problem | Q13 = Q14 = **50.0 MVAr** in the file — past the nose point, ACLF does not converge         |
+| Result  | Q13 → **47.332**, Q14 → **17.510** MVAr; **V13 = 0.904929**, **V14 = 0.904935** pu (8 passes) |
+
+
+| Pass | Q13, Q14 (MVAr) | V13, V14 (pu) | Note |
+| ---- | --------------- | ------------- | ---- |
+| start | 5.80, 5.00 | 1.05038, 1.03553 | anchor: the plain IEEE-14 loads, flat start |
+| 1 | 26.86, 8.84 | 1.00867, 1.00217 | far: predicted voltage move capped at 0.020 pu |
+| 4 | 40.50, 15.06 | 0.96526, 0.96095 | |
+| 6 | 45.36, 16.89 | 0.92303, 0.92154 | local: cap tightens to 0.006 pu |
+| **8** | **47.33, 17.51** | **0.904929, 0.904935** | converged, max \|V − target\| = 7.1e-5 pu |
+
+
+Applying the rounded pair (47.33 / 17.51 MVAr) with the setter re-solves to V13 = 0.904972,
+V14 = 0.904975 pu — still ~0.005 pu inside each edge — and no bus drops below 0.90.
+
+## Example A′ — the same bus, band one tenth higher: [0.90, 0.91]
+
+The control is identical; only the window moves up, so Bus14 sheds ~1.9 MVAr more. Worth keeping
+as a second data point because it shows the B″ error **shrinking** as the bus recovers: near
+0.871 pu the AC stiffness is 0.638 pu/pu (1.44× B″), but at this operating point it is
+0.507 pu/pu (1.14×), so the B″ window (41.3 … 43.5 MVAr) is closer to the truth than it was for
+Example A — yet still 1.5 MVAr optimistic at the 0.90 edge.
+
+
+|         |                                                                                    |
+| ------- | ---------------------------------------------------------------------------------- |
+| Case    | `wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee.ieee` → same case as Example A          |
+| Problem | Bus14 at 14.9 MW + j50.0 MVAr, V = 0.871352 pu; target band **[0.90, 0.91]**        |
+| Result  | Q 50.0 → **44.1 MVAr**, **V(Bus14) = 0.905016 pu** — the band midpoint              |
+
+
+| File                                                                     | Role                                                                 |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------- |
+| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14_0p90to0p91.gvy`        | Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied window for this band |
+| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_adjBus14Q_0p90to0p91.gvy`         | Mutating. Sets Bus14 load to 14.9 MW + j44.1 MVAr                    |
+
+
+| Q (MVAr)  | V(Bus14) pu  | How                                            |
+| --------- | ------------ | ---------------------------------------------- |
+| 50.00     | 0.871352     | base                                           |
+| 45.00     | 0.900423     | AC probe — the 0.90 edge sits just below this  |
+| 43.20     | 0.909548     | AC probe — the 0.91 edge sits just above this  |
+| **44.10** | **0.905016** | **applied** — midpoint of the AC window        |
+
+
+The AC window is **43.11 … 45.08 MVAr** (0.507 pu/pu near 0.90), so 44.1 MVAr keeps ~0.005 pu of
+margin on each edge. No other bus moves below 0.90 (next lowest Bus13 = 0.9854 pu).
+
+```groovy
+busId  = "Bus14";
+loadId = "Bus14-L1";
+loadP  = 0.149;   // 14.9 MW — untouched
+loadQ  = 0.441;   // 44.1 MVAr
+```
+
+
 ## Example B — Multiple loads: IEEE14 Bus13 + Bus14
 
 Bring **both** buses into **[0.89, 0.90]** pu by adjusting their load Q together. Single-bus
@@ -211,9 +287,14 @@ terms, so each bus's Q moves the other's voltage almost as much as its own.
 
 | File                                                              | Role                                                                                                                                        |
 | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`           | Prints the 2×2 B″ reference matrix and, when solved, the finite-difference operating-point matrix; restores Q and voltages before returning |
-| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_qv_adjust.gvy`             | Walks Q13/Q14 from a solvable anchor to the largest load Q that keeps both buses inside the band                                            |
-| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_adjBus1314Q_0p89to0p90.gvy` | Mutating. Sets Bus13 to 13.5 MW + j45.5053 MVAr and Bus14 to 14.9 MW + j21.3202 MVAr — the values the adjuster found, applied in one shot    |
+| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_qv_adjust.gvy`             | The adjuster. Walks Q13/Q14 from a solvable anchor to the largest load Q that keeps both buses inside the band                                |
+| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_qv_adjust_0p90to0p91.gvy`  | The same adjuster for the [0.90, 0.91] band, targeting the midpoint (Example B′)                                                             |
+| `…/Ieee14Bus_LargeLoadQ2/scripts/ieee14_adjBus1314Q_0p90to0p91.gvy` | Mutating. Sets Bus13 to 13.5 MW + j47.33 MVAr and Bus14 to 14.9 MW + j17.51 MVAr — the pair Example B′ found, applied in one shot            |
+
+The `[0.89, 0.90]` companions this table used to name (`ieee14_dvdq_matrix.gvy`,
+`ieee14_adjBus1314Q_0p89to0p90.gvy`) are **not in the checkout** — they were never committed, and
+case-folder `scripts/` folders do get rebuilt (the skill's durability caveat). The adjuster above is
+the derivation; re-running it reproduces the 45.5053 / 21.3202 MVAr pair.
 
 Bare script names resolve to the case folder's `scripts/` directory under `interpss_run_gvy`. The
 adjuster is the **derivation** of the two Q values; the setter is the **fixture** that applies them.

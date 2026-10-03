@@ -29,4 +29,5 @@ build/*
 temp/*
 wspace/data/**/diagram/*.png
 wspace/data/**/diagram/*.bkp
-wspace/script/__pycache__/*.*
+wspace/data/**/diagram/*.dtmp
+**/__pycache__/*.pyc
