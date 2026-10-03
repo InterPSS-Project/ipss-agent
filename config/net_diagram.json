@@ -1,9 +1,9 @@
 {
-  "Bus_flag_upper_limit": 1.1,
+  "Bus_flag_upper_limit": 1.05,
   "Bus_flag_lower_limit": 0.9,
-  "Bus_flag_color": "red",
-  "Basecase_branch_flow_flag_percent": 80.0,
-  "Basecase_branch_flow_flag_color": "green",
-  "Contingency_branch_flow_flag_percent": 100.0,
-  "Contingency_branch_flow_flag_color": "blue"
+  "Bus_flag_color": "Red",
+  "Basecase_branch_flow_flag_percent": 70,
+  "Basecase_branch_flow_flag_color": "yellow",
+  "Contingency_branch_flow_flag_percent": 100,
+  "Contingency_branch_flow_flag_color": "Red"
 }

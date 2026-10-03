@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio', 'openDrawio']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio', 'openDrawio', 'getNetDiagramOptions', 'saveNetDiagramOptions']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -425,9 +425,55 @@ export default {
 
     // The dialog reports how many entries a candidate file holds, which means
     // parsing every .json in the case folder; skip absurd ones.
-    const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
+    // config/net_diagram.json: the Diagram tab's flag thresholds and colours, edited from the tab's
+// gear dialog (0.6.26). WORKSPACE-level -- one flag style for every case -- and a PREVIEW setting:
+// the generator bakes no colour into a .drawio, so the desktop app and the PNG stay plain.
+const DEFAULT_NET_DIAGRAM_CONFIG = {
+  Bus_flag_upper_limit: 1.1,
+  Bus_flag_lower_limit: 0.9,
+  Bus_flag_color: 'red',
+  Basecase_branch_flow_flag_percent: 80.0,
+  Basecase_branch_flow_flag_color: 'green',
+  Contingency_branch_flow_flag_percent: 100.0,
+  Contingency_branch_flow_flag_color: 'blue',
+}
 
-    function caConfigPath(root, parent) {
+const NET_DIAGRAM_COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\([^)]*\)|hsla?\([^)]*\))$/i
+
+// The seven known keys, validated; every other key is passed through untouched. The client
+// validates the same way for immediate feedback, the Host sanitizes again so nothing bad lands.
+function sanitizeNetDiagramConfig(raw) {
+  const out = raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.assign({}, raw) : {}
+  const defaults = DEFAULT_NET_DIAGRAM_CONFIG
+  const num = (key, fallback, lo, hi) => {
+    const v = Number(out[key])
+    out[key] = Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback
+  }
+  const color = (key, fallback) => {
+    const v = typeof out[key] === 'string' ? out[key].trim() : ''
+    out[key] = NET_DIAGRAM_COLOR_RE.test(v) ? v : fallback
+  }
+  num('Bus_flag_upper_limit', defaults.Bus_flag_upper_limit, 0.05, 5.0)
+  num('Bus_flag_lower_limit', defaults.Bus_flag_lower_limit, 0.05, 5.0)
+  if (!(out.Bus_flag_lower_limit < out.Bus_flag_upper_limit)) {
+    out.Bus_flag_lower_limit = defaults.Bus_flag_lower_limit
+    out.Bus_flag_upper_limit = defaults.Bus_flag_upper_limit
+  }
+  color('Bus_flag_color', defaults.Bus_flag_color)
+  num('Basecase_branch_flow_flag_percent', defaults.Basecase_branch_flow_flag_percent, 0.0, 1000.0)
+  color('Basecase_branch_flow_flag_color', defaults.Basecase_branch_flow_flag_color)
+  num('Contingency_branch_flow_flag_percent', defaults.Contingency_branch_flow_flag_percent, 0.0, 1000.0)
+  color('Contingency_branch_flow_flag_color', defaults.Contingency_branch_flow_flag_color)
+  return out
+}
+
+const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
+
+    function netDiagramConfigPath(root) {
+  return root + '/config/net_diagram.json'
+}
+
+function caConfigPath(root, parent) {
       return root + '/wspace/' + wspaceJoin(parent, 'config/ca_run.json')
     }
 
@@ -1366,6 +1412,60 @@ export default {
           return { ok: true }
         } catch (e) {
           return { ok: false, error: 'failed to write ' + caseCfg + ': ' + (e && e.message ? e.message : String(e)) }
+        }
+      },
+
+      // The Diagram tab's gear dialog (0.6.26): read and write the workspace
+      // config/net_diagram.json. A read never fails the diagram -- missing or
+      // unparseable falls back to the built-in defaults, with a warning the dialog
+      // shows. A write merges over what is on disk (unknown keys survive) and always
+      // writes a sanitized document.
+      async getNetDiagramOptions(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const cfgPath = netDiagramConfigPath(root)
+        const rel = 'config/net_diagram.json'
+        try {
+          const target = await fs.resolve(cfgPath)
+          const text = await fs.readText(target)
+          let raw = null
+          try {
+            raw = JSON.parse(text)
+          } catch (e) {
+            return { ok: true, config: DEFAULT_NET_DIAGRAM_CONFIG, exists: true, path: rel,
+                     warning: rel + ' is not valid JSON; using the built-in defaults' }
+          }
+          return { ok: true, config: sanitizeNetDiagramConfig(raw), exists: true, path: rel }
+        } catch (e) {
+          return { ok: true, config: DEFAULT_NET_DIAGRAM_CONFIG, exists: false, path: rel }
+        }
+      },
+
+      async saveNetDiagramOptions(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const config = args && args.config && typeof args.config === 'object' ? args.config : null
+        if (config === null) return { ok: false, error: 'missing options payload' }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const cfgPath = netDiagramConfigPath(root)
+        let onDisk = {}
+        try {
+          const target = await fs.resolve(cfgPath)
+          const parsed = JSON.parse(await fs.readText(target))
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) onDisk = parsed
+        } catch (e) {
+          onDisk = {}
+        }
+        const merged = sanitizeNetDiagramConfig(Object.assign(onDisk, config))
+        try {
+          const target = await fs.resolve(cfgPath)
+          await fs.writeText(target, JSON.stringify(merged, null, 2) + '\n')
+          return { ok: true, config: merged, path: 'config/net_diagram.json' }
+        } catch (e) {
+          return { ok: false, error: 'failed to write ' + cfgPath + ': ' + (e && e.message ? e.message : String(e)) }
         }
       },
 

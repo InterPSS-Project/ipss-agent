@@ -110,11 +110,12 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
 
 - `inject: ['typert']` on the default export (else `apply()` runs before the
   typert registry and `/api` endpoints silently 404)
-- `METHODS` matches the dynamic list (21): `isActivated, checkResult,
+- `METHODS` matches the dynamic list (23): `isActivated, checkResult,
   checkResultFiles, listCases, readCsv, busConnections, runAclf, runCa,
   runReport, getAclfOptions, saveAclfOptions, listCaFiles, getCaOptions,
-  saveCaOptions, loadCase, summarizeResult, getNetworkInfo, getBridgeCase,
-  listDrawioFiles, readDrawio, openDrawio`
+  saveCaOptions, getNetDiagramOptions, saveNetDiagramOptions, loadCase,
+  summarizeResult, getNetworkInfo, getBridgeCase, listDrawioFiles, readDrawio,
+  openDrawio`
 - `readCsv` whitelist includes `contingency`: `_DF_(bus|branch|gen|load|contingency)\.csv`
 - **Shared Host features (both halves, since 0.6.3)**: `applyCsvSort(rows, header, column,
   desc)` — byte-identical in both hosts, so the sorted order cannot drift; `readCsv` applies
@@ -548,7 +549,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 235 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 263 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -737,7 +738,23 @@ Client-half change is served with the plugin bundle, so the reload is what picks
       them — so nothing is left dangling into nothing. The funnel button stays lit while a filter is
       applied, and the status text (`filter: area 5`, `3 buses ✕`) clears the search and the filter.
     - Both are paint-time overrides of the same kind as the voltage alert: `hidden` skips a cell,
-      `match` recolours one, and the `.drawio`, the parsed scene and the desktop app see neither.
+      `paint` recolours one, and the `.drawio`, the parsed scene and the desktop app see neither.
+  - **The gear, and `config/net_diagram.json` (0.6.26)**. A gear button beside the draw.io button
+    opens a dialog for the diagram's **flag thresholds and colours**, read and written through
+    `getNetDiagramOptions` / `saveNetDiagramOptions` (Host, workspace-level file). Three families
+    are painted from the case's own tables, keyed by cell id in one map that the renderer applies
+    (`paint`):
+    - **bus flags** — `VoltMag` outside `Bus_flag_lower_limit .. Bus_flag_upper_limit`, in
+      `Bus_flag_color` (`red` by default), on the bar *and* its `Bus-N` label text;
+    - **base-case branch flags** — pairs whose highest `Loading%` reaches
+      `Basecase_branch_flow_flag_percent` (`green` by default);
+    - **contingency branch flags** — pairs whose worst `LoadingPercent` in the CA result table
+      reaches `Contingency_branch_flow_flag_percent` (`blue` by default), and a contingency flag
+      outranks a base-case one on the same branch.
+    A search's blue still outranks every flag, because a search is the deliberate act. The dialog's
+    form is a draft (OK saves, Cancel cancels); the Host sanitizes again on save, merges over what
+    is on disk (unknown keys survive) and never writes an out-of-range value. Flags are a **preview**
+    concern: no colour reaches the `.drawio`, so the desktop app and the PNG stay plain.
       The two hard parts are pure and pinned in §16: an edge through a transformer is *two* stubs
       (`bus → ring`), so the bus pair comes from the group's sibling ring — every edge must resolve,
       or those branches could never be searched or filtered — and a filter needs the area/zone

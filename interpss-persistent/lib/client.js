@@ -782,16 +782,213 @@ module.exports = {
       return DRAWIO_MID
     }
 
+    // --- the one-line diagram config (0.6.26) --------------------------------
+    // config/net_diagram.json holds three flag families for the PREVIEW: the bus voltage band and
+    // its colour, and a flow percent + colour for the base case and for contingencies. The file is
+    // the Host's to write (the gear dialog asks it to); this side only needs the same defaults and
+    // the same validation, so a missing or broken file still paints the familiar red, and a value
+    // the dialog accepts is a value the Host will keep.
+    const DRAWIO_NET_DEFAULTS = {
+      Bus_flag_upper_limit: 1.1,
+      Bus_flag_lower_limit: 0.9,
+      Bus_flag_color: 'red',
+      Basecase_branch_flow_flag_percent: 80.0,
+      Basecase_branch_flow_flag_color: 'green',
+      Contingency_branch_flow_flag_percent: 100.0,
+      Contingency_branch_flow_flag_color: 'blue',
+    }
+    const DRAWIO_COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\([^)]*\)|hsla?\([^)]*\))$/i
+    // The seven keys the dialog edits, in the order the file carries them, with the label the
+    // dialog shows and the bounds the form checks. One table drives the form, the validation and
+    // the sanitizer, so they cannot drift apart.
+    const DRAWIO_NET_FIELDS = [
+      { key: 'Bus_flag_upper_limit', label: 'Bus flag: upper limit (pu)', kind: 'number', min: 0.05, max: 5.0, step: 0.01 },
+      { key: 'Bus_flag_lower_limit', label: 'Bus flag: lower limit (pu)', kind: 'number', min: 0.05, max: 5.0, step: 0.01 },
+      { key: 'Bus_flag_color', label: 'Bus flag colour', kind: 'color' },
+      { key: 'Basecase_branch_flow_flag_percent', label: 'Base-case branch flow flag (%)', kind: 'number', min: 0, max: 1000, step: 1 },
+      { key: 'Basecase_branch_flow_flag_color', label: 'Base-case branch colour', kind: 'color' },
+      { key: 'Contingency_branch_flow_flag_percent', label: 'Contingency branch flow flag (%)', kind: 'number', min: 0, max: 1000, step: 1 },
+      { key: 'Contingency_branch_flow_flag_color', label: 'Contingency branch colour', kind: 'color' },
+    ]
+
+    // Server values pasted over the defaults, with every unknown key kept: the file is hand-editable
+    // and a save must not throw away what the dialog does not show.
+    function drawioNetConfig(raw) {
+      const out = Object.assign({}, DRAWIO_NET_DEFAULTS)
+      const src = raw !== null && raw !== undefined && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+      for (const key of Object.keys(src)) out[key] = src[key]
+      for (const field of DRAWIO_NET_FIELDS) {
+        const value = out[field.key]
+        if (field.kind === 'number') {
+          const n = Number(value)
+          out[field.key] = Number.isFinite(n) ? Math.min(field.max, Math.max(field.min, n)) : DRAWIO_NET_DEFAULTS[field.key]
+        } else {
+          const text = typeof value === 'string' ? value.trim() : ''
+          out[field.key] = DRAWIO_COLOR_RE.test(text) ? text : DRAWIO_NET_DEFAULTS[field.key]
+        }
+      }
+      if (!(out.Bus_flag_lower_limit < out.Bus_flag_upper_limit)) {
+        out.Bus_flag_lower_limit = DRAWIO_NET_DEFAULTS.Bus_flag_lower_limit
+        out.Bus_flag_upper_limit = DRAWIO_NET_DEFAULTS.Bus_flag_upper_limit
+      }
+      return out
+    }
+
+    // The band, spelled the way every surface that mentions it must spell it: the filter dialog's
+    // checkbox, its live count, the toolbar's filter label and the bus tooltip all read the config,
+    // so a user who changes the band in the gear dialog sees that change everywhere at once (0.6.27).
+    function drawioBandText(config) {
+      const cfg = drawioNetConfig(config)
+      return '|V| outside ' + cfg.Bus_flag_lower_limit + '\u2013' + cfg.Bus_flag_upper_limit + ' pu'
+    }
+
+    // What stops OK: one message per offending field, or none. Kept separate from the sanitizer
+    // above, because a form should say WHY rather than silently clamp behind the user's back.
+    function drawioNetConfigErrors(form) {
+      const out = {}
+      const src = form === null || form === undefined ? {} : form
+      for (const field of DRAWIO_NET_FIELDS) {
+        const value = src[field.key]
+        if (field.kind === 'number') {
+          const n = Number(value)
+          if (String(value === null || value === undefined ? '' : value).trim() === '' || !Number.isFinite(n)) {
+            out[field.key] = 'a number is required'
+          } else if (n < field.min || n > field.max) {
+            out[field.key] = 'must be between ' + field.min + ' and ' + field.max
+          }
+        } else {
+          const text = typeof value === 'string' ? value.trim() : ''
+          if (text === '') out[field.key] = 'a colour is required'
+          else if (!DRAWIO_COLOR_RE.test(text)) out[field.key] = 'a CSS colour name, #hex or rgb()'
+        }
+      }
+      const lower = Number(src.Bus_flag_lower_limit)
+      const upper = Number(src.Bus_flag_upper_limit)
+      if (out.Bus_flag_lower_limit === undefined && out.Bus_flag_upper_limit === undefined
+        && Number.isFinite(lower) && Number.isFinite(upper) && !(lower < upper)) {
+        out.Bus_flag_upper_limit = 'the upper limit must be above the lower limit'
+      }
+      return out
+    }
+
+    // A tiny CSV header lookup: the column index for `name`, or -1. Every table read here goes
+    // through it, because a positional read would silently flag the wrong branches in a reordered
+    // table (the same rule the voltage and area/zone columns follow).
+    function drawioColIndex(header, name) {
+      const cells = String(header === null || header === undefined ? '' : header).split(',')
+      for (let i = 0; i < cells.length; i += 1) {
+        if (String(cells[i]).trim().toLowerCase() === name) return i
+      }
+      return -1
+    }
+
+    // Loadings keyed the way the branch index keys them (both bus ids lowercased and sorted, joined
+    // with `|`), each carrying the highest loading among parallel circuits -- and only for the rows
+    // at or above `percent`, since flagging is all this is for.
+    function drawioMaxByPair(rows, threshold, percentAt, pairAt) {
+      const out = {}
+      if (percentAt < 0 || !Array.isArray(rows)) return out
+      for (const line of rows) {
+        const c = String(line).split(',')
+        const loading = parseFloat(String(c[percentAt] === undefined ? '' : c[percentAt]).trim())
+        if (!Number.isFinite(loading) || loading < threshold) continue
+        const pair = pairAt(c)
+        if (pair === null) continue
+        if (out[pair] === undefined || loading > out[pair]) out[pair] = loading
+      }
+      return out
+    }
+
+    // The base-case flags, from `<stem>_DF_branch.csv`: `FromBusID`/`ToBusID` give the pair, and
+    // `Loading%` gives the loading, all by header NAME.
+    function drawioBranchFlagPairs(header, rows, percent) {
+      const threshold = Number.isFinite(Number(percent)) ? Number(percent) : 0
+      const iFrom = drawioColIndex(header, 'frombusid')
+      const iTo = drawioColIndex(header, 'tobusid')
+      const iLoading = drawioColIndex(header, 'loading%')
+      return drawioMaxByPair(rows, threshold, iLoading, (c) => {
+        const from = String(c[iFrom] === undefined ? '' : c[iFrom]).trim().toLowerCase()
+        const to = String(c[iTo] === undefined ? '' : c[iTo]).trim().toLowerCase()
+        if (iFrom < 0 || iTo < 0 || !drawioIsBusCell(from) || !drawioIsBusCell(to)) return null
+        return [from, to].sort().join('|')
+      })
+    }
+
+    // The contingency flags, from the CA result table `<stem>_DF_contingency.csv`: its `BranchID`
+    // is `Bus1001->Bus1064(1)`, so the pair is the head of that string, and `LoadingPercent` is the
+    // worst loading any contingency left on the branch. Both columns by header name.
+    function drawioContingencyFlagPairs(header, rows, percent) {
+      const threshold = Number.isFinite(Number(percent)) ? Number(percent) : 0
+      const iId = drawioColIndex(header, 'branchid')
+      const iLoading = drawioColIndex(header, 'loadingpercent')
+      return drawioMaxByPair(rows, threshold, iLoading, (c) => {
+        if (iId < 0) return null
+        const m = /^(bus\d+)\s*->\s*(bus\d+)/i.exec(String(c[iId] === undefined ? '' : c[iId]).trim())
+        if (m === null) return null
+        return [m[1].toLowerCase(), m[2].toLowerCase()].sort().join('|')
+      })
+    }
+
+    // The paint map the renderer takes: cell id -> colour. Bus flags come from the band in the
+    // config (via the same `drawioBusAlerts` the 0.6.18 annotation used), the two branch families
+    // from the flow tables, and a branch flagged by a contingency outranks one flagged by its base
+    // case. Buses and branches cannot collide -- a cell is either a bar/label or an edge/ring.
+    function drawioFlagPaint(nodes, edges, config, busAlerts, branchLoads, contingencyLoads) {
+      const out = {}
+      const cfg = config === null || config === undefined ? DRAWIO_NET_DEFAULTS : config
+      if (Array.isArray(nodes) && busAlerts !== null && busAlerts !== undefined) {
+        for (const n of nodes) {
+          const bus = drawioBusCellId(n)
+          if (bus !== null && busAlerts[String(bus).toLowerCase()] === true) out[n.id] = cfg.Bus_flag_color
+        }
+      }
+      if (!Array.isArray(edges)) return out
+      const index = drawioRingIndex(nodes || [])
+      for (const e of edges) {
+        const ends = drawioEdgeBusPair(e, edges, index)
+        if (ends === null) continue
+        const key = ends.slice().sort().join('|')
+        if (contingencyLoads !== null && contingencyLoads !== undefined && contingencyLoads[key] !== undefined) {
+          out[e.id] = cfg.Contingency_branch_flow_flag_color
+        } else if (branchLoads !== null && branchLoads !== undefined && branchLoads[key] !== undefined) {
+          out[e.id] = cfg.Basecase_branch_flow_flag_color
+        }
+      }
+      return out
+    }
+
+    // The final paint map: the flags, with the search colour over the top -- a search is the
+    // deliberate act, so a bus that is both flagged and searched shows as searched. Pure, so the
+    // guard can hold the precedence still.
+    function drawioMergedPaint(flagPaint, searchHits, searchColour) {
+      const out = flagPaint === null || flagPaint === undefined ? {} : Object.assign({}, flagPaint)
+      if (searchHits !== null && searchHits !== undefined) {
+        for (const id of Object.keys(searchHits.buses || {})) out[id] = searchColour
+        for (const id of Object.keys(searchHits.edges || {})) out[id] = searchColour
+      }
+      return Object.keys(out).length === 0 ? null : out
+    }
+
+    const drawioGearIcon = React.createElement('svg',
+      { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+      React.createElement('circle', { cx: 8, cy: 8, r: 2.3, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }),
+      React.createElement('path', {
+        d: 'M8 1.4 L9.2 3.1 L11.3 2.6 L11.5 4.7 L13.5 5.6 L12.5 7.4 L13.5 9.2 L11.5 10.1 L11.3 12.2 '
+          + 'L9.2 11.7 L8 13.4 L6.8 11.7 L4.7 12.2 L4.5 10.1 L2.5 9.2 L3.5 7.4 L2.5 5.6 L4.5 4.7 L4.7 2.6 L6.8 3.1 Z',
+        fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinejoin: 'round',
+      }),
+    )
+
     // --- Render-time voltage annotation ---------------------------------------
     // A bus whose solved |V| is outside this band is painted red — bar, outline and `Bus-N` label
     // — by `DrawioDiagram`. The annotation is PAINT-TIME ONLY: it never touches the .drawio file,
     // the parsed scene keeps its authored colours, and the desktop app plus the generator's PNG
     // preview stay as authored. The colours are saturated on purpose: `drawioThemeColor` passes
     // them through unchanged, so a violation reads the same in the light and the dark theme.
-    const DRAWIO_ALERT_FILL = '#CC0000'
-    const DRAWIO_ALERT_STROKE = '#7F0000'
-    const DRAWIO_ALERT_TEXT = '#CC0000'
-    const DRAWIO_V_BAND = [0.9, 1.1]
+    // The band and colour now come from config/net_diagram.json (0.6.26): `DRAWIO_NET_DEFAULTS`
+    // below carries the shipped values and `drawioNetConfig` fills in whatever the file omits, so
+    // with no config file at all the annotation is the red 0.9-1.1 pu it has always been.
+    const DRAWIO_DEFAULT_V_BAND = [DRAWIO_NET_DEFAULTS.Bus_flag_lower_limit, DRAWIO_NET_DEFAULTS.Bus_flag_upper_limit]
 
     // The bus a node stands for — the bus half of `drawioHoverTarget`, without needing the
     // element->branch pairs: a bar carries `busN`, a `Bus-N` label stands in for its bar.
@@ -804,7 +1001,7 @@ module.exports = {
     // Strictly outside the band: the endpoints 0.9 and 1.1 are in band, and a value that is not a
     // finite number (a blank VoltMag, a `-` placeholder) is simply not annotated.
     function drawioVoltOutsideBand(volt, band) {
-      const limits = Array.isArray(band) && band.length === 2 ? band : DRAWIO_V_BAND
+      const limits = Array.isArray(band) && band.length === 2 ? band : DRAWIO_DEFAULT_V_BAND
       const v = typeof volt === 'number' ? volt : parseFloat(volt)
       if (!Number.isFinite(v)) return false
       return v < limits[0] || v > limits[1]
@@ -846,7 +1043,6 @@ module.exports = {
     // are the only part of the feature with behaviour worth pinning down in the guard -- the rest
     // is a dialog and a pair of buttons.
     const DRAWIO_MATCH_FILL = '#1F6FEB'
-    const DRAWIO_MATCH_STROKE = '#0B4AA2'
 
     const drawioIsBusCell = (id) => /^bus\d+$/i.test(String(id === null || id === undefined ? '' : id))
 
@@ -972,7 +1168,7 @@ module.exports = {
     // What a filter hides: every bus outside the chosen area/zone -- and, when asked, outside the
     // |V| band -- plus the labels, branches and transformer symbols attached to those buses. A
     // branch is hidden when EITHER end is hidden, so nothing is left dangling into nothing.
-    function drawioFilterHidden(filter, nodes, edges, meta, alerts) {
+    function drawioFilterHidden(filter, nodes, edges, meta, alerts, config) {
       const out = { ids: {}, nBuses: 0, text: '' }
       if (filter === null || filter === undefined) return out
       const index = drawioRingIndex(nodes)
@@ -1033,8 +1229,8 @@ module.exports = {
         parts.push('zone ' + zone + nameOf(meta === null || meta === undefined ? null : meta.zones, zone))
       }
       if (band) {
-        short.push('|V| outside 0.9-1.1 pu')
-        parts.push('|V| outside 0.9-1.1 pu')
+        short.push(drawioBandText(config))
+        parts.push(drawioBandText(config))
       }
       out.label = short.join(', ')
       out.criteria = parts.join(', ')
@@ -1531,13 +1727,12 @@ module.exports = {
       // Tooltips are opt-in: with no hover prop the renderer emits exactly what it always
       // did — no hit areas and no handlers — so a diagram still renders on its own.
       const hover = props.hover || null
-      // Voltage alerts are opt-in in the same way: `alert` maps a lowercase bus id (`bus14`) to
-      // true, and without it every colour below is exactly what it was before.
-      const alert = props.alert || null
-      // Search and filter (0.6.23), opt-in the same way and also paint-time only: `hidden` skips a
-      // whole cell, `match` repaints one in the search colour. Absent, the tree is byte-identical.
+      // `paint` (0.6.26) maps a cell id to the colour it should take -- the bus's flag colour from
+      // config/net_diagram.json, a branch's flow-flag colour, or the search blue -- and `hidden`
+      // (0.6.23) skips a whole cell. Both are paint-time only: with neither, every colour below is
+      // exactly what it always was, and the .drawio on disk never learns any of it.
+      const paint = props.paint || null
       const hidden = props.hidden || null
-      const match = props.match || null
       // draw.io paints in the model's own document order, interleaving vertices and edges.
       // That order is load-bearing: this workspace's diagram declares `bg`, an opaque
       // 900x760 white rectangle, BEFORE its branches. Drawing every edge up front and every
@@ -1547,7 +1742,7 @@ module.exports = {
       for (let i = 0; i < scene.edges.length; i += 1) {
         const e = scene.edges[i]
         if (hidden !== null && hidden[e.id] === true) continue
-        const matchedEdge = match !== null && match[e.id] === true
+        const edgeColour = paint === null ? null : paint[e.id]
         const points = e.points.map((p) => p.x + ',' + p.y).join(' ')
         const parts = []
         // The invisible wide-stroke twin that makes a 1.5px branch hoverable.
@@ -1568,11 +1763,11 @@ module.exports = {
           key: 'l',
           points: points,
           fill: 'none',
-          stroke: matchedEdge ? DRAWIO_MATCH_FILL : drawioThemeColor(e.stroke),
-          strokeWidth: matchedEdge ? e.strokeWidth + 1.5 : e.strokeWidth,
+          stroke: edgeColour === null || edgeColour === undefined ? drawioThemeColor(e.stroke) : edgeColour,
+          strokeWidth: edgeColour === null || edgeColour === undefined ? e.strokeWidth : e.strokeWidth + 1.5,
           strokeDasharray: e.dashed ? '6 4' : undefined,
         }))
-        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: matchedEdge ? DRAWIO_MATCH_FILL : drawioThemeColor(e.stroke) }))
+        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: edgeColour === null || edgeColour === undefined ? drawioThemeColor(e.stroke) : edgeColour }))
         if (e.label !== '') {
           parts.push(React.createElement('text', {
             key: 't',
@@ -1585,21 +1780,21 @@ module.exports = {
       for (let i = 0; i < scene.nodes.length; i += 1) {
         const n = scene.nodes[i]
         if (hidden !== null && hidden[n.id] === true) continue
-        const matched = match !== null && match[n.id] === true
+        const colour = paint === null ? null : paint[n.id]
+        const marked = colour !== null && colour !== undefined
         const parts = []
-        // An out-of-band bus is red: the bar's fill and outline, and the `Bus-N` text — but NOT
-        // the label's white paper box, which must stay white so it keeps masking the wires under
-        // the text. The scene object is never modified; the colours are chosen here.
-        const alertBus = alert === null ? null : drawioBusCellId(n)
-        const alerted = alertBus !== null && alert[String(alertBus).toLowerCase()] === true
+        // A flagged or matched bus takes its colour on the bar's fill and outline, and on the
+        // `Bus-N` text — but NOT on the label's white paper box, which must stay white so it keeps
+        // masking the wires under the text. The scene object is never modified; the colour is
+        // chosen here.
         const isBar = drawioIsBusId(n.id)
         if (n.kind === 'ellipse') {
           parts.push(React.createElement('ellipse', {
             key: 's',
             cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2, ry: n.h / 2,
             fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
-            stroke: matched ? DRAWIO_MATCH_STROKE : drawioThemeColor(n.stroke),
-            strokeWidth: matched ? n.strokeWidth + 1 : n.strokeWidth,
+            stroke: marked ? colour : drawioThemeColor(n.stroke),
+            strokeWidth: marked ? n.strokeWidth + 1 : n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         } else if (n.kind === 'rect') {
@@ -1607,16 +1802,13 @@ module.exports = {
             key: 's',
             x: n.x, y: n.y, width: n.w, height: n.h,
             rx: n.rounded ? Math.min(8, n.h / 2) : 0,
-            fill: matched && isBar ? DRAWIO_MATCH_FILL
-              : (alerted && isBar ? DRAWIO_ALERT_FILL : (n.fill === null ? 'none' : drawioThemeColor(n.fill))),
-            stroke: matched && isBar ? DRAWIO_MATCH_STROKE
-              : (alerted && isBar ? DRAWIO_ALERT_STROKE : drawioThemeColor(n.stroke)),
+            fill: marked && isBar ? colour : (n.fill === null ? 'none' : drawioThemeColor(n.fill)),
+            stroke: marked && isBar ? colour : drawioThemeColor(n.stroke),
             strokeWidth: n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         }
-        const labelNode = matched && !isBar ? Object.assign({}, n, { fontColor: DRAWIO_MATCH_STROKE })
-          : (alerted && !isBar ? Object.assign({}, n, { fontColor: DRAWIO_ALERT_TEXT }) : n)
+        const labelNode = marked && !isBar ? Object.assign({}, n, { fontColor: colour }) : n
         const label = drawioLabel(labelNode.lines, n.x + n.w / 2, n.y + n.h / 2, labelNode, 't')
         if (label !== null) parts.push(label)
         // A transparent padded rect, so a 6px bar or a 16px transformer ring is comfortable
@@ -3080,6 +3272,18 @@ module.exports = {
       const [filterApplied, setFilterApplied] = React.useState(null)
       const [busMeta, setBusMeta] = React.useState(null)
       const [busMetaLoading, setBusMetaLoading] = React.useState(false)
+      // config/net_diagram.json (0.6.26): the flag thresholds and colours the Host hands back, the
+      // dialog's draft copy of them, and the flow tables the branch flags are read from. The config
+      // read never blocks the drawing: until it lands, the built-in defaults paint what 0.6.24 did.
+      const [netConfig, setNetConfig] = React.useState(DRAWIO_NET_DEFAULTS)
+      const [netConfigPath, setNetConfigPath] = React.useState('config/net_diagram.json')
+      const [netConfigWarning, setNetConfigWarning] = React.useState(null)
+      const [netConfigError, setNetConfigError] = React.useState(null)
+      const [netConfigSaving, setNetConfigSaving] = React.useState(false)
+      const [cfgForm, setCfgForm] = React.useState(null)
+      const [conFile, setConFile] = React.useState(null)
+      const [branchLoads, setBranchLoads] = React.useState(null)
+      const [conLoads, setConLoads] = React.useState(null)
       const canvasRef = React.useRef(null)
       const dragRef = React.useRef(null)
       // Tooltip data keyed to the SELECTED case: the branch
@@ -3120,7 +3324,10 @@ module.exports = {
         setResultDir(null)
         setBranchFile(null)
         setBusFile(null)
+        setConFile(null)
         setBusAlerts(null)
+        setBranchLoads(null)
+        setConLoads(null)
         setTip(null)
         setPath('')
         setXml('')
@@ -3163,6 +3370,8 @@ module.exports = {
             setBranchFile(branch === undefined ? null : branch)
             const bus = (res.files || []).find((f) => String(f).indexOf('_DF_bus.csv') !== -1)
             setBusFile(bus === undefined ? null : bus)
+            const con = (res.files || []).find((f) => String(f).indexOf('_DF_contingency.csv') !== -1)
+            setConFile(con === undefined ? null : con)
           },
           () => {},
         )
@@ -3180,12 +3389,14 @@ module.exports = {
         if (branchFile === null || resultDir === null) return undefined
         const pair = new Map()
         const canonical = {}
+        const allRows = []
         const page = (start, guard) => {
           if (guard > 20) return
           callRemote('readCsv', { path: resultDir + '/' + branchFile, sessionId: sessionId, start: start, limit: 5000 }).then(
             (res) => {
               if (res === null || res === undefined || res.ok !== true) return
               const rows = res.rows || []
+              for (const line of rows) allRows.push(line)
               for (const line of rows) {
                 const c = String(line).split(',')
                 const from = String(c[4] || '').trim()
@@ -3200,16 +3411,21 @@ module.exports = {
               if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
               dataRef.current.branch = pair
               dataRef.current.canonical = canonical
+              // The same page loop feeds the base-case flow flags: the percent column and the two
+              // bus columns are located by header NAME, so a reordered table cannot flag the wrong
+              // branches.
+              setBranchLoads(drawioBranchFlagPairs(res.header, allRows,
+                netConfig.Basecase_branch_flow_flag_percent))
             },
             () => {},
           )
         }
         page(0, 0)
         return undefined
-      }, [branchFile, resultDir])
+      }, [branchFile, resultDir, netConfig.Basecase_branch_flow_flag_percent])
 
       // The render-time voltage annotation: read `<case>/result/<stem>_DF_bus.csv` and keep the
-      // buses whose `VoltMag` is outside `DRAWIO_V_BAND`. The columns come from the file's own
+      // buses whose `VoltMag` is outside the band config/net_diagram.json sets (0.9-1.1 by default). The columns come from the file's own
       // header (never by position), the ids are lowercased so they match the diagram's `busN`
       // cells, and the paging stops early — a page that has answered for no bus the open scene
       // draws is the common case, which is what keeps a 2000-bus (or 78k-bus) table cheap.
@@ -3232,7 +3448,8 @@ module.exports = {
               if (!alive) return
               if (res === null || res === undefined || res.ok !== true) { setBusAlerts(null); return }
               const rows = res.rows || []
-              const found = drawioBusAlerts(res.header, rows, wanted, DRAWIO_V_BAND)
+              const found = drawioBusAlerts(res.header, rows, wanted,
+                [netConfig.Bus_flag_lower_limit, netConfig.Bus_flag_upper_limit])
               for (const id of Object.keys(found)) hits[id] = true
               if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
               setBusAlerts(hits)
@@ -3242,7 +3459,54 @@ module.exports = {
         }
         page(0, 0)
         return () => { alive = false }
-      }, [busFile, resultDir, scene])
+      }, [busFile, resultDir, scene, netConfig.Bus_flag_lower_limit, netConfig.Bus_flag_upper_limit])
+
+      // config/net_diagram.json (0.6.26), read once per case. It lives at the workspace root and the
+      // Host hands back a sanitized copy, so this side never has to trust the file; a failure keeps
+      // the built-in defaults and the diagram still draws.
+      React.useEffect(() => {
+        let alive = true
+        callRemote('getNetDiagramOptions', { sessionId: sessionId }).then(
+          (res) => {
+            if (!alive) return
+            if (res === null || res === undefined || res.ok !== true) {
+              setNetConfigWarning(res && res.error ? String(res.error) : null)
+              return
+            }
+            setNetConfig(drawioNetConfig(res.config))
+            setNetConfigPath(typeof res.path === 'string' && res.path !== '' ? res.path : 'config/net_diagram.json')
+            setNetConfigWarning(res.warning ? String(res.warning) : null)
+          },
+          (err) => { if (alive) setNetConfigWarning(String(err && err.message ? err.message : err)) },
+        )
+        return () => { alive = false }
+      }, [caseInput])
+
+      // The contingency flow flags: the CA result table, when the case has one. Its BranchID is
+      // `Bus1001->Bus1064(1)`, so the pair is the head of the string; the loading column is located
+      // by name like every other table read here.
+      React.useEffect(() => {
+        if (conFile === null || resultDir === null) { setConLoads(null); return undefined }
+        let alive = true
+        const all = []
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + conFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!alive) return
+              if (res === null || res === undefined || res.ok !== true) { setConLoads(null); return }
+              const rows = res.rows || []
+              for (const line of rows) all.push(line)
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setConLoads(drawioContingencyFlagPairs(res.header, all,
+                netConfig.Contingency_branch_flow_flag_percent))
+            },
+            () => { if (alive) setConLoads(null) },
+          )
+        }
+        page(0, 0)
+        return () => { alive = false }
+      }, [conFile, resultDir, netConfig.Contingency_branch_flow_flag_percent])
 
       // The preview's read: fetch the .drawio, decode it
       // (plain or compressed) and resolve element -> branch once, not on every repaint.
@@ -3331,7 +3595,7 @@ module.exports = {
         if (busAlerts === null) return text
         const id = record !== null && record !== undefined && record.id !== undefined ? String(record.id).toLowerCase() : ''
         if (id === '' || busAlerts[id] !== true) return text
-        return text + '\n⚠ |V| outside ' + DRAWIO_V_BAND[0] + '\u2013' + DRAWIO_V_BAND[1] + ' pu'
+        return text + '\n⚠ |V| outside ' + netConfig.Bus_flag_lower_limit + '\u2013' + netConfig.Bus_flag_upper_limit + ' pu'
       }
 
       // A cache hit answers instantly; otherwise the bus says who it is, one call fills the
@@ -3502,6 +3766,15 @@ module.exports = {
             'aria-label': 'Edit this diagram in the local draw.io app',
             style: { ...btn, padding: '4px 7px', display: 'inline-flex', alignItems: 'center', opacity: editBusy ? 0.6 : 1, cursor: editBusy ? 'progress' : 'pointer' },
           }, drawioAppIcon),
+          // The gear (0.6.26): config/net_diagram.json, the flag thresholds and colours the
+          // drawing below is painted with. It sits in this row, not the toolbar, so the toolbar's
+          // controls stay the ones the mock specifies.
+          React.createElement('button', {
+            onClick: openConfig,
+            title: 'One-line diagram config options',
+            'aria-label': 'One-line diagram config options',
+            style: { ...btn, padding: '4px 7px', display: 'inline-flex', alignItems: 'center' },
+          }, drawioGearIcon),
         )
         : null
 
@@ -3567,6 +3840,38 @@ module.exports = {
         setDialog(null)
       }
 
+      // The gear dialog (0.6.26). The form is a draft, like the filter's: only OK sanitizes and
+      // saves, and the drawing's flags follow the saved values when the Host answers.
+      function openConfig() {
+        setCfgForm(drawioNetConfig(netConfig))
+        setNetConfigError(null)
+        setDialog('config')
+      }
+
+      function applyConfig() {
+        const errors = drawioNetConfigErrors(cfgForm)
+        const keys = Object.keys(errors)
+        if (keys.length > 0) {
+          setNetConfigError('check ' + keys.length + (keys.length === 1 ? ' field: ' : ' fields: ') + keys.join(', '))
+          return
+        }
+        setNetConfigSaving(true)
+        setNetConfigError(null)
+        callRemote('saveNetDiagramOptions', { config: cfgForm, sessionId: sessionId }).then(
+          (res) => {
+            setNetConfigSaving(false)
+            if (res !== null && res !== undefined && res.ok === true) {
+              setNetConfig(drawioNetConfig(res.config === undefined ? cfgForm : res.config))
+              setNetConfigWarning(null)
+              setDialog(null)
+              return
+            }
+            setNetConfigError(res && res.error ? String(res.error) : 'failed to save ' + netConfigPath)
+          },
+          (err) => { setNetConfigSaving(false); setNetConfigError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
       function clearSearchFilter() {
         setSearchQuery(null)
         setSearchText('')
@@ -3583,12 +3888,31 @@ module.exports = {
       const searchHits = searchQuery === null || scene === null
         ? null : drawioSearchHits(searchQuery, scene.nodes, scene.edges, busNames)
       const filterHits = filterApplied === null || scene === null
-        ? null : drawioFilterHidden(filterApplied, scene.nodes, scene.edges, busMeta, busAlerts)
+        ? null : drawioFilterHidden(filterApplied, scene.nodes, scene.edges, busMeta, busAlerts, netConfig)
+      // Everything that colours a cell, merged here rather than in the renderer, so precedence is
+      // one readable rule: the flags first (bus, then base case, then contingency -- the last wins
+      // inside drawioFlagPaint), and the search blue over the top, because a search is the
+      // deliberate act. The renderer only sees cell id -> colour.
+      const flagPaint = scene === null
+        ? null : drawioFlagPaint(scene.nodes, scene.edges, netConfig, busAlerts, branchLoads, conLoads)
+      const paintMap = drawioMergedPaint(flagPaint, searchHits, DRAWIO_MATCH_FILL)
+      // The status line's counts, per family, with the thresholds the config set.
+      const flagCounts = (function () {
+        const buses = busAlerts === null ? 0 : Object.keys(busAlerts).length
+        const base = branchLoads === null ? 0 : Object.keys(branchLoads).length
+        const cont = conLoads === null ? 0 : Object.keys(conLoads).length
+        if (buses + base + cont === 0) return null
+        const parts = []
+        if (buses > 0) parts.push(buses + (buses === 1 ? ' bus ' : ' buses ') + netConfig.Bus_flag_lower_limit + '\u2013' + netConfig.Bus_flag_upper_limit + ' pu')
+        if (base > 0) parts.push(base + (base === 1 ? ' branch ' : ' branches ') + '\u2265' + netConfig.Basecase_branch_flow_flag_percent + '%')
+        if (cont > 0) parts.push(cont + ' contingency \u2265' + netConfig.Contingency_branch_flow_flag_percent + '%')
+        return 'flags: ' + parts.join(' \u00b7 ')
+      })()
       // The dialog's own message previews the DRAFT, so changing Area or Zone updates it immediately
       // (0.6.24). The drawing still waits for OK: only the sentence is live.
       const draftHits = scene === null
         ? null : drawioFilterHidden({ area: filterArea, zone: filterZone, outOfBand: filterOutOfBand },
-          scene.nodes, scene.edges, busMeta, busAlerts)
+          scene.nodes, scene.edges, busMeta, busAlerts, netConfig)
       const statusText = searchHits !== null
         ? (searchHits.nBus + searchHits.nBranch === 0
           ? 'no match'
@@ -3625,7 +3949,44 @@ module.exports = {
       // The search dialog's help is about THIS case: how many buses it draws, the range, a branch
       // example from its own numbers, and a name to try when its result table carries names.
       const searchHelp = drawioSearchHelp(scene, busMeta)
-      const dialogEl = dialog === 'search'
+      const cfgErrors = dialog === 'config' ? drawioNetConfigErrors(cfgForm) : {}
+      const cfgField = (field) => {
+        const raw = cfgForm === null || cfgForm === undefined ? '' : cfgForm[field.key]
+        const value = raw === null || raw === undefined ? '' : String(raw)
+        const bad = cfgErrors[field.key] !== undefined
+        const input = React.createElement('input', {
+          value: value,
+          'aria-label': field.label,
+          onChange: (e) => setCfgForm(Object.assign({}, cfgForm, { [field.key]: e.target.value })),
+          style: Object.assign({}, selectStyle, {
+            width: '150px', minWidth: '150px', maxWidth: '150px', height: '28px',
+            borderColor: bad ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-border-l1)',
+          }),
+        })
+        const control = field.kind === 'color'
+          ? React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, input,
+            React.createElement('span', {
+              title: value,
+              style: { width: '14px', height: '14px', borderRadius: '3px', background: value === '' ? 'transparent' : value, border: '1px solid var(--dsw-alias-border-l1)' },
+            }))
+          : input
+        return React.createElement('div', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '2px' } },
+          fieldRow(field.label, control),
+          bad ? React.createElement('div', { style: { fontSize: '10px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
+      }
+      const cfgSection = (title, fields) => React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+        React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, title),
+        fields.map(cfgField))
+      const dialogEl = dialog === 'config'
+        ? dialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+          cfgSection('Bus flags', DRAWIO_NET_FIELDS.slice(0, 3)),
+          cfgSection('Branch flow flags', DRAWIO_NET_FIELDS.slice(3)),
+          React.createElement('div', { style: hintStyle },
+            'Writes ' + netConfigPath + ' \u2014 one flag style for every case. Flags are a preview: the .drawio keeps no colour.'),
+          netConfigWarning !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigWarning) : null,
+          netConfigError !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigError) : null,
+        ), applyConfig, netConfigSaving)
+        : dialog === 'search'
         ? dialogShell('Search the diagram', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
           React.createElement('input', {
             value: searchText,
@@ -3663,7 +4024,7 @@ module.exports = {
                 'aria-label': 'Only buses outside the voltage band',
                 onChange: (e) => setFilterOutOfBand(e.target.checked),
               }),
-              'Only buses with |V| outside 0.9\u20131.1 pu'),
+              'Only buses with ' + drawioBandText(netConfig)),
             React.createElement('div', { style: hintStyle },
               busMetaLoading || (filterNeedsMeta && busMeta === null)
                 ? 'Loading the case\u2019s bus table\u2026'
@@ -3755,6 +4116,15 @@ module.exports = {
               style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' },
             }, statusText + ' \u2715')
             : null,
+          // The flag counts, tinted by the config's own colours and clickable to open the gear --
+          // so what the thresholds are doing is visible without opening the dialog.
+          path !== '' && view === 'rendered' && scene !== null && flagCounts !== null
+            ? React.createElement('span', {
+              onClick: openConfig,
+              title: 'Flagged by config/net_diagram.json \u2014 click to change the thresholds',
+              style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' },
+            }, flagCounts)
+            : null,
         )
         : null
 
@@ -3790,9 +4160,8 @@ module.exports = {
                         view: rect,
                         // Render-time only: neither the alert nor the search/filter overrides ever
                         // reach the file.
-                        alert: busAlerts,
+                        paint: paintMap,
                         hidden: filterHits === null ? null : filterHits.ids,
-                        match: searchHits === null ? null : Object.assign({}, searchHits.buses, searchHits.edges),
                         hover: {
                           pairs: dataRef.current.pairs,
                           onBus: diagramBusTip,

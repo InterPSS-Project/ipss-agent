@@ -113,6 +113,12 @@ function build(overrides) {
       + ' drawioBusMeta: drawioBusMeta, drawioEdgeBusPair: drawioEdgeBusPair, drawioRingIndex: drawioRingIndex,'
       + ' drawioIsBusCell: drawioIsBusCell,'
       + ' drawioSearchHelp: drawioSearchHelp,'
+      + ' DRAWIO_NET_DEFAULTS: DRAWIO_NET_DEFAULTS, DRAWIO_NET_FIELDS: DRAWIO_NET_FIELDS,'
+      + ' drawioNetConfig: drawioNetConfig, drawioNetConfigErrors: drawioNetConfigErrors,'
+      + ' drawioBranchFlagPairs: drawioBranchFlagPairs, drawioContingencyFlagPairs: drawioContingencyFlagPairs,'
+      + ' drawioBandText: drawioBandText,'
+      + ' drawioColIndex: drawioColIndex, drawioFlagPaint: drawioFlagPaint,'
+      + ' drawioMergedPaint: drawioMergedPaint,'
       + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
       + ' drawioThemeColor: drawioThemeColor,'
       + ' drawioBranchPairs: drawioBranchPairs, drawioIsBusId: drawioIsBusId, drawioLabelBusId: drawioLabelBusId,'
@@ -963,9 +969,10 @@ check('the toolbar row ends at the filter button, with no draw.io and no separat
   // and 0.6.23 put the two icon buttons last (counted last, not by length: the file picker and the
   // status span share this row)
   && (function () {
-    const kids = (toolbarRow.kids || []).filter((k) => k !== null && k !== undefined);
+    // the last CONTROL, not the last child: a flags summary span (0.6.26) can follow the buttons
+    const kids = (toolbarRow.kids || []).filter((k) => k !== null && k !== undefined && k.type === 'button');
     const last = kids[kids.length - 1];
-    return last !== undefined && last.type === 'button' && String(last.props.title) === 'Filter the diagram';
+    return last !== undefined && String(last.props.title) === 'Filter the diagram';
   })());
 
 // Asked for in 0.6.17: the view toggle is `R` / `S`. The letters only work because the tooltip
@@ -1099,6 +1106,8 @@ const filterDialog = renderTab(withState([
   ['scene', scene],
   ['dialog', 'filter'],
   ['busMeta', { areas: [{ num: '1', name: 'NORTH' }], zones: [{ num: '9', name: 'FAR WEST TEX', area: '1' }], ofBus: {} }],
+  // a band that is deliberately NOT the shipped 0.9-1.1: the label must follow the config (0.6.27)
+  ['netConfig', api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 })],
 ]));
 const filterDialogButtons = ['OK', 'Cancel'].map((label) => findInTree(filterDialog, (n) => n.type === 'button' && (n.kids || []).indexOf(label) >= 0));
 const areaSelect = findInTree(filterDialog, (n) => n.type === 'select' && String(n.props['aria-label'] || '') === 'Area');
@@ -1136,9 +1145,80 @@ check('the toolbar status keeps the APPLIED filter, so Cancel still cancels',
   slice.indexOf('filterApplied === null || scene === null') >= 0
   && slice.indexOf('const draftHits = scene === null') >= 0);
 
+check('the filter dialog\'s band checkbox reads the config, not a literal',
+  flatTree(filterDialog).indexOf('Only buses with |V| outside 0.95\u20131.05 pu') > 0
+  && flatTree(filterDialog).indexOf('outside 0.9\u20131.1') < 0,
+  api.drawioBandText(api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 })));
 check('the filter dialog offers the case\'s own areas and zones, plus All',
   JSON.stringify(optionKids(areaSelect).map((o) => String((o.kids || [])[0]))) === JSON.stringify(['All areas', '1  NORTH'])
   && JSON.stringify(optionKids(zoneSelect).map((o) => String((o.kids || [])[0]))) === JSON.stringify(['All zones', '9  FAR WEST TEX']));
+
+// 0.6.26: the gear. It lives in the header row beside the draw.io button -- NOT in the toolbar, so
+// the toolbar's controls stay the ones the mock specifies -- and it opens the config dialog.
+const gearButton = findInTree(editTree, (n) => n.type === 'button'
+  && String(n.props['aria-label'] || '') === 'One-line diagram config options');
+check('the header row carries the config gear next to the draw.io button',
+  gearButton !== null && String(gearButton.props.title) === 'One-line diagram config options'
+  && topRow !== null && findInTree(topRow, (n) => n.type === 'button' && String(n.props['aria-label'] || '') === 'Edit this diagram in the local draw.io app') !== null,
+  gearButton === null ? 'no gear' : String(gearButton.props.title));
+check('the gear opens the config dialog and the save asks the Host to write the file',
+  slice.indexOf('onClick: openConfig') >= 0 && slice.indexOf("setDialog('config')") >= 0
+  && slice.indexOf("callRemote('saveNetDiagramOptions'") >= 0
+  && slice.indexOf("callRemote('getNetDiagramOptions'") >= 0);
+
+const cfgDialog = renderTab(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'config'],
+  ['cfgForm', api.drawioNetConfig(null)],
+]));
+const cfgInputs = api.DRAWIO_NET_FIELDS.map((f) => findInTree(cfgDialog, (n) => n.type === 'input' && String(n.props['aria-label'] || '') === f.label));
+const cfgButtons = ['OK', 'Cancel'].map((label) => findInTree(cfgDialog, (n) => n.type === 'button' && (n.kids || []).indexOf(label) >= 0));
+const cfgFlat = flatTree(cfgDialog);
+check('the config dialog shows every option, OK and Cancel, and the file it writes',
+  cfgInputs.every((i) => i !== null) && cfgButtons[0] !== null && cfgButtons[1] !== null
+  && cfgFlat.indexOf('config/net_diagram.json') > 0 && cfgFlat.indexOf('Bus flags') > 0
+  && cfgFlat.indexOf('Branch flow flags') > 0,
+  cfgInputs.filter((i) => i === null).length + ' missing fields');
+check('the config dialog starts at the configured values, and OK / Cancel are wired',
+  cfgInputs[0] !== null && String(cfgInputs[0].props.value) === '1.1'
+  && String(cfgInputs[2].props.value) === 'red'
+  && (function () {
+    try {
+      cfgButtons[0].props.onClick();
+      cfgButtons[1].props.onClick();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  })());
+
+// 0.6.26: the flags summary. It counts each family that actually has data, quoting the thresholds
+// the config set, and it is clickable so the gear is one click from what it is doing.
+const flagsTab = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['busAlerts', { bus5: true, bus9: true }],
+  ['branchLoads', { 'bus1|bus2': 91.5 }],
+  ['netConfig', api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05,
+    Basecase_branch_flow_flag_percent: 80, Contingency_branch_flow_flag_percent: 100 })],
+]));
+check('the flags summary counts each family with its configured threshold',
+  flagsTab.indexOf('flags: 2 buses 0.95') > 0 && flagsTab.indexOf('1 branch \u226580%') > 0
+  && flagsTab.indexOf('contingency') < 0,
+  flagsTab.slice(flagsTab.indexOf('flags:'), flagsTab.indexOf('flags:') + 70));
+const noFlagsTab = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+]));
+check('with nothing flagged there is no summary line at all',
+  noFlagsTab.indexOf('flags:') < 0);
 
 if (editButton !== null) {
   editButton.props.onClick();
@@ -1388,7 +1468,9 @@ check('ids are lowercased so they match the diagram cells',
 // The painting. The bar and its label go red; the label's paper box must stay white (it masks the
 // wires under the text), an in-band bus is untouched, and red passes the theme mapping through.
 if (scene) {
-  const alertScene = api.DrawioDiagram({ scene: scene, alert: { bus5: true } });
+  // Both cells of a flagged bus carry the colour -- the bar and its label -- because the tab's
+  // drawioFlagPaint keys the map by cell id (a label cell is `nm5`, not `bus5`).
+  const alertScene = api.DrawioDiagram({ scene: scene, paint: { bus5: 'red', nm5: 'red' } });
   const byKey = {};
   for (const g of groupsOf(alertScene)) byKey[g.props.key] = partsOf(g);
   const shapeOf = (key) => (byKey[key] || []).filter((part) => part.props.key === 's')[0];
@@ -1398,17 +1480,17 @@ if (scene) {
   const labelParts = byKey['n' + iLabel] || [];
   const labelText = labelParts.filter((part) => part.type === 'text')[0];
   const labelBox = labelParts.filter((part) => part.type === 'rect')[0];
-  check('an out-of-band bar is painted red',
-    bar !== undefined && bar.props.fill === '#CC0000' && bar.props.stroke === '#7F0000',
+  check('a flagged bar is painted in the configured colour',
+    bar !== undefined && bar.props.fill === 'red' && bar.props.stroke === 'red',
     bar === undefined ? 'no bar' : bar.props.fill + ' / ' + bar.props.stroke);
-  check('its Bus-N label text is red too', labelText !== undefined && labelText.props.fill === '#CC0000',
+  check('its Bus-N label text takes the colour too', labelText !== undefined && labelText.props.fill === 'red',
     labelText === undefined ? 'no label' : String(labelText.props.fill));
   // The label's paper box, when the file paints one, must stay white: it is what masks the wires
   // under the text. (The older hand-laid files use a `text;` cell with `labelBackgroundColor`, so
   // they paint no box at all — the generated format paints a real white rect. Both are asserted.)
   const labelNode = scene.nodes[iLabel];
   check('the label keeps a white paper box wherever the file draws one',
-    labelText !== undefined && labelText.props.fill === '#CC0000'
+    labelText !== undefined && labelText.props.fill === 'red'
     && (labelNode.kind === 'text' ? labelBox === undefined : labelBox !== undefined && labelBox.props.fill === 'var(--dsw-alias-bg-layer-1)'),
     labelNode === undefined ? 'no node' : labelNode.kind + ' / ' + (labelBox === undefined ? 'no box' : String(labelBox.props.fill)));
   const boxed = api.parseDrawioScene('<mxfile><diagram><mxGraphModel><root>'
@@ -1417,17 +1499,17 @@ if (scene) {
     + '<mxCell id="nm7" value="Bus-7" vertex="1" parent="1" style="rounded=0;fillColor=#FFFFFF;strokeColor=none;fontColor=#000000;fontSize=11;">'
     + '<mxGeometry x="0" y="20" width="52" height="14" as="geometry"/></mxCell>'
     + '</root></mxGraphModel></diagram></mxfile>');
-  const boxedSvg = api.DrawioDiagram({ scene: boxed, alert: { bus7: true } });
+  const boxedSvg = api.DrawioDiagram({ scene: boxed, paint: { bus7: 'red', nm7: 'red' } });
   const boxedByKey = {};
   for (const g of groupsOf(boxedSvg)) boxedByKey[g.props.key] = partsOf(g);
   const boxedBar = (boxedByKey['n0'] || []).filter((part) => part.type === 'rect')[0];
   const boxedParts = boxedByKey['n1'] || [];
   const boxedBox = boxedParts.filter((part) => part.type === 'rect')[0];
   const boxedText = boxedParts.filter((part) => part.type === 'text')[0];
-  check('a generated-format label keeps its white box and reddens only the text',
-    boxedBar !== undefined && boxedBar.props.fill === '#CC0000'
+  check('a generated-format label keeps its white box and colours only the text',
+    boxedBar !== undefined && boxedBar.props.fill === 'red'
     && boxedBox !== undefined && boxedBox.props.fill === 'var(--dsw-alias-bg-layer-1)'
-    && boxedText !== undefined && boxedText.props.fill === '#CC0000',
+    && boxedText !== undefined && boxedText.props.fill === 'red',
     (boxedBox === undefined ? 'no box' : String(boxedBox.props.fill)) + ' / ' + (boxedText === undefined ? 'no text' : String(boxedText.props.fill)));
   const iQuiet = scene.nodes.findIndex((n) => n.id === 'bus1');
   const quiet = shapeOf('n' + iQuiet);
@@ -1443,7 +1525,7 @@ if (scene) {
   // The constraint behind this whole design: the annotation is paint-time only. Nothing above may
   // have written to the scene, and no file write exists anywhere in the client path.
   const authored = JSON.stringify(scene);
-  api.DrawioDiagram({ scene: scene, alert: { bus5: true, bus1: true } });
+  api.DrawioDiagram({ scene: scene, paint: { bus5: 'red', nm5: 'red', bus1: 'red', nm1: 'red' } });
   check('the parsed scene keeps its authored colours after an alerted render',
     JSON.stringify(scene) === authored
     && scene.nodes.filter((n) => n.id === 'bus5')[0].fill === '#666666',
@@ -1452,9 +1534,10 @@ if (scene) {
 check('the diagram path has no write RPC — the .drawio is only ever read',
   (slice.match(/callRemote\('(?:writeText|writeFile|saveDrawio|writeDrawio|saveFile)'/g) || []).length === 0
   && slice.indexOf("callRemote('readDrawio'") >= 0);
-check('the tab wires the alert into the renderer from the bus result table',
-  slice.indexOf('alert: busAlerts') >= 0 && slice.indexOf('setBusAlerts') >= 0
-  && slice.indexOf('_DF_bus.csv') >= 0 && slice.indexOf('drawioBusAlerts(') >= 0);
+check('the tab wires the flags into the renderer from the result tables',
+  slice.indexOf('paint: paintMap') >= 0 && slice.indexOf('drawioFlagPaint(') >= 0
+  && slice.indexOf('drawioBusAlerts(') >= 0 && slice.indexOf('_DF_bus.csv') >= 0
+  && slice.indexOf("'loading%'") >= 0 && slice.indexOf("'loadingpercent'") >= 0);
 
 // --- 15. size limits --------------------------------------------------------
 console.log('\n15. size limits (20000 cells, 4 MiB)');
@@ -1554,6 +1637,17 @@ check('merging pages keeps the lists and the per-bus lookups',
     const both = api.drawioBusMeta('ID,Name,AreaNum,ZoneNum', ['Bus2,B,2,7'], first);
     return both.areas.length === 2 && both.ofBus.bus1 !== undefined && both.ofBus.bus2 !== undefined;
   })());
+check('the band is spelled from the config, in one place',
+  api.drawioBandText(null) === '|V| outside 0.9\u20131.1 pu'
+  && api.drawioBandText(api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 })) === '|V| outside 0.95\u20131.05 pu'
+  && api.drawioBandText('nonsense') === '|V| outside 0.9\u20131.1 pu',
+  api.drawioBandText(null));
+check('the filter\'s own label and count quote the configured band',
+  (function () {
+    const cfg = api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 });
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: true }, scene.nodes, scene.edges, meta, null, cfg);
+    return h.label === '|V| outside 0.95\u20131.05 pu' && h.text.indexOf('0.95\u20131.05 pu') > 0;
+  })());
 check('a filter with no criteria hides nothing',
   Object.keys(api.drawioFilterHidden(null, scene.nodes, scene.edges, meta, null).ids).length === 0
   && Object.keys(api.drawioFilterHidden({ area: '', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).ids).length === 0);
@@ -1620,19 +1714,19 @@ check('a hidden cell is not painted at all',
   && hiddenKeys.indexOf('n' + radiusIndex) < 0
   && groupsOf(hiddenSvg).length === groupsOf(api.DrawioDiagram({ scene: scene })).length - 2,
   hiddenKeys.length + ' groups painted');
-const matchSvg = api.DrawioDiagram({ scene: scene, match: { bus5: true, nm5: true } });
+const matchSvg = api.DrawioDiagram({ scene: scene, paint: { bus5: '#1F6FEB', nm5: '#1F6FEB' } });
 const matchByKey = {};
 for (const g of groupsOf(matchSvg)) matchByKey[g.props.key] = partsOf(g);
 const matchBar = (matchByKey['n' + radiusIndex] || []).filter((part) => part.type === 'rect')[0];
 const matchLabel = (matchByKey['n' + scene.nodes.findIndex((n) => n.id === 'nm5')] || []).filter((part) => part.type === 'text')[0];
 check('a matched bar and its label take the search colour',
-  matchBar !== undefined && matchBar.props.fill === '#1F6FEB' && matchBar.props.stroke === '#0B4AA2'
-  && matchLabel !== undefined && matchLabel.props.fill === '#0B4AA2',
+  matchBar !== undefined && matchBar.props.fill === '#1F6FEB' && matchBar.props.stroke === '#1F6FEB'
+  && matchLabel !== undefined && matchLabel.props.fill === '#1F6FEB',
   (matchBar === undefined ? 'no bar' : matchBar.props.fill) + ' / ' + (matchLabel === undefined ? 'no label' : matchLabel.props.fill));
 check('a matched branch is thicker and in the search colour',
   (function () {
     const e = scene.edges[0];
-    const svg = api.DrawioDiagram({ scene: scene, match: Object.assign({}, { [e.id]: true }) });
+    const svg = api.DrawioDiagram({ scene: scene, paint: { [e.id]: '#1F6FEB' } });
     const g = groupsOf(svg).filter((x) => String(x.props.key) === 'e0')[0];
     const line = g === undefined ? undefined : partsOf(g).filter((part) => part.props.key === 'l')[0];
     return line !== undefined && line.props.stroke === '#1F6FEB'
@@ -1648,6 +1742,115 @@ check('the sentence names the area and zone, the toolbar label stays numeric',
 check('the filter reports what it kept, in words',
   api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).text.indexOf('Showing') === 0
   && api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).label === 'area 1');
+
+// --- 17. the one-line diagram config ---------------------------------------
+console.log('\n17. one-line diagram config (config/net_diagram.json)');
+// The shipped file and the code must agree: the client's defaults are what the diagram paints with
+// before the Host answers, and the Host writes from its own copy, so a drift here would show as
+// "the dialog saved it but the drawing looks different".
+const shippedCfg = JSON.parse(readFileSync(join(ROOT, 'config', 'net_diagram.json'), 'utf8'));
+const cfgKeys = api.DRAWIO_NET_FIELDS.map((f) => f.key);
+check('the shipped config carries exactly the seven editable keys',
+  cfgKeys.every((k) => Object.prototype.hasOwnProperty.call(shippedCfg, k))
+  && Object.keys(shippedCfg).length === cfgKeys.length,
+  Object.keys(shippedCfg).join(','));
+// The file is the user's to tune (`config/net_diagram.json` is a live, hand-editable setting), so
+// this asserts what must hold rather than equality: the code's fallback carries the same seven keys
+// as the file, and the file as written is already valid -- the sanitizer leaves it untouched.
+check('the fallback defaults carry the same seven keys as the file',
+  cfgKeys.length === 7 && JSON.stringify(Object.keys(api.DRAWIO_NET_DEFAULTS).sort()) === JSON.stringify(cfgKeys.slice().sort()),
+  Object.keys(api.DRAWIO_NET_DEFAULTS).join(','));
+check('the shipped config is valid as written: the sanitizer changes nothing',
+  JSON.stringify(api.drawioNetConfig(shippedCfg)) === JSON.stringify(shippedCfg)
+  && JSON.stringify(api.drawioNetConfig(api.DRAWIO_NET_DEFAULTS)) === JSON.stringify(api.DRAWIO_NET_DEFAULTS),
+  JSON.stringify(api.drawioNetConfig(shippedCfg)));
+check('both hosts carry the same defaults and the same seven keys',
+  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) => {
+    const src = readFileSync(join(ROOT, p), 'utf8');
+    return src.indexOf('const DEFAULT_NET_DIAGRAM_CONFIG = {') >= 0
+      && cfgKeys.every((k) => src.indexOf(k + ':') >= 0)
+      && src.indexOf("'getNetDiagramOptions'") >= 0 && src.indexOf("'saveNetDiagramOptions'") >= 0;
+  }));
+
+// The sanitizer: what the Host will keep, and what the client paints with before it answers.
+check('a missing or broken config becomes the shipped defaults',
+  JSON.stringify(api.drawioNetConfig(null)) === JSON.stringify(api.DRAWIO_NET_DEFAULTS)
+  && JSON.stringify(api.drawioNetConfig('nonsense')) === JSON.stringify(api.DRAWIO_NET_DEFAULTS)
+  && JSON.stringify(api.drawioNetConfig([1, 2])) === JSON.stringify(api.DRAWIO_NET_DEFAULTS));
+check('a partial config keeps its values and fills the rest',
+  (function () {
+    const c = api.drawioNetConfig({ Bus_flag_color: 'orange' });
+    return c.Bus_flag_color === 'orange' && c.Bus_flag_lower_limit === 0.9 && c.Basecase_branch_flow_flag_percent === 80;
+  })());
+check('an inverted bus band falls back rather than painting nonsense',
+  (function () {
+    const c = api.drawioNetConfig({ Bus_flag_lower_limit: 1.2, Bus_flag_upper_limit: 0.8 });
+    return c.Bus_flag_lower_limit === 0.9 && c.Bus_flag_upper_limit === 1.1;
+  })());
+check('unknown keys survive a round trip, so hand edits are not destroyed',
+  api.drawioNetConfig({ something_else: 7 }).something_else === 7);
+check('the sanitizer bounds numbers and rejects unusable colours',
+  (function () {
+    const c = api.drawioNetConfig({ Basecase_branch_flow_flag_percent: 99999, Bus_flag_color: 'not a colour' });
+    return c.Basecase_branch_flow_flag_percent === 1000 && c.Bus_flag_color === 'red';
+  })());
+
+// The form's own validation: it must say WHY rather than clamp silently behind the user's back.
+check('a valid form has no errors', Object.keys(api.drawioNetConfigErrors(api.drawioNetConfig(null))).length === 0);
+check('the form reports a missing number, a bad range, a bad colour and an inverted band',
+  Object.keys(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Basecase_branch_flow_flag_percent: '' }))).length === 1
+  && Object.keys(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Contingency_branch_flow_flag_percent: '-5' }))).length === 1
+  && Object.keys(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Bus_flag_color: 'x y z' }))).length === 1
+  && api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Bus_flag_lower_limit: '1.5' })).Bus_flag_upper_limit !== undefined,
+  JSON.stringify(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Bus_flag_color: 'x y z' }))));
+
+// The flow readers: columns by NAME (a reordered table must not flag the wrong branches), the max
+// across parallel circuits, and only the rows at or above the threshold.
+const BR_HEADER = 'ID,Name,Circuit,FromBusID,FromBusNumber,ToBusID,ToBusNumber,Loading%';
+const BR_ROWS = [
+  'Bus1->Bus2(1),L1,1,Bus1,1,Bus2,2,91.5',
+  'Bus1->Bus2(2),L1,2,Bus1,1,Bus2,2,72.0',
+  'Bus2->Bus3(1),L2,1,Bus2,2,Bus3,3,45.0',
+  'Bus3->Bus4(1),L3,1,Bus3,3,Bus4,4,120.0',
+];
+const baseFlags = api.drawioBranchFlagPairs(BR_HEADER, BR_ROWS, 80);
+check('base-case flags keep pairs at or above the percent, with the highest circuit loading',
+  baseFlags['bus1|bus2'] === 91.5 && baseFlags['bus3|bus4'] === 120 && baseFlags['bus2|bus3'] === undefined,
+  JSON.stringify(baseFlags));
+check('the flow columns are read by header name, not by position',
+  (function () {
+    const shuffled = api.drawioBranchFlagPairs('Loading%,Status,FromBusID,ToBusID', ['95.0,true,Bus8,Bus9', '10.0,true,Bus1,Bus2'], 80);
+    return shuffled['bus8|bus9'] === 95 && shuffled['bus1|bus2'] === undefined;
+  })());
+check('a threshold the config raises stops flagging what it used to',
+  Object.keys(api.drawioBranchFlagPairs(BR_HEADER, BR_ROWS, 100)).length === 1);
+const CON_HEADER = 'BranchID,BranchName,IsXfmr,ContingencyName,LoadingPercent';
+const CON_ROWS = ['Bus1->Bus2(1),L1,false,C1,118.0', 'Bus2->Bus3(1),L2,false,C1,60.0', 'Bus7->Bus8(1),L3,true,C2,150.5'];
+const conFlags = api.drawioContingencyFlagPairs(CON_HEADER, CON_ROWS, 100);
+check('contingency flags come from the CA table, keyed by the BranchID pair',
+  conFlags['bus1|bus2'] === 118 && conFlags['bus7|bus8'] === 150.5 && conFlags['bus2|bus3'] === undefined,
+  JSON.stringify(conFlags));
+
+// The paint map: buses cover their bar and label, branches resolve through a transformer group, and
+// a contingency flag outranks a base-case one on the same branch.
+const cfgPaint = api.drawioNetConfig(null);
+const flagPaint = api.drawioFlagPaint(scene.nodes, scene.edges, cfgPaint, { bus5: true },
+  { 'bus1|bus2': 91.5 }, { 'bus1|bus2': 118 });
+check('a flagged bus paints its bar and its label; a flagged branch paints its edges',
+  flagPaint.bus5 === 'red' && flagPaint.nm5 === 'red'
+  && Object.keys(flagPaint).some((id) => id.charAt(0) === 'e' && flagPaint[id] === 'blue'),
+  JSON.stringify(Object.keys(flagPaint).slice(0, 6)));
+check('a contingency flag outranks the base-case flag on the same branch',
+  Object.keys(flagPaint).filter((id) => id.charAt(0) === 'e').every((id) => flagPaint[id] === 'blue')
+  && !Object.keys(flagPaint).some((id) => flagPaint[id] === 'green'));
+check('with no flags data the map is empty, and the renderer paints as it always did',
+  Object.keys(api.drawioFlagPaint(scene.nodes, scene.edges, cfgPaint, null, null, null)).length === 0);
+check('the search colour goes over the flags, because a search is the deliberate act',
+  (function () {
+    const merged = api.drawioMergedPaint({ bus5: 'red', nm5: 'red' }, { buses: { bus5: true }, edges: { e1: true } }, '#1F6FEB');
+    return merged.bus5 === '#1F6FEB' && merged.nm5 === 'red' && merged.e1 === '#1F6FEB'
+      && api.drawioMergedPaint(null, null, '#1F6FEB') === null;
+  })());
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

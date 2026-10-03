@@ -92,6 +92,9 @@ failed.
 - Keep the file uncompressed XML under `<mxfile>`, and under **20000 cells** and **4 MiB** — the
   preview's caps since 0.6.19 (the 118-bus diagram uses 465 cells / 137 KB, so the ceiling is only
   relevant for a case like Texas 2K: ~10.7k cells / ~3 MB, which now fits).
+- **The flag colours live in a config, not in the file.** `config/net_diagram.json` (edited from the Diagram tab's gear dialog,
+  0.6.26) sets the bus band/colour and the two branch flow-flag percents/colours; the tab paints them at render time. The generator
+  still writes one grey per bar and no branch colour.
 - **Do not bake voltage colour into the file.** The Diagram tab reads the case's
   `result/<stem>_DF_bus.csv` and paints out-of-band buses (`|V|` outside 0.9–1.1 pu) red as it
   renders (0.6.18); the `.drawio` itself stays one grey per bar, and the generator has no colour

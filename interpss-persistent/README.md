@@ -49,11 +49,13 @@ parameters and results, no build-time Typert compiler required.
   last viewed — and gives the diagram pan / zoom / fit, a **zoom picker** (25–400 %, plus **Fit** as its last entry — 0.6.21, Fit 0.6.22 — and
   whatever level the wheel reached, selected), **search** (by number, id, name or `A-B` pair, highlighted in
   the drawing) and **filter** (by area/zone from the case table, or by the |V| band — 0.6.23) dialogs with OK / Cancel, an **R** / **S** toggle (Rendered / Source;
-  the words live in the tooltip and the accessible name since 0.6.17) and
+  the words live in the tooltip and the accessible name since 0.6.17), a **gear** dialog for the flag
+  thresholds and colours in `config/net_diagram.json` (0.6.26) and
   bus/branch tooltips, and (0.6.12; at the right end of the top row since 0.6.15) a
   draw.io button that opens the file in the **local draw.io
   desktop app** to edit it. A bus whose solved `|V|` is outside **0.9–1.1 pu** is painted **red**
-  (bar, outline and `Bus-N`, with the violation spelled out in its tooltip) — at render time only,
+  (bar and `Bus-N` text, with the violation spelled out in its tooltip; the band and colour come from the gear dialog's
+  `config/net_diagram.json` since 0.6.26, which also paints branch flow flags) — at render time only,
   since 0.6.18: the `.drawio` file, the desktop app and the generator's PNG preview stay exactly as
   authored. It reuses `listDrawioFiles`, `readDrawio`, `readCsv` (the bus table), `checkResult` and
   `busConnections`, and the launcher is the one new endpoint (`openDrawio`, over the sandbox-aware
