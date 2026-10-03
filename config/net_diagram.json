@@ -4,7 +4,7 @@
   "Bus_flag_color": "Red",
   "Basecase_branch_flow_flag_percent": 70,
   "Basecase_branch_flow_flag_color": "yellow",
-  "Contingency_branch_flow_flag_percent": 100,
+  "Contingency_branch_flow_flag_percent": 90,
   "Contingency_branch_flow_flag_color": "Red",
   "Show_birdseye_view": true
 }

@@ -115,7 +115,7 @@ function build(overrides) {
       + ' drawioSearchHelp: drawioSearchHelp,'
       + ' DRAWIO_NET_DEFAULTS: DRAWIO_NET_DEFAULTS, DRAWIO_NET_FIELDS: DRAWIO_NET_FIELDS,'
       + ' drawioNetConfig: drawioNetConfig, drawioNetConfigErrors: drawioNetConfigErrors,'
-      + ' drawioBranchFlagPairs: drawioBranchFlagPairs, drawioContingencyFlagPairs: drawioContingencyFlagPairs,'
+      + ' drawioBranchLoads: drawioBranchLoads, drawioContingencyLoads: drawioContingencyLoads,'
       + ' drawioBandText: drawioBandText,'
       + ' drawioBirdseyePaths: drawioBirdseyePaths, drawioBirdseyeRect: drawioBirdseyeRect,'
       + ' DrawioBirdseye: DrawioBirdseye,'
@@ -130,7 +130,7 @@ function build(overrides) {
       + ' drawioBusAlerts: drawioBusAlerts, drawioBusCellId: drawioBusCellId,'
       + ' drawioVoltOutsideBand: drawioVoltOutsideBand, drawioVoltColumns: drawioVoltColumns,'
       + ' DRAWIO_MAX_CELLS: DRAWIO_MAX_CELLS,'
-      + ' busTooltip: busTooltip, branchTooltip: branchTooltip };');
+      + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText };');
 
 
   return factory(makeReact(overrides || {}), { call: () => Promise.resolve({}) }, { get: () => undefined },
@@ -773,6 +773,33 @@ if (scene) {
     branchTip.split('\n')[0]);
   check('both tooltip builders survive a missing record',
     api.busTooltip(null) === 'Bus info' && api.branchTooltip(null) === 'Branch info');
+  // 0.6.30: the flow loadings. The base case comes from the branch table the row came from, the
+  // contingency from the caller (only the Diagram tab reads the CA table), and neither line appears
+  // when the value is not there -- "when available" is the whole rule.
+  const loadedRow = xfRow2.slice();
+  loadedRow[24] = '58.94';
+  const loadedTip = api.branchTooltip(loadedRow, { contingencyLoading: 70 });
+  check('the branch tooltip shows both loadings, in percent, one decimal at most',
+    loadedTip.indexOf('Basecase Loading(%): 58.9%') > 0
+    && loadedTip.indexOf('Contingency Loading(%): 70%') > 0
+    && loadedTip.indexOf('58.94') < 0,
+    loadedTip.split('\n').slice(-3).join(' | '));
+  check('a whole number loses its pointless decimal',
+    api.loadingText('59.0') === '59%' && api.loadingText(70) === '70%' && api.loadingText('118.25') === '118.3%'
+    && api.loadingText('') === null && api.loadingText('n/a') === null && api.loadingText(undefined) === null);
+  check('the base-case line shows without any contingency data, and vice versa',
+    api.branchTooltip(loadedRow).indexOf('Basecase Loading(%): 58.9%') > 0
+    && api.branchTooltip(loadedRow).indexOf('Contingency') < 0
+    && api.branchTooltip(xfRow2, { contingencyLoading: 91 }).indexOf('Contingency Loading(%): 91%') > 0);
+  check('neither line appears when the row carries no loading column',
+    (function () {
+      const bare = xfRow2.slice(0, 24);
+      const tip = api.branchTooltip(bare);
+      return tip.indexOf('Loading') < 0 && tip.indexOf('Power From->To') > 0;
+    })());
+  check('the connection diagram passes no contingency, so its tooltip is unchanged',
+    slice.indexOf("showTip(branchTooltip(branches[0]), e)") >= 0
+    && slice.indexOf('branchTooltip(r, { contingencyLoading: contingency })') >= 0);
 }
 
 // --- 12. the Diagram tab (a second conversation view, order 2) --------------
@@ -1110,6 +1137,8 @@ const filterDialog = renderTab(withState([
   ['busMeta', { areas: [{ num: '1', name: 'NORTH' }], zones: [{ num: '9', name: 'FAR WEST TEX', area: '1' }], ofBus: {} }],
   // a band that is deliberately NOT the shipped 0.9-1.1: the label must follow the config (0.6.27)
   ['netConfig', api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 })],
+  ['branchLoads', { 'bus1|bus2': 91.5, 'bus5|bus6': 45 }],
+  ['conLoads', { 'bus1|bus2': 118 }],
 ]));
 const filterDialogButtons = ['OK', 'Cancel'].map((label) => findInTree(filterDialog, (n) => n.type === 'button' && (n.kids || []).indexOf(label) >= 0));
 const areaSelect = findInTree(filterDialog, (n) => n.type === 'select' && String(n.props['aria-label'] || '') === 'Area');
@@ -1146,6 +1175,45 @@ check('the filter message previews the dialog fields, not the applied filter',
 check('the toolbar status keeps the APPLIED filter, so Cancel still cancels',
   slice.indexOf('filterApplied === null || scene === null') >= 0
   && slice.indexOf('const draftHits = scene === null') >= 0);
+
+const filterBoxes = ['Only buses outside the voltage band',
+  'Only branches at or above the base-case flow flag',
+  'Only branches at or above the contingency flow flag']
+  .map((label) => findInTree(filterDialog, (n) => n.type === 'input' && n.props.type === 'checkbox'
+    && String(n.props['aria-label'] || '') === label));
+check('the filter dialog offers all three criteria, labelled from the config',
+  filterBoxes.every((b) => b !== null)
+  // the CODE's fallback defaults (80/100), because this fixture sets only the bus band: the user's
+  // own file value is theirs to tune and is not what a fresh profile shows
+  && flatTree(filterDialog).indexOf('Only branches with base-case loading \u2265 80%') > 0
+  && flatTree(filterDialog).indexOf('Only branches with contingency loading \u2265 100%') > 0,
+  filterBoxes.filter((b) => b === null).length + ' missing');
+check('the two flow boxes are offered but not tappable when their table is missing',
+  (function () {
+    const noData = renderFlat(withState([
+      ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+      ['files', tabFiles(2)],
+      ['path', 'wspace/data/c/diagram/d0.drawio'],
+      ['scene', scene],
+      ['dialog', 'filter'],
+      ['busMeta', { areas: [], zones: [], ofBus: {} }],
+      ['branchLoads', null],
+      ['conLoads', null],
+    ]));
+    const box = findInTree(renderTab(withState([
+      ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+      ['files', tabFiles(2)],
+      ['path', 'wspace/data/c/diagram/d0.drawio'],
+      ['scene', scene],
+      ['dialog', 'filter'],
+      ['busMeta', { areas: [], zones: [], ofBus: {} }],
+      ['branchLoads', null],
+      ['conLoads', null],
+    ])), (n) => n.type === 'input' && n.props.type === 'checkbox'
+      && String(n.props['aria-label'] || '') === 'Only branches at or above the base-case flow flag');
+    return noData.indexOf('no branch table yet') > 0 && box !== null && box.props.disabled === true
+      && box.props.checked === false;
+  })());
 
 check('the filter dialog\'s band checkbox reads the config, not a literal',
   flatTree(filterDialog).indexOf('Only buses with |V| outside 0.95\u20131.05 pu') > 0
@@ -1802,6 +1870,74 @@ check('the sentence names the area and zone, the toolbar label stays numeric',
     return h.text.indexOf('area 1 NORTH') >= 0 && h.text.indexOf('zone 9 FAR WEST TEX') >= 0
       && h.label === 'area 1, zone 9' && h.kept === h.total - h.nBuses;
   })());
+// 0.6.32: the two flow criteria. They choose BRANCHES, so they also narrow the buses to the ends of
+// what survives -- otherwise "only branches >= 70%" would still draw every bus.
+const flowScene = {
+  viewBox: { x: 0, y: 0, w: 400, h: 200 },
+  nodes: [
+    { id: 'bus1', kind: 'rect', x: 0, y: 0, w: 6, h: 40, lines: [] },
+    { id: 'bus2', kind: 'rect', x: 100, y: 0, w: 6, h: 40, lines: [] },
+    { id: 'bus3', kind: 'rect', x: 200, y: 0, w: 6, h: 40, lines: [] },
+    { id: 'bus4', kind: 'rect', x: 300, y: 0, w: 6, h: 40, lines: [] },
+  ],
+  edges: [
+    { id: 'e1', source: 'bus1', target: 'bus2', points: [{ x: 3, y: 20 }, { x: 103, y: 20 }], stroke: '#000', strokeWidth: 1, arrow: null },
+    { id: 'e2', source: 'bus2', target: 'bus3', points: [{ x: 103, y: 20 }, { x: 203, y: 20 }], stroke: '#000', strokeWidth: 1, arrow: null },
+    { id: 'e3', source: 'bus3', target: 'bus4', points: [{ x: 203, y: 20 }, { x: 303, y: 20 }], stroke: '#000', strokeWidth: 1, arrow: null },
+  ],
+};
+const flowCfg = api.drawioNetConfig({ Basecase_branch_flow_flag_percent: 70, Contingency_branch_flow_flag_percent: 100 });
+const flowLoads = { 'bus1|bus2': 91.5, 'bus2|bus3': 45, 'bus3|bus4': 120 };
+const flowCons = { 'bus3|bus4': 118 };
+const flowMeta = { ofBus: { bus1: { area: '1', zone: '9' }, bus2: { area: '9', zone: '9' },
+  bus3: { area: '9', zone: '9' }, bus4: { area: '1', zone: '9' } }, areas: [], zones: [] };
+const onlyBase = api.drawioFilterHidden({ area: '', zone: '', outOfBand: false, basecaseLoading: true },
+  flowScene.nodes, flowScene.edges, null, null, flowCfg, flowLoads, flowCons);
+check('a base-case loading filter keeps the branches at or above it, and their buses',
+  // e2 is the only branch below 70%, so it goes; every bus is an end of a branch that stays
+  onlyBase.ids.e1 !== true && onlyBase.ids.e2 === true && onlyBase.ids.e3 !== true
+  && JSON.stringify(Object.keys(onlyBase.ids)) === '["e2"]',
+  JSON.stringify(Object.keys(onlyBase.ids)));
+check('it reports in branches, because that is what it chose',
+  onlyBase.keptBranches === 2 && onlyBase.totalBranches === 3
+  && onlyBase.text === 'Showing 2 of 3 branches (base-case loading \u2265 70%).'
+  && onlyBase.label === 'base-case loading \u2265 70%',
+  onlyBase.text);
+check('the contingency criterion uses the contingency table and its own threshold',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: false, contingencyLoading: true },
+      flowScene.nodes, flowScene.edges, null, null, flowCfg, flowLoads, flowCons);
+    // the two buses with no branch that stays are hidden too, and the sentence says so
+    return h.ids.e3 !== true && h.ids.e1 === true && h.ids.e2 === true
+      && h.ids.bus1 === true && h.ids.bus2 === true && h.ids.bus3 !== true && h.ids.bus4 !== true
+      && h.text === 'Showing 2 of 4 buses and 1 of 3 branches (contingency loading \u2265 100%).';
+  })());
+check('both flow criteria together are an AND, and a bus criterion narrows them further',
+  (function () {
+    const both = api.drawioFilterHidden({ area: '', zone: '', outOfBand: false, basecaseLoading: true, contingencyLoading: true },
+      flowScene.nodes, flowScene.edges, null, null, flowCfg, flowLoads, flowCons);
+    const inArea = api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false, basecaseLoading: true },
+      flowScene.nodes, flowScene.edges, flowMeta, null, flowCfg, flowLoads, flowCons);
+    return both.keptBranches === 1 && both.ids.e3 !== true && both.ids.e1 === true
+      && inArea.keptBranches === 0 && inArea.ids.e1 === true;
+  })());
+check('a bus criterion on its own still reports buses, and keeps the network between them',
+  (function () {
+    // bus1 and bus2 are area 1: their branch stays, everything else in the area's network goes
+    const meta1 = { ofBus: { bus1: { area: '1' }, bus2: { area: '1' }, bus3: { area: '9' }, bus4: { area: '9' } }, areas: [], zones: [] };
+    const h = api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, flowScene.nodes, flowScene.edges,
+      meta1, null, flowCfg, flowLoads, flowCons);
+    return h.text === 'Showing 2 of 4 buses (area 1).' && h.ids.bus3 === true && h.ids.bus4 === true
+      && h.ids.e1 !== true && h.ids.e2 === true && h.ids.e3 === true;
+  })());
+check('with no loading data a flow criterion keeps nothing, and says so',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: false, basecaseLoading: true },
+      flowScene.nodes, flowScene.edges, null, null, flowCfg, null, null);
+    return h.keptBranches === 0 && h.totalBranches === 3
+      && h.text.indexOf('Showing 0 of 4 buses and 0 of 3 branches') === 0;
+  })());
+
 check('the filter reports what it kept, in words',
   api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).text.indexOf('Showing') === 0
   && api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).label === 'area 1');
@@ -1876,8 +2012,10 @@ check('the form reports a missing number, a bad range, a bad colour and an inver
   && api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Bus_flag_lower_limit: '1.5' })).Bus_flag_upper_limit !== undefined,
   JSON.stringify(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Bus_flag_color: 'x y z' }))));
 
-// The flow readers: columns by NAME (a reordered table must not flag the wrong branches), the max
-// across parallel circuits, and only the rows at or above the threshold.
+// The flow readers: columns by NAME (a reordered table must not flag the wrong branches) and the
+// max across parallel circuits. They keep EVERY row -- the thresholds are applied by the paint and
+// the status counts -- because the tooltip quotes what the tables hold (0.6.31). Reading the
+// contingency table at all depends on the Host listing it, so that is pinned here too.
 const BR_HEADER = 'ID,Name,Circuit,FromBusID,FromBusNumber,ToBusID,ToBusNumber,Loading%';
 const BR_ROWS = [
   'Bus1->Bus2(1),L1,1,Bus1,1,Bus2,2,91.5',
@@ -1885,23 +2023,47 @@ const BR_ROWS = [
   'Bus2->Bus3(1),L2,1,Bus2,2,Bus3,3,45.0',
   'Bus3->Bus4(1),L3,1,Bus3,3,Bus4,4,120.0',
 ];
-const baseFlags = api.drawioBranchFlagPairs(BR_HEADER, BR_ROWS, 80);
-check('base-case flags keep pairs at or above the percent, with the highest circuit loading',
-  baseFlags['bus1|bus2'] === 91.5 && baseFlags['bus3|bus4'] === 120 && baseFlags['bus2|bus3'] === undefined,
+const baseFlags = api.drawioBranchLoads(BR_HEADER, BR_ROWS);
+check('the load map keeps every pair, with the highest circuit loading',
+  baseFlags['bus1|bus2'] === 91.5 && baseFlags['bus3|bus4'] === 120 && baseFlags['bus2|bus3'] === 45,
   JSON.stringify(baseFlags));
 check('the flow columns are read by header name, not by position',
   (function () {
-    const shuffled = api.drawioBranchFlagPairs('Loading%,Status,FromBusID,ToBusID', ['95.0,true,Bus8,Bus9', '10.0,true,Bus1,Bus2'], 80);
-    return shuffled['bus8|bus9'] === 95 && shuffled['bus1|bus2'] === undefined;
+    const shuffled = api.drawioBranchLoads('Loading%,Status,FromBusID,ToBusID', ['95.0,true,Bus8,Bus9', '10.0,true,Bus1,Bus2']);
+    return shuffled['bus8|bus9'] === 95 && shuffled['bus1|bus2'] === 10;
   })());
-check('a threshold the config raises stops flagging what it used to',
-  Object.keys(api.drawioBranchFlagPairs(BR_HEADER, BR_ROWS, 100)).length === 1);
+// 0.6.31: both Hosts must list the contingency result in `checkResult`, because that list is the only
+// way the tab discovers it -- a missing entry means the contingency family can never appear.
+check('both hosts list the contingency result in checkResult',
+  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) =>
+    readFileSync(join(ROOT, p), 'utf8').indexOf("stem + '_DF_contingency.csv'") >= 0),
+  'checkResult files');
+check('a threshold the config raises stops PAINTING what it used to',
+  (function () {
+    const edges = (cfg) => Object.keys(api.drawioFlagPaint(scene.nodes, scene.edges, cfg, null, baseFlags, null))
+      .filter((id) => id.charAt(0) === 'e').length;
+    const wide = edges(api.drawioNetConfig({ Basecase_branch_flow_flag_percent: 40 }));
+    const narrow = edges(api.drawioNetConfig({ Basecase_branch_flow_flag_percent: 100 }));
+    return wide > narrow && narrow >= 0 && baseFlags['bus2|bus3'] === 45;
+  })());
 const CON_HEADER = 'BranchID,BranchName,IsXfmr,ContingencyName,LoadingPercent';
 const CON_ROWS = ['Bus1->Bus2(1),L1,false,C1,118.0', 'Bus2->Bus3(1),L2,false,C1,60.0', 'Bus7->Bus8(1),L3,true,C2,150.5'];
-const conFlags = api.drawioContingencyFlagPairs(CON_HEADER, CON_ROWS, 100);
-check('contingency flags come from the CA table, keyed by the BranchID pair',
-  conFlags['bus1|bus2'] === 118 && conFlags['bus7|bus8'] === 150.5 && conFlags['bus2|bus3'] === undefined,
+const conFlags = api.drawioContingencyLoads(CON_HEADER, CON_ROWS);
+check('contingency loadings come from the CA table, keyed by the BranchID pair',
+  conFlags['bus1|bus2'] === 118 && conFlags['bus7|bus8'] === 150.5 && conFlags['bus2|bus3'] === 60,
   JSON.stringify(conFlags));
+// The bug this release exists for: with a 100% contingency FLAG and a 70% value in the table, the
+// tooltip must still have the value while the paint leaves the branch alone.
+check('a contingency below the flag threshold is available to the tooltip but not painted',
+  (function () {
+    const th = api.drawioNetConfig({ Contingency_branch_flow_flag_percent: 100, Basecase_branch_flow_flag_percent: 1000 });
+    const painted = Object.keys(api.drawioFlagPaint(scene.nodes, scene.edges, th, null, null, { 'bus1|bus2': 70 }))
+      .filter((id) => id.charAt(0) === 'e');
+    const painted100 = Object.keys(api.drawioFlagPaint(scene.nodes, scene.edges,
+      api.drawioNetConfig({ Contingency_branch_flow_flag_percent: 100 }), null, null, { 'bus1|bus2': 118 }))
+      .filter((id) => id.charAt(0) === 'e');
+    return conFlags['bus2|bus3'] < 100 && painted.length === 0 && painted100.length > 0;
+  })());
 
 // The paint map: buses cover their bar and label, branches resolve through a transformer group, and
 // a contingency flag outranks a base-case one on the same branch.

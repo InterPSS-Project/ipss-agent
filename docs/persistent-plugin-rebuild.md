@@ -549,7 +549,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 280 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 295 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -770,7 +770,9 @@ Client-half change is served with the plugin bundle, so the reload is what picks
     - **the birdseye switch** (`Show_birdseye_view`, a checkbox in the dialog's *View* group) turns the
       thumbnail off and on; it is on unless it was explicitly turned off, and the canvas simply does not
       render the overlay rather than hiding it with CSS;
-    - **contingency branch flags** — pairs whose worst `LoadingPercent` in the CA result table
+    - **contingency branch flags** — pairs whose worst `LoadingPercent` in the CA result table (`checkResult`
+      must list `_DF_contingency.csv`: that list is the only way the tab finds a result file, and leaving it out
+      made the whole family silently invisible until 0.6.31)
       reaches `Contingency_branch_flow_flag_percent` (`blue` by default), and a contingency flag
       outranks a base-case one on the same branch.
     A search's blue still outranks every flag, because a search is the deliberate act. The dialog's
@@ -786,8 +788,11 @@ Client-half change is served with the plugin bundle, so the reload is what picks
   them and reopens the one last viewed; a case with none says so instead of drawing an empty
   pane, and a case never touched shows the InterPSS preset's diagram. Hovering a bar or a
   branch shows the connection diagram's tooltip (without a result table it says
-  `no result data — run ACLF`), the wheel zooms about the cursor, dragging pans, **Fit**
-  resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
+  `no result data — run ACLF`), and a branch's tooltip ends with its flow loadings since 0.6.30 —
+  `Basecase Loading(%): …` from the branch table's own `Loading%` (the field the base-case flags
+  compare against), plus `Contingency Loading(%): …` when the CA result table lists that branch
+  (which it only does at or above the CA's `overloadThreshold`). The wheel zooms about the cursor,
+  dragging pans, **Fit** resets, and **Source** shows the raw file. Loading a case from chat moves this tab too —
   the regression symptom is a Diagram tab that keeps drawing the previous case.
   **Since 0.6.18 a bus whose `|V|` is outside 0.9–1.1 pu is red** (bar, outline and `Bus-N`), and
   hovering it adds `⚠ |V| outside 0.9–1.1 pu` to its tooltip. The check is

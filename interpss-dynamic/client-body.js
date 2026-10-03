@@ -275,7 +275,20 @@ return {
       return pf + sign + qf
     }
 
-    function branchTooltip(r) {
+    // A percent as the tooltip says it: one decimal at most, and no pointless `.0` (`59%`, not
+    // `59.0%`). Anything that is not a number is "not available", and the line is left out.
+    function loadingText(value) {
+      const n = parseFloat(String(value === undefined || value === null ? '' : value).trim())
+      if (!Number.isFinite(n)) return null
+      return (Math.round(n * 10) / 10) + '%'
+    }
+
+    // `extra.contingencyLoading` is the worst contingency loading for this branch, which only the
+    // Diagram tab has (it reads the CA result table for the flags); the connection diagram passes
+    // nothing and simply gets no contingency line. The base-case loading comes from the branch table
+    // the row itself came from, so it shows wherever that table is the source -- and neither line
+    // appears for a table without those columns.
+    function branchTooltip(r, extra) {
       if (!r) return 'Branch info'
       const isXfmr = r[12] === 'true'
       const lines = []
@@ -289,6 +302,13 @@ return {
       lines.push('')
       lines.push('Power From->To: ' + pqText(r[19], r[20]))
       lines.push('Power To->From: ' + pqText(r[21], r[22]))
+      const basecase = loadingText(r[24])
+      const contingency = extra === undefined || extra === null ? null : loadingText(extra.contingencyLoading)
+      if (basecase !== null || contingency !== null) {
+        lines.push('')
+        if (basecase !== null) lines.push('Basecase Loading(%): ' + basecase)
+        if (contingency !== null) lines.push('Contingency Loading(%): ' + contingency)
+      }
       return lines.join('\n')
     }
 
@@ -820,6 +840,17 @@ return {
       return '|V| outside ' + cfg.Bus_flag_lower_limit + '\u2013' + cfg.Bus_flag_upper_limit + ' pu'
     }
 
+    // The flow thresholds, spelled for the two surfaces that quote them: the Filter dialog's
+    // checkboxes and the sentence that reports what the filter kept. `which` is 'basecase' or
+    // 'contingency' -- the two families the dialog can filter on (0.6.32).
+    function drawioLoadingThresholdText(config, which) {
+      const cfg = drawioNetConfig(config)
+      const pct = which === 'contingency'
+        ? cfg.Contingency_branch_flow_flag_percent
+        : cfg.Basecase_branch_flow_flag_percent
+      return (which === 'contingency' ? 'contingency' : 'base-case') + ' loading \u2265 ' + pct + '%'
+    }
+
     // What stops OK: one message per offending field, or none. Kept separate from the sanitizer
     // above, because a form should say WHY rather than silently clamp behind the user's back.
     function drawioNetConfigErrors(form) {
@@ -864,15 +895,18 @@ return {
     }
 
     // Loadings keyed the way the branch index keys them (both bus ids lowercased and sorted, joined
-    // with `|`), each carrying the highest loading among parallel circuits -- and only for the rows
-    // at or above `percent`, since flagging is all this is for.
-    function drawioMaxByPair(rows, threshold, percentAt, pairAt) {
+    // with `|`), each carrying the highest loading among parallel circuits (or among contingencies).
+    // EVERY row is kept, whatever the display thresholds say: the tooltip quotes what the tables hold
+    // -- "when available" -- while the paint and the status counts apply the configured thresholds.
+    // Filtering here instead (0.6.30) hid a 70% contingency from the tooltip whenever the flag
+    // threshold was 100%, which is exactly the case the tables are read for.
+    function drawioMaxByPair(rows, percentAt, pairAt) {
       const out = {}
       if (percentAt < 0 || !Array.isArray(rows)) return out
       for (const line of rows) {
         const c = String(line).split(',')
         const loading = parseFloat(String(c[percentAt] === undefined ? '' : c[percentAt]).trim())
-        if (!Number.isFinite(loading) || loading < threshold) continue
+        if (!Number.isFinite(loading)) continue
         const pair = pairAt(c)
         if (pair === null) continue
         if (out[pair] === undefined || loading > out[pair]) out[pair] = loading
@@ -882,12 +916,11 @@ return {
 
     // The base-case flags, from `<stem>_DF_branch.csv`: `FromBusID`/`ToBusID` give the pair, and
     // `Loading%` gives the loading, all by header NAME.
-    function drawioBranchFlagPairs(header, rows, percent) {
-      const threshold = Number.isFinite(Number(percent)) ? Number(percent) : 0
+    function drawioBranchLoads(header, rows) {
       const iFrom = drawioColIndex(header, 'frombusid')
       const iTo = drawioColIndex(header, 'tobusid')
       const iLoading = drawioColIndex(header, 'loading%')
-      return drawioMaxByPair(rows, threshold, iLoading, (c) => {
+      return drawioMaxByPair(rows, iLoading, (c) => {
         const from = String(c[iFrom] === undefined ? '' : c[iFrom]).trim().toLowerCase()
         const to = String(c[iTo] === undefined ? '' : c[iTo]).trim().toLowerCase()
         if (iFrom < 0 || iTo < 0 || !drawioIsBusCell(from) || !drawioIsBusCell(to)) return null
@@ -898,11 +931,10 @@ return {
     // The contingency flags, from the CA result table `<stem>_DF_contingency.csv`: its `BranchID`
     // is `Bus1001->Bus1064(1)`, so the pair is the head of that string, and `LoadingPercent` is the
     // worst loading any contingency left on the branch. Both columns by header name.
-    function drawioContingencyFlagPairs(header, rows, percent) {
-      const threshold = Number.isFinite(Number(percent)) ? Number(percent) : 0
+    function drawioContingencyLoads(header, rows) {
       const iId = drawioColIndex(header, 'branchid')
       const iLoading = drawioColIndex(header, 'loadingpercent')
-      return drawioMaxByPair(rows, threshold, iLoading, (c) => {
+      return drawioMaxByPair(rows, iLoading, (c) => {
         if (iId < 0) return null
         const m = /^(bus\d+)\s*->\s*(bus\d+)/i.exec(String(c[iId] === undefined ? '' : c[iId]).trim())
         if (m === null) return null
@@ -929,9 +961,13 @@ return {
         const ends = drawioEdgeBusPair(e, edges, index)
         if (ends === null) continue
         const key = ends.slice().sort().join('|')
-        if (contingencyLoads !== null && contingencyLoads !== undefined && contingencyLoads[key] !== undefined) {
+        const contingency = contingencyLoads === null || contingencyLoads === undefined ? undefined : contingencyLoads[key]
+        const basecase = branchLoads === null || branchLoads === undefined ? undefined : branchLoads[key]
+        // The map holds every branch the tables mention; the thresholds decide what is painted, with
+        // a contingency flag outranking a base-case one.
+        if (contingency !== undefined && contingency >= cfg.Contingency_branch_flow_flag_percent) {
           out[e.id] = cfg.Contingency_branch_flow_flag_color
-        } else if (branchLoads !== null && branchLoads !== undefined && branchLoads[key] !== undefined) {
+        } else if (basecase !== undefined && basecase >= cfg.Basecase_branch_flow_flag_percent) {
           out[e.id] = cfg.Basecase_branch_flow_flag_color
         }
       }
@@ -1149,10 +1185,21 @@ return {
     // What a filter hides: every bus outside the chosen area/zone -- and, when asked, outside the
     // |V| band -- plus the labels, branches and transformer symbols attached to those buses. A
     // branch is hidden when EITHER end is hidden, so nothing is left dangling into nothing.
-    function drawioFilterHidden(filter, nodes, edges, meta, alerts, config) {
-      const out = { ids: {}, nBuses: 0, text: '' }
+    // Two KINDS of criterion, and the difference matters when they are combined (0.6.32):
+    //
+    //   - the bus criteria (area, zone, the voltage band) choose buses;
+    //   - the flow criteria (base-case, contingency loading) choose branches.
+    //
+    // A bus criterion alone leaves the network of the chosen buses standing, exactly as before. A
+    // flow criterion is the "only" kind: the branches that do not reach its threshold go, and so do
+    // the buses that are not an end of a branch that stays -- otherwise "only branches >= 70%" would
+    // still draw every bus. Combined, they narrow together: area 1 + base-case >= 70% is the
+    // overloaded branches *inside* area 1.
+    function drawioFilterHidden(filter, nodes, edges, meta, alerts, config, branchLoads, contingencyLoads) {
+      const out = { ids: {}, nBuses: 0, nBranches: 0, text: '' }
       if (filter === null || filter === undefined) return out
       const index = drawioRingIndex(nodes)
+      const cfg = drawioNetConfig(config)
       const bars = []
       for (const n of nodes) {
         if (drawioIsBusCell(n.id)) bars.push(String(n.id).toLowerCase())
@@ -1161,6 +1208,9 @@ return {
       const area = String(filter.area === undefined || filter.area === null ? '' : filter.area)
       const zone = String(filter.zone === undefined || filter.zone === null ? '' : filter.zone)
       const band = filter.outOfBand === true
+      const flowBase = filter.basecaseLoading === true
+      const flowCont = filter.contingencyLoading === true
+      const flow = flowBase || flowCont
       for (const key of bars) {
         const info = meta !== null && meta !== undefined && meta.ofBus !== undefined ? meta.ofBus[key] : undefined
         let ok = true
@@ -1168,6 +1218,49 @@ return {
         if (ok && zone !== '') ok = info !== undefined && String(info.zone) === zone
         if (ok && band) ok = alerts !== null && alerts !== undefined && alerts[key] === true
         keep[key] = ok
+      }
+      // Phase B: the branch criteria, over the pairs the diagram draws (a transformer's two stubs are
+      // one pair, the same granularity the flow flags count in).
+      const loadOf = (loads, key) => (loads === null || loads === undefined ? undefined : loads[key])
+      const flowOk = (key) => {
+        if (!flow) return true
+        if (flowBase) {
+          const v = loadOf(branchLoads, key)
+          if (v === undefined || v < cfg.Basecase_branch_flow_flag_percent) return false
+        }
+        if (flowCont) {
+          const v = loadOf(contingencyLoads, key)
+          if (v === undefined || v < cfg.Contingency_branch_flow_flag_percent) return false
+        }
+        return true
+      }
+      const pairs = {}
+      const edgePair = {}
+      for (const e of edges) {
+        const ends = drawioEdgeBusPair(e, edges, index)
+        if (ends === null) continue
+        const key = ends.slice().sort().join('|')
+        edgePair[e.id] = key
+        pairs[key] = true
+      }
+      const edgeOk = {}
+      const incident = {}
+      for (const e of edges) {
+        const key = edgePair[e.id]
+        if (key === undefined) continue
+        const ends = key.split('|')
+        const ok = keep[ends[0]] !== false && keep[ends[1]] !== false && flowOk(key)
+        edgeOk[e.id] = ok
+        if (ok && flow) {
+          incident[ends[0]] = true
+          incident[ends[1]] = true
+        }
+      }
+      // Phase C: a flow criterion narrows the buses to the ends of what survives (see above).
+      const surv = {}
+      for (const key of bars) {
+        const ok = keep[key] !== false && (!flow || incident[key] === true)
+        surv[key] = ok
         if (!ok) {
           out.nBuses += 1
           out.ids[key] = true
@@ -1175,13 +1268,28 @@ return {
       }
       for (const n of nodes) {
         const bus = drawioBusCellId(n)
-        if (bus !== null && keep[String(bus).toLowerCase()] === false) out.ids[n.id] = true
+        if (bus !== null && surv[String(bus).toLowerCase()] === false) out.ids[n.id] = true
       }
       for (const e of edges) {
-        const ends = drawioEdgeBusPair(e, edges, index)
-        if (ends === null) continue
-        if (keep[ends[0]] === false || keep[ends[1]] === false) out.ids[e.id] = true
+        const key = edgePair[e.id]
+        if (key === undefined) continue
+        const ends = key.split('|')
+        if (edgeOk[e.id] !== true || surv[ends[0]] === false || surv[ends[1]] === false) out.ids[e.id] = true
       }
+      let nPairs = 0
+      let nPairsKept = 0
+      const counted = {}
+      for (const key of Object.keys(edgePair)) {
+        const pairKey = edgePair[key]
+        if (counted[pairKey] === true) continue
+        counted[pairKey] = true
+        nPairs += 1
+        const ends = pairKey.split('|')
+        if (surv[ends[0]] !== false && surv[ends[1]] !== false && flowOk(pairKey)) nPairsKept += 1
+      }
+      out.totalBranches = nPairs
+      out.keptBranches = nPairsKept
+      out.nBranches = nPairs - nPairsKept
       // a transformer's rings have no bus of their own: hide them with the stub that was hidden
       for (const e of edges) {
         if (out.ids[e.id] !== true) continue
@@ -1201,25 +1309,45 @@ return {
       }
       const short = []
       const parts = []
+      let busCriteria = false
+      let branchCriteria = false
       if (area !== '') {
         short.push('area ' + area)
         parts.push('area ' + area + nameOf(meta === null || meta === undefined ? null : meta.areas, area))
+        busCriteria = true
       }
       if (zone !== '') {
         short.push('zone ' + zone)
         parts.push('zone ' + zone + nameOf(meta === null || meta === undefined ? null : meta.zones, zone))
+        busCriteria = true
       }
       if (band) {
         short.push(drawioBandText(config))
         parts.push(drawioBandText(config))
+        busCriteria = true
+      }
+      if (flowBase) {
+        short.push(drawioLoadingThresholdText(config, 'basecase'))
+        parts.push(drawioLoadingThresholdText(config, 'basecase'))
+        branchCriteria = true
+      }
+      if (flowCont) {
+        short.push(drawioLoadingThresholdText(config, 'contingency'))
+        parts.push(drawioLoadingThresholdText(config, 'contingency'))
+        branchCriteria = true
       }
       out.label = short.join(', ')
       out.criteria = parts.join(', ')
       out.kept = bars.length - out.nBuses
       out.total = bars.length
+      // A branch criterion is answered in branches -- counting buses there would say "all 2000 shown"
+      // while the drawing shows a handful of overloaded lines. Both kinds together report both.
+      const clause = []
+      if (busCriteria || branchCriteria === false || out.nBuses > 0) clause.push(out.kept + ' of ' + out.total + ' buses')
+      if (branchCriteria) clause.push(out.keptBranches + ' of ' + out.totalBranches + ' branches')
       out.text = parts.length === 0
         ? 'Nothing is filtered: every bus is shown.'
-        : 'Showing ' + out.kept + ' of ' + out.total + ' buses (' + out.criteria + ').'
+        : 'Showing ' + clause.join(' and ') + ' (' + out.criteria + ').'
       return out
     }
 
@@ -3354,6 +3482,9 @@ return {
       const [filterArea, setFilterArea] = React.useState('')
       const [filterZone, setFilterZone] = React.useState('')
       const [filterOutOfBand, setFilterOutOfBand] = React.useState(false)
+      // The two flow criteria (0.6.32): "only branches at or above a configured loading".
+      const [filterBasecaseLoading, setFilterBasecaseLoading] = React.useState(false)
+      const [filterContingencyLoading, setFilterContingencyLoading] = React.useState(false)
       const [filterApplied, setFilterApplied] = React.useState(null)
       const [busMeta, setBusMeta] = React.useState(null)
       const [busMetaLoading, setBusMetaLoading] = React.useState(false)
@@ -3499,15 +3630,14 @@ return {
               // The same page loop feeds the base-case flow flags: the percent column and the two
               // bus columns are located by header NAME, so a reordered table cannot flag the wrong
               // branches.
-              setBranchLoads(drawioBranchFlagPairs(res.header, allRows,
-                netConfig.Basecase_branch_flow_flag_percent))
+              setBranchLoads(drawioBranchLoads(res.header, allRows))
             },
             () => {},
           )
         }
         page(0, 0)
         return undefined
-      }, [branchFile, resultDir, netConfig.Basecase_branch_flow_flag_percent])
+      }, [branchFile, resultDir])
 
       // The render-time voltage annotation: read `<case>/result/<stem>_DF_bus.csv` and keep the
       // buses whose `VoltMag` is outside the band config/net_diagram.json sets (0.9-1.1 by default). The columns come from the file's own
@@ -3583,15 +3713,14 @@ return {
               const rows = res.rows || []
               for (const line of rows) all.push(line)
               if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
-              setConLoads(drawioContingencyFlagPairs(res.header, all,
-                netConfig.Contingency_branch_flow_flag_percent))
+              setConLoads(drawioContingencyLoads(res.header, all))
             },
             () => { if (alive) setConLoads(null) },
           )
         }
         page(0, 0)
         return () => { alive = false }
-      }, [conFile, resultDir, netConfig.Contingency_branch_flow_flag_percent])
+      }, [conFile, resultDir])
 
       // The preview's read: fetch the .drawio, decode it
       // (plain or compressed) and resolve element -> branch once, not on every repaint.
@@ -3717,9 +3846,10 @@ return {
         const data = dataRef.current
         data.hovered = { kind: 'branch', key: key }
         const rows = data.branch === null || data.branch === undefined ? undefined : data.branch.get(key)
+        const contingency = conLoads === null || conLoads === undefined ? null : conLoads[key]
         showTip(rows === undefined || rows.length === 0
           ? drawioFallbackTip(drawioPairLabel(key), data.branch !== null)
-          : rows.map((r) => branchTooltip(r)).join('\n\n'), event)
+          : rows.map((r) => branchTooltip(r, { contingencyLoading: contingency })).join('\n\n'), event)
       }
 
       // --- Pan / zoom ---------------------------------------------------------
@@ -3899,10 +4029,14 @@ return {
       }
 
       function openFilter() {
-        const f = filterApplied === null ? { area: '', zone: '', outOfBand: false } : filterApplied
+        const f = filterApplied === null
+          ? { area: '', zone: '', outOfBand: false, basecaseLoading: false, contingencyLoading: false }
+          : filterApplied
         setFilterArea(f.area === undefined || f.area === null ? '' : String(f.area))
         setFilterZone(f.zone === undefined || f.zone === null ? '' : String(f.zone))
         setFilterOutOfBand(f.outOfBand === true)
+        setFilterBasecaseLoading(f.basecaseLoading === true)
+        setFilterContingencyLoading(f.contingencyLoading === true)
         setDialog('filter')
         ensureBusMeta()
       }
@@ -3920,8 +4054,10 @@ return {
       }
 
       function applyFilter() {
-        const next = { area: filterArea, zone: filterZone, outOfBand: filterOutOfBand }
-        setFilterApplied(next.area === '' && next.zone === '' && next.outOfBand !== true ? null : next)
+        const next = { area: filterArea, zone: filterZone, outOfBand: filterOutOfBand,
+          basecaseLoading: filterBasecaseLoading, contingencyLoading: filterContingencyLoading }
+        setFilterApplied(next.area === '' && next.zone === '' && next.outOfBand !== true
+          && next.basecaseLoading !== true && next.contingencyLoading !== true ? null : next)
         setDialog(null)
       }
 
@@ -3973,7 +4109,8 @@ return {
       const searchHits = searchQuery === null || scene === null
         ? null : drawioSearchHits(searchQuery, scene.nodes, scene.edges, busNames)
       const filterHits = filterApplied === null || scene === null
-        ? null : drawioFilterHidden(filterApplied, scene.nodes, scene.edges, busMeta, busAlerts, netConfig)
+        ? null : drawioFilterHidden(filterApplied, scene.nodes, scene.edges, busMeta, busAlerts, netConfig,
+          branchLoads, conLoads)
       // Everything that colours a cell, merged here rather than in the renderer, so precedence is
       // one readable rule: the flags first (bus, then base case, then contingency -- the last wins
       // inside drawioFlagPaint), and the search blue over the top, because a search is the
@@ -4008,8 +4145,10 @@ return {
 
       const flagCounts = (function () {
         const buses = busAlerts === null ? 0 : Object.keys(busAlerts).length
-        const base = branchLoads === null ? 0 : Object.keys(branchLoads).length
-        const cont = conLoads === null ? 0 : Object.keys(conLoads).length
+        const above = (loads, threshold) => (loads === null || loads === undefined ? 0
+          : Object.keys(loads).filter((k) => loads[k] >= threshold).length)
+        const base = above(branchLoads, netConfig.Basecase_branch_flow_flag_percent)
+        const cont = above(conLoads, netConfig.Contingency_branch_flow_flag_percent)
         if (buses + base + cont === 0) return null
         const parts = []
         if (buses > 0) parts.push(buses + (buses === 1 ? ' bus ' : ' buses ') + netConfig.Bus_flag_lower_limit + '\u2013' + netConfig.Bus_flag_upper_limit + ' pu')
@@ -4020,8 +4159,9 @@ return {
       // The dialog's own message previews the DRAFT, so changing Area or Zone updates it immediately
       // (0.6.24). The drawing still waits for OK: only the sentence is live.
       const draftHits = scene === null
-        ? null : drawioFilterHidden({ area: filterArea, zone: filterZone, outOfBand: filterOutOfBand },
-          scene.nodes, scene.edges, busMeta, busAlerts, netConfig)
+        ? null : drawioFilterHidden({ area: filterArea, zone: filterZone, outOfBand: filterOutOfBand,
+          basecaseLoading: filterBasecaseLoading, contingencyLoading: filterContingencyLoading },
+        scene.nodes, scene.edges, busMeta, busAlerts, netConfig, branchLoads, conLoads)
       const statusText = searchHits !== null
         ? (searchHits.nBus + searchHits.nBranch === 0
           ? 'no match'
@@ -4145,12 +4285,36 @@ return {
                 onChange: (e) => setFilterOutOfBand(e.target.checked),
               }),
               'Only buses with ' + drawioBandText(netConfig)),
+            React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px',
+              opacity: branchLoads === null ? 0.5 : 1 } },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: filterBasecaseLoading,
+                // No branch table in the result folder means no loading to compare: the criterion is
+                // offered but not tappable, rather than silently emptying the drawing (0.6.32).
+                disabled: branchLoads === null,
+                'aria-label': 'Only branches at or above the base-case flow flag',
+                onChange: (e) => setFilterBasecaseLoading(e.target.checked),
+              }),
+              'Only branches with ' + drawioLoadingThresholdText(netConfig, 'basecase')
+                + (branchLoads === null ? ' (no branch table yet)' : '')),
+            React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px',
+              opacity: conLoads === null ? 0.5 : 1 } },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: filterContingencyLoading,
+                disabled: conLoads === null,
+                'aria-label': 'Only branches at or above the contingency flow flag',
+                onChange: (e) => setFilterContingencyLoading(e.target.checked),
+              }),
+              'Only branches with ' + drawioLoadingThresholdText(netConfig, 'contingency')
+                + (conLoads === null ? ' (no CA table yet)' : '')),
             React.createElement('div', { style: hintStyle },
               busMetaLoading || (filterNeedsMeta && busMeta === null)
                 ? 'Loading the case\u2019s bus table\u2026'
                 : (draftHits !== null && draftHits.label !== ''
                   ? draftHits.text
-                  : 'Anything that does not match is hidden, along with its branches and transformer symbols. All areas and All zones bring the whole diagram back.')),
+                  : 'Anything that does not match is hidden, along with its branches and transformer symbols; a branch loading filter also hides the buses that are not an end of a branch that stays. All areas and All zones bring the whole diagram back.')),
           ), applyFilter, busMetaLoading || (filterNeedsMeta && busMeta === null))
           : null
 

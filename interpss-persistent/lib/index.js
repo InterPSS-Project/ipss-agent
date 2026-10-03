@@ -1307,6 +1307,10 @@ class InterpssService extends TypertRemoteService {
           stem + '_DF_branch.csv',
           stem + '_DF_gen.csv',
           stem + '_DF_load.csv',
+          // Listed whether or not a CA has been run: the client reads what it can and an absent
+          // file simply means "no contingency data". Without this line the Diagram tab never saw
+          // the table at all, so its contingency flags and tooltip line could never appear (0.6.31).
+          stem + '_DF_contingency.csv',
           stem + '_network_info.txt',
         ],
       }

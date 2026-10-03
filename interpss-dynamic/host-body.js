@@ -689,6 +689,9 @@ function caConfigPath(root, parent) {
               stem + '_DF_branch.csv',
               stem + '_DF_gen.csv',
               stem + '_DF_load.csv',
+              // Listed whether or not a CA has been run: the client reads what it can, and an
+              // absent file simply means "no contingency data" (0.6.31).
+              stem + '_DF_contingency.csv',
               stem + '_network_info.txt',
             ],
           }
@@ -1116,6 +1119,9 @@ function caConfigPath(root, parent) {
             stem + '_DF_branch.csv',
             stem + '_DF_gen.csv',
             stem + '_DF_load.csv',
+            // Listed whether or not a CA has been run: the client reads what it can, and an
+            // absent file simply means "no contingency data" (0.6.31).
+            stem + '_DF_contingency.csv',
             stem + '_network_info.txt',
           ],
         }
