@@ -796,6 +796,7 @@ module.exports = {
       Basecase_branch_flow_flag_color: 'green',
       Contingency_branch_flow_flag_percent: 100.0,
       Contingency_branch_flow_flag_color: 'blue',
+      Show_birdseye_view: true,
     }
     const DRAWIO_COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\([^)]*\)|hsla?\([^)]*\))$/i
     // The seven keys the dialog edits, in the order the file carries them, with the label the
@@ -809,6 +810,7 @@ module.exports = {
       { key: 'Basecase_branch_flow_flag_color', label: 'Base-case branch colour', kind: 'color' },
       { key: 'Contingency_branch_flow_flag_percent', label: 'Contingency branch flow flag (%)', kind: 'number', min: 0, max: 1000, step: 1 },
       { key: 'Contingency_branch_flow_flag_color', label: 'Contingency branch colour', kind: 'color' },
+      { key: 'Show_birdseye_view', label: 'Show the birdseye view', kind: 'boolean' },
     ]
 
     // Server values pasted over the defaults, with every unknown key kept: the file is hand-editable
@@ -822,6 +824,11 @@ module.exports = {
         if (field.kind === 'number') {
           const n = Number(value)
           out[field.key] = Number.isFinite(n) ? Math.min(field.max, Math.max(field.min, n)) : DRAWIO_NET_DEFAULTS[field.key]
+        } else if (field.kind === 'boolean') {
+          // A switch is on unless it was explicitly turned off: `false`, or the word, from a hand edit.
+          const off = value === false || value === 0 || String(value).trim().toLowerCase() === 'false'
+          const on = value === true || value === 1 || String(value).trim().toLowerCase() === 'true'
+          out[field.key] = off ? false : (on ? true : DRAWIO_NET_DEFAULTS[field.key])
         } else {
           const text = typeof value === 'string' ? value.trim() : ''
           out[field.key] = DRAWIO_COLOR_RE.test(text) ? text : DRAWIO_NET_DEFAULTS[field.key]
@@ -856,6 +863,9 @@ module.exports = {
           } else if (n < field.min || n > field.max) {
             out[field.key] = 'must be between ' + field.min + ' and ' + field.max
           }
+        } else if (field.kind === 'boolean') {
+          // a switch is never wrong: it is on, or it is off
+          continue
         } else {
           const text = typeof value === 'string' ? value.trim() : ''
           if (text === '') out[field.key] = 'a colour is required'
@@ -1342,6 +1352,109 @@ module.exports = {
       { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
       React.createElement('path', { d: 'M1.6 2.2 H14.4 L9.4 8.2 V13.4 L6.6 12 V8.2 Z', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinejoin: 'round' }),
     )
+
+    // --- the birdseye view (0.6.28) ------------------------------------------
+    // A whole-diagram thumbnail in the corner of the canvas, with the visible rectangle drawn on
+    // it: at 200% on a 2000-bus drawing there is otherwise nothing to say where you are. It is NOT
+    // a second DrawioDiagram -- that would double the DOM for 10k cells -- but two `<path>` strings,
+    // one for every branch and one for every bar, which the browser paints as a single shape each.
+    // The viewport frame is a real element on top, so the panning stays smooth.
+    const DRAWIO_BIRDSEYE_MAX_ITEMS = 30000
+
+    function drawioBirdseyePaths(scene) {
+      const out = { bars: '', edges: '' }
+      if (scene === null || scene === undefined) return out
+      const bars = []
+      const step = scene.nodes !== undefined && scene.nodes.length > DRAWIO_BIRDSEYE_MAX_ITEMS
+        ? Math.ceil(scene.nodes.length / DRAWIO_BIRDSEYE_MAX_ITEMS) : 1
+      for (let i = 0; i < (scene.nodes || []).length; i += step) {
+        const n = scene.nodes[i]
+        if (!drawioIsBusId(n.id) || n.kind !== 'rect') continue
+        // every bar as its own subpath: `M x y h w v h h -w z`
+        bars.push('M' + n.x + ' ' + n.y + 'h' + n.w + 'v' + n.h + 'h' + -n.w + 'z')
+      }
+      const edges = []
+      const estep = (scene.edges || []).length > DRAWIO_BIRDSEYE_MAX_ITEMS
+        ? Math.ceil(scene.edges.length / DRAWIO_BIRDSEYE_MAX_ITEMS) : 1
+      for (let i = 0; i < (scene.edges || []).length; i += estep) {
+        const pts = scene.edges[i].points || []
+        if (pts.length < 2) continue
+        let d = 'M' + pts[0].x + ' ' + pts[0].y
+        for (let k = 1; k < pts.length; k += 1) d += 'L' + pts[k].x + ' ' + pts[k].y
+        edges.push(d)
+      }
+      out.bars = bars.join('')
+      out.edges = edges.join('')
+      return out
+    }
+
+    // Where the canvas should look when a point at fractions (fx, fy) of the birdseye is clicked or
+    // dragged: the same size window, centred there, and held inside the drawing so a click on the
+    // thumbnail always lands on the diagram rather than on empty paper.
+    function drawioBirdseyeRect(scene, rect, fx, fy) {
+      if (scene === null || scene === undefined || rect === null || rect === undefined) return rect
+      const vb = scene.viewBox
+      const x = Number.isFinite(fx) ? Math.min(1, Math.max(0, fx)) : 0.5
+      const y = Number.isFinite(fy) ? Math.min(1, Math.max(0, fy)) : 0.5
+      const w = Math.min(rect.w, vb.w)
+      const h = Math.min(rect.h, vb.h)
+      const cx = vb.x + vb.w * x
+      const cy = vb.y + vb.h * y
+      const minX = vb.x
+      const maxX = vb.x + vb.w - w
+      const minY = vb.y
+      const maxY = vb.y + vb.h - h
+      return {
+        x: maxX <= minX ? minX : Math.min(maxX, Math.max(minX, cx - w / 2)),
+        y: maxY <= minY ? minY : Math.min(maxY, Math.max(minY, cy - h / 2)),
+        w: w,
+        h: h,
+      }
+    }
+
+    // The thumbnail. Pointer events are captured here and never bubble: they must not also pan the
+    // canvas underneath, which is why every handler stops propagation.
+    function DrawioBirdseye(props) {
+      const scene = props.scene
+      const rect = props.rect
+      const [grab, setGrab] = React.useState(false)
+      const box = { position: 'absolute', right: '10px', bottom: '10px', width: '190px', height: '150px',
+        background: DRAWIO_PAPER, border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '6px',
+        overflow: 'hidden', boxShadow: '0 2px 10px rgba(0, 0, 0, 0.25)', opacity: 0.94, cursor: 'crosshair' }
+      return React.createElement('svg', {
+        viewBox: scene.viewBox.x + ' ' + scene.viewBox.y + ' ' + scene.viewBox.w + ' ' + scene.viewBox.h,
+        preserveAspectRatio: 'xMidYMid meet',
+        role: 'img',
+        'aria-label': 'Birdseye view of the whole diagram',
+        title: 'Birdseye view — click or drag to move the view',
+        style: box,
+        onPointerDown: (e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          setGrab(true)
+          if (typeof e.currentTarget.setPointerCapture === 'function') {
+            try { e.currentTarget.setPointerCapture(e.pointerId) } catch (err) {}
+          }
+          props.onCentre(e)
+        },
+        onPointerMove: (e) => {
+          e.stopPropagation()
+          if (grab) props.onCentre(e)
+        },
+        onPointerUp: (e) => { e.stopPropagation(); setGrab(false) },
+        onPointerCancel: (e) => { e.stopPropagation(); setGrab(false) },
+        onPointerLeave: (e) => { e.stopPropagation(); if (grab) setGrab(false) },
+      },
+        React.createElement('path', { key: 'e', d: props.paths.edges, fill: 'none', stroke: DRAWIO_INK, strokeWidth: 1, vectorEffect: 'non-scaling-stroke', opacity: 0.45 }),
+        React.createElement('path', { key: 'b', d: props.paths.bars, fill: DRAWIO_INK, opacity: 0.7 }),
+        React.createElement('rect', {
+          key: 'v',
+          x: rect.x, y: rect.y, width: rect.w, height: rect.h,
+          fill: DRAWIO_MATCH_FILL, fillOpacity: 0.18, stroke: DRAWIO_MATCH_FILL,
+          strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke',
+        }),
+      )
+    }
 
     // mxGraphModel -> a flat, React-free scene description: { viewBox, nodes, edges }.
     // Geometry is resolved to absolute coordinates so grouped cells (style=group, whose
@@ -3897,6 +4010,30 @@ module.exports = {
         ? null : drawioFlagPaint(scene.nodes, scene.edges, netConfig, busAlerts, branchLoads, conLoads)
       const paintMap = drawioMergedPaint(flagPaint, searchHits, DRAWIO_MATCH_FILL)
       // The status line's counts, per family, with the thresholds the config set.
+      // Built once per scene (not per zoom): two path strings for the whole drawing, or null when
+      // there is nothing to show.
+      const birdseyePaths = scene === null ? null : drawioBirdseyePaths(scene)
+      // A click or drag on the thumbnail puts the same-size window where it landed, held inside the
+      // drawing.
+      function centreFromBirdseye(e) {
+        if (scene === null || birdseyePaths === null) return
+        const el = e && e.currentTarget !== undefined && e.currentTarget !== null ? e.currentTarget : null
+        if (el === null || typeof el.getBoundingClientRect !== 'function') return
+        const box = el.getBoundingClientRect()
+        if (box.width <= 0 || box.height <= 0) return
+        const vb = scene.viewBox
+        // The svg meets the scene into its box, so the drawn area is inset when the aspects differ:
+        // measure the scene's own edges by where the viewBox corners land.
+        const scale = Math.min(box.width / vb.w, box.height / vb.h)
+        const drawW = vb.w * scale
+        const drawH = vb.h * scale
+        const left = box.left + (box.width - drawW) / 2
+        const top = box.top + (box.height - drawH) / 2
+        const fx = (e.clientX - left) / (drawW || 1)
+        const fy = (e.clientY - top) / (drawH || 1)
+        setRect(drawioBirdseyeRect(scene, currentRect(), fx, fy))
+      }
+
       const flagCounts = (function () {
         const buses = busAlerts === null ? 0 : Object.keys(busAlerts).length
         const base = branchLoads === null ? 0 : Object.keys(branchLoads).length
@@ -3969,7 +4106,17 @@ module.exports = {
               title: value,
               style: { width: '14px', height: '14px', borderRadius: '3px', background: value === '' ? 'transparent' : value, border: '1px solid var(--dsw-alias-border-l1)' },
             }))
-          : input
+          : field.kind === 'boolean'
+            // A switch is a checkbox, not a text box: `true`/`false` typed by hand is a config-file
+            // job, and the sanitizer accepts both spellings for anyone who does it there.
+            ? React.createElement('input', {
+              type: 'checkbox',
+              checked: raw === true || String(raw).trim().toLowerCase() === 'true',
+              'aria-label': field.label,
+              onChange: (e) => setCfgForm(Object.assign({}, cfgForm, { [field.key]: e.target.checked })),
+              style: { width: '16px', height: '16px', margin: 0, cursor: 'pointer' },
+            })
+            : input
         return React.createElement('div', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '2px' } },
           fieldRow(field.label, control),
           bad ? React.createElement('div', { style: { fontSize: '10px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
@@ -3980,7 +4127,8 @@ module.exports = {
       const dialogEl = dialog === 'config'
         ? dialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
           cfgSection('Bus flags', DRAWIO_NET_FIELDS.slice(0, 3)),
-          cfgSection('Branch flow flags', DRAWIO_NET_FIELDS.slice(3)),
+          cfgSection('Branch flow flags', DRAWIO_NET_FIELDS.slice(3, 7)),
+          cfgSection('View', DRAWIO_NET_FIELDS.slice(7)),
           React.createElement('div', { style: hintStyle },
             'Writes ' + netConfigPath + ' \u2014 one flag style for every case. Flags are a preview: the .drawio keeps no colour.'),
           netConfigWarning !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigWarning) : null,
@@ -4154,7 +4302,8 @@ module.exports = {
                         onPointerUp: pointerUp,
                         onPointerCancel: pointerUp,
                         onPointerLeave: pointerUp,
-                        style: { height: '70vh', minHeight: '320px', overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' },
+                        // `position: relative` so the birdseye can sit in the corner of the canvas.
+                        style: { position: 'relative', height: '70vh', minHeight: '320px', overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' },
                       }, React.createElement(DrawioDiagram, {
                         scene: scene,
                         view: rect,
@@ -4169,7 +4318,14 @@ module.exports = {
                           onMove: moveTip,
                           onLeave: hideTip,
                         },
-                      }))
+                      }), netConfig.Show_birdseye_view !== false ? React.createElement(DrawioBirdseye, {
+                        // The whole drawing, with the visible rectangle on it. Its pointer events
+                        // are stopped inside, so dragging the thumbnail never pans the canvas too.
+                        scene: scene,
+                        rect: currentRect(),
+                        paths: birdseyePaths,
+                        onCentre: centreFromBirdseye,
+                      }) : null)
                       : null
 
       const tipEl = tip ? React.createElement('div', {

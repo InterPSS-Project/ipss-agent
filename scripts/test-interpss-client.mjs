@@ -117,6 +117,8 @@ function build(overrides) {
       + ' drawioNetConfig: drawioNetConfig, drawioNetConfigErrors: drawioNetConfigErrors,'
       + ' drawioBranchFlagPairs: drawioBranchFlagPairs, drawioContingencyFlagPairs: drawioContingencyFlagPairs,'
       + ' drawioBandText: drawioBandText,'
+      + ' drawioBirdseyePaths: drawioBirdseyePaths, drawioBirdseyeRect: drawioBirdseyeRect,'
+      + ' DrawioBirdseye: DrawioBirdseye,'
       + ' drawioColIndex: drawioColIndex, drawioFlagPaint: drawioFlagPaint,'
       + ' drawioMergedPaint: drawioMergedPaint,'
       + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
@@ -1182,6 +1184,12 @@ check('the config dialog shows every option, OK and Cancel, and the file it writ
   && cfgFlat.indexOf('config/net_diagram.json') > 0 && cfgFlat.indexOf('Bus flags') > 0
   && cfgFlat.indexOf('Branch flow flags') > 0,
   cfgInputs.filter((i) => i === null).length + ' missing fields');
+const cfgCheckbox = findInTree(cfgDialog, (n) => n.type === 'input' && n.props.type === 'checkbox'
+  && String(n.props['aria-label'] || '') === 'Show the birdseye view');
+check('the configuration switch renders as a checkbox, checked by default',
+  cfgCheckbox !== null && cfgCheckbox.props.checked === true
+  && flatTree(cfgDialog).indexOf('View') > 0,
+  cfgCheckbox === null ? 'no checkbox' : String(cfgCheckbox.props.checked));
 check('the config dialog starts at the configured values, and OK / Cancel are wired',
   cfgInputs[0] !== null && String(cfgInputs[0].props.value) === '1.1'
   && String(cfgInputs[2].props.value) === 'red'
@@ -1219,6 +1227,61 @@ const noFlagsTab = renderFlat(withState([
 ]));
 check('with nothing flagged there is no summary line at all',
   noFlagsTab.indexOf('flags:') < 0);
+
+// 0.6.28: the birdseye. It rides on the canvas (which is now a positioning context) and carries the
+// whole drawing as TWO paths plus the viewport frame -- not a second DrawioDiagram, which would
+// double the DOM of a 10k-cell scene.
+const birdseye = api.DrawioBirdseye({ scene: scene, rect: api.drawioFitRect(scene.viewBox),
+  paths: api.drawioBirdseyePaths(scene), onCentre: () => {} });
+const birdseyeRect = birdseye === null ? null : (birdseye.kids || []).filter((k) => k.type === 'rect')[0];
+const birdseyePaths = birdseye === null ? [] : (birdseye.kids || []).filter((k) => k.type === 'path');
+check('the canvas carries a birdseye with the whole scene and the visible rectangle',
+  birdseye !== null && birdseyePaths.length === 2
+  && birdseye.props.viewBox === scene.viewBox.x + ' ' + scene.viewBox.y + ' ' + scene.viewBox.w + ' ' + scene.viewBox.h
+  && birdseyeRect !== undefined && birdseyeRect.props.width === scene.viewBox.w && birdseyeRect.props.height === scene.viewBox.h,
+  birdseye === null ? 'no birdseye' : String(birdseye.props.viewBox));
+check('the birdseye sits inside the canvas, which is a positioning context',
+  String(birdseye.props.style.position) === 'absolute'
+  && slice.indexOf("position: 'relative', height: '70vh'") >= 0
+  // and the canvas renders it with the scene, the current window and the prebuilt paths
+  && slice.indexOf('React.createElement(DrawioBirdseye, {') >= 0
+  && slice.indexOf('paths: birdseyePaths') >= 0 && slice.indexOf('rect: currentRect()') >= 0,
+  String(birdseye.props.style.position));
+check('the birdseye is absent when there is no diagram, and its pointer events never pan the canvas',
+  idle.indexOf('Birdseye view') < 0
+  && slice.indexOf('onCentre: centreFromBirdseye') >= 0
+  && slice.indexOf('setRect(drawioBirdseyeRect(scene, currentRect(), fx, fy))') >= 0
+  && slice.indexOf('e.stopPropagation()') >= 0);
+if (birdseye !== null) {
+  const fake = {
+    stopPropagation: () => {}, preventDefault: () => {}, pointerId: 1, clientX: 120, clientY: 90,
+    currentTarget: { setPointerCapture: () => {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 190, height: 150 }) },
+  };
+  check('clicking and dragging the birdseye is wired and does not throw',
+    (function () {
+      try {
+        birdseye.props.onPointerDown(fake);
+        birdseye.props.onPointerMove(fake);
+        birdseye.props.onPointerUp(fake);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    })());
+}
+
+// 0.6.29: the switch. With the setting off the canvas carries no thumbnail at all.
+const noBirdseye = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['netConfig', api.drawioNetConfig({ Show_birdseye_view: false })],
+]));
+check('turning the birdseye off leaves the canvas without it',
+  noBirdseye.indexOf('Birdseye view') < 0 && noBirdseye.indexOf('THREW') < 0);
+check('the switch gates the overlay in the source, not by hiding it with css',
+  slice.indexOf('netConfig.Show_birdseye_view !== false ? React.createElement(DrawioBirdseye, {') >= 0);
 
 if (editButton !== null) {
   editButton.props.onClick();
@@ -1750,15 +1813,15 @@ console.log('\n17. one-line diagram config (config/net_diagram.json)');
 // "the dialog saved it but the drawing looks different".
 const shippedCfg = JSON.parse(readFileSync(join(ROOT, 'config', 'net_diagram.json'), 'utf8'));
 const cfgKeys = api.DRAWIO_NET_FIELDS.map((f) => f.key);
-check('the shipped config carries exactly the seven editable keys',
+check('the shipped config carries exactly the editable keys',
   cfgKeys.every((k) => Object.prototype.hasOwnProperty.call(shippedCfg, k))
   && Object.keys(shippedCfg).length === cfgKeys.length,
   Object.keys(shippedCfg).join(','));
 // The file is the user's to tune (`config/net_diagram.json` is a live, hand-editable setting), so
 // this asserts what must hold rather than equality: the code's fallback carries the same seven keys
 // as the file, and the file as written is already valid -- the sanitizer leaves it untouched.
-check('the fallback defaults carry the same seven keys as the file',
-  cfgKeys.length === 7 && JSON.stringify(Object.keys(api.DRAWIO_NET_DEFAULTS).sort()) === JSON.stringify(cfgKeys.slice().sort()),
+check('the fallback defaults carry the same keys as the file',
+  cfgKeys.length === 8 && JSON.stringify(Object.keys(api.DRAWIO_NET_DEFAULTS).sort()) === JSON.stringify(cfgKeys.slice().sort()),
   Object.keys(api.DRAWIO_NET_DEFAULTS).join(','));
 check('the shipped config is valid as written: the sanitizer changes nothing',
   JSON.stringify(api.drawioNetConfig(shippedCfg)) === JSON.stringify(shippedCfg)
@@ -1787,6 +1850,15 @@ check('an inverted bus band falls back rather than painting nonsense',
     const c = api.drawioNetConfig({ Bus_flag_lower_limit: 1.2, Bus_flag_upper_limit: 0.8 });
     return c.Bus_flag_lower_limit === 0.9 && c.Bus_flag_upper_limit === 1.1;
   })());
+check('the birdseye switch is on unless it was turned off, and the file\'s spelling counts',
+  api.drawioNetConfig(null).Show_birdseye_view === true
+  && api.drawioNetConfig({ Show_birdseye_view: false }).Show_birdseye_view === false
+  && api.drawioNetConfig({ Show_birdseye_view: 'false' }).Show_birdseye_view === false
+  && api.drawioNetConfig({ Show_birdseye_view: 0 }).Show_birdseye_view === false
+  && api.drawioNetConfig({ Show_birdseye_view: 'true' }).Show_birdseye_view === true
+  && api.drawioNetConfig({ Show_birdseye_view: 'yes' }).Show_birdseye_view === true);
+check('a switch is never a validation error, whatever the form holds',
+  api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Show_birdseye_view: false })).Show_birdseye_view === undefined);
 check('unknown keys survive a round trip, so hand edits are not destroyed',
   api.drawioNetConfig({ something_else: 7 }).something_else === 7);
 check('the sanitizer bounds numbers and rejects unusable colours',
@@ -1851,6 +1923,55 @@ check('the search colour goes over the flags, because a search is the deliberate
     return merged.bus5 === '#1F6FEB' && merged.nm5 === 'red' && merged.e1 === '#1F6FEB'
       && api.drawioMergedPaint(null, null, '#1F6FEB') === null;
   })());
+
+// --- 18. the birdseye view --------------------------------------------------
+console.log('\n18. birdseye view (0.6.28)');
+const birdPaths = api.drawioBirdseyePaths(scene);
+const subpaths = (d) => (String(d).match(/M/g) || []).length;
+check('the birdseye carries one subpath per bar and per branch, as two paths',
+  subpaths(birdPaths.bars) === scene.nodes.filter((n) => api.drawioIsBusId(n.id) && n.kind === 'rect').length
+  && subpaths(birdPaths.edges) === scene.edges.length,
+  subpaths(birdPaths.bars) + ' bars / ' + subpaths(birdPaths.edges) + ' edges');
+check('every bar subpath is a closed rectangle at the bar itself',
+  birdPaths.bars.indexOf('M') === 0 && (birdPaths.bars.match(/z/g) || []).length === subpaths(birdPaths.bars));
+check('the branch paths follow their polylines, so a hop shows in the thumbnail too',
+  (function () {
+    const withHop = scene.edges.filter((e) => e.points.length > 2)[0];
+    if (withHop === undefined) return true;
+    return birdPaths.edges.split('M').some((seg) => (seg.match(/L/g) || []).length === withHop.points.length - 1);
+  })());
+check('an empty or missing scene gives empty paths rather than a throw',
+  api.drawioBirdseyePaths(null).bars === '' && api.drawioBirdseyePaths(null).edges === ''
+  && api.drawioBirdseyePaths({ nodes: [], edges: [] }).bars === '');
+
+// Where a click lands: the same-size window, centred, and held inside the drawing.
+const fit = api.drawioFitRect(scene.viewBox);
+const half = { x: fit.x, y: fit.y, w: fit.w / 2, h: fit.h / 2 };
+check('a click at the middle centres the window on the middle of the drawing',
+  (function () {
+    const r = api.drawioBirdseyeRect(scene, half, 0.5, 0.5);
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    return Math.abs(cx - (fit.x + fit.w / 2)) < 0.001 && Math.abs(cy - (fit.y + fit.h / 2)) < 0.001
+      && r.w === half.w && r.h === half.h;
+  })());
+check('a click in a corner is held inside the drawing instead of showing empty paper',
+  (function () {
+    const tl = api.drawioBirdseyeRect(scene, half, 0, 0);
+    const br = api.drawioBirdseyeRect(scene, half, 1, 1);
+    return tl.x === fit.x && tl.y === fit.y
+      && br.x + br.w <= fit.x + fit.w + 0.001 && br.y + br.h <= fit.y + fit.h + 0.001;
+  })());
+check('a window as large as the drawing cannot be moved, and fraction drift is clamped',
+  (function () {
+    const whole = api.drawioBirdseyeRect(scene, fit, 0.9, 0.9);
+    const wild = api.drawioBirdseyeRect(scene, half, 5, -5);
+    // fx clamps to 1 (the right edge), fy to 0 (the top)
+    return whole.x === fit.x && whole.y === fit.y && whole.w === fit.w
+      && wild.x === fit.x + fit.w - half.w && wild.y === fit.y;
+  })());
+check('a missing scene or rect passes through unchanged',
+  api.drawioBirdseyeRect(null, half, 0.5, 0.5) === half && api.drawioBirdseyeRect(scene, null, 0.5, 0.5) === null);
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

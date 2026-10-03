@@ -666,6 +666,7 @@ const DEFAULT_NET_DIAGRAM_CONFIG = {
   Basecase_branch_flow_flag_color: 'green',
   Contingency_branch_flow_flag_percent: 100.0,
   Contingency_branch_flow_flag_color: 'blue',
+  Show_birdseye_view: true,
 }
 
 const NET_DIAGRAM_COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\([^)]*\)|hsla?\([^)]*\))$/i
@@ -695,6 +696,12 @@ function sanitizeNetDiagramConfig(raw) {
   color('Basecase_branch_flow_flag_color', defaults.Basecase_branch_flow_flag_color)
   num('Contingency_branch_flow_flag_percent', defaults.Contingency_branch_flow_flag_percent, 0.0, 1000.0)
   color('Contingency_branch_flow_flag_color', defaults.Contingency_branch_flow_flag_color)
+  // The one switch: on unless it was explicitly turned off (the word counts, for a hand edit).
+  const bird = out.Show_birdseye_view
+  out.Show_birdseye_view = (bird === false || bird === 0 || String(bird).trim().toLowerCase() === 'false')
+    ? false
+    : ((bird === true || bird === 1 || String(bird).trim().toLowerCase() === 'true')
+      ? true : defaults.Show_birdseye_view)
   return out
 }
 

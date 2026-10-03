@@ -549,7 +549,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 263 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 280 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -619,6 +619,13 @@ mechanism caught the 0.6.0 modal defect as
   bus still on the theme tokens, red surviving `drawioThemeColor`), and — the constraint the whole
   design exists for — that the **parsed scene is unchanged** after an alerted render and that no
   write RPC exists anywhere in the diagram path.
+- §18 (since 0.6.28) covers the **birdseye**: one subpath per bar and per branch (every bar closed,
+  branch polylines followed so a hop shows in the thumbnail), an empty scene yielding empty paths, and
+  the geometry — a middle click centring the window, a corner click held inside the drawing, a window
+  as large as the drawing being immovable, out-of-range fractions clamped, and a missing scene or rect
+  passing through untouched. §12 renders the thumbnail and asserts it carries the whole scene and the
+  viewport frame, that it is absolutely positioned inside a `relative` canvas, and that its pointer
+  handlers do not throw.
 - §16 (since 0.6.23; the draft-preview rule since 0.6.24) covers **diagram search and filter**: that
   every edge resolves to a bus pair
   through its transformer group's sibling ring (0 of 25 unresolved on the reference scene, and each
@@ -739,8 +746,20 @@ Client-half change is served with the plugin bundle, so the reload is what picks
       applied, and the status text (`filter: area 5`, `3 buses ✕`) clears the search and the filter.
     - Both are paint-time overrides of the same kind as the voltage alert: `hidden` skips a cell,
       `paint` recolours one, and the `.drawio`, the parsed scene and the desktop app see neither.
+  - **The birdseye view (0.6.28)** is a thumbnail of the whole drawing in the canvas's bottom-right
+    corner, with the visible rectangle drawn on it — at 200 % on a 2000-bus drawing there is otherwise
+    nothing to say where you are. It is deliberately **not** a second `DrawioDiagram` (that would
+    double the DOM of a 10k-cell scene): `drawioBirdseyePaths` flattens the scene into **two** `<path>`
+    strings, one for every branch and one for every bar, which the browser paints as one shape each
+    (measured on the 2000-bus Texas 2K scene: 2 ms, 180 KB of path data, 2 DOM elements). The
+    viewport frame is a real `rect` on top, `vectorEffect="non-scaling-stroke"` keeps every line
+    visible at thumbnail scale, and clicking or dragging the thumbnail moves the view
+    (`drawioBirdseyeRect` centres the same-size window and holds it inside the drawing). The
+    thumbnail captures its own pointer events and stops them, so dragging it never pans the canvas
+    underneath.
   - **The gear, and `config/net_diagram.json` (0.6.26)**. A gear button beside the draw.io button
-    opens a dialog for the diagram's **flag thresholds and colours**, read and written through
+    opens a dialog for the diagram's **flag thresholds and colours** (and, since 0.6.29, the **birdseye
+    switch**), read and written through
     `getNetDiagramOptions` / `saveNetDiagramOptions` (Host, workspace-level file). Three families
     are painted from the case's own tables, keyed by cell id in one map that the renderer applies
     (`paint`):
@@ -748,6 +767,9 @@ Client-half change is served with the plugin bundle, so the reload is what picks
       `Bus_flag_color` (`red` by default), on the bar *and* its `Bus-N` label text;
     - **base-case branch flags** — pairs whose highest `Loading%` reaches
       `Basecase_branch_flow_flag_percent` (`green` by default);
+    - **the birdseye switch** (`Show_birdseye_view`, a checkbox in the dialog's *View* group) turns the
+      thumbnail off and on; it is on unless it was explicitly turned off, and the canvas simply does not
+      render the overlay rather than hiding it with CSS;
     - **contingency branch flags** — pairs whose worst `LoadingPercent` in the CA result table
       reaches `Contingency_branch_flow_flag_percent` (`blue` by default), and a contingency flag
       outranks a base-case one on the same branch.
