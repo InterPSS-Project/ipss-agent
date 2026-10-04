@@ -987,8 +987,11 @@ check('the edit button sits in the tab\'s top row, right-aligned (the upper-righ
 check('the button no longer needs the retired sticky-strip workaround',
   styleOf(editButton).position === undefined && styleOf(editButton).pointerEvents === undefined
   && slice.slice(slice.indexOf('function DiagramView(')).indexOf("position: 'sticky'") < 0);
+// 0.6.34 removed the `R` / `S` view toggle, so the row is located by a control that remains:
+// the Search button. (It used to key on the button labelled `R`.)
 const toolbarRow = findInTree(editTree, (n) => n.type === 'div' && Array.isArray(n.kids)
-  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button' && (k.kids || []).indexOf('R') >= 0));
+  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button'
+    && String(k.props.title || '') === 'Search the diagram'));
 check('the toolbar row ends at the filter button, with no draw.io and no separate Fit button',
   toolbarRow !== null
   // the EDIT button's own title — the bare word `draw.io` now also appears in the Source tooltip
@@ -1004,23 +1007,20 @@ check('the toolbar row ends at the filter button, with no draw.io and no separat
     return last !== undefined && String(last.props.title) === 'Filter the diagram';
   })());
 
-// Asked for in 0.6.17: the view toggle is `R` / `S`. The letters only work because the tooltip
-// and the accessible name still say the words, so assert both halves of that bargain — a bare
-// letter with no label would be a UI regression even though the pixels look right.
-const viewButton = (letter) => findInTree(toolbarRow, (n) => n.type === 'button'
-  && (n.kids || []).indexOf(letter) >= 0 && String(n.props.title || '').indexOf('view') >= 0);
-const renderedBtn = toolbarRow === null ? null : viewButton('R');
-const sourceBtn = toolbarRow === null ? null : viewButton('S');
-check('the view toggle is the single letters R and S',
-  renderedBtn !== null && sourceBtn !== null
-  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Rendered') >= 0) === null
-  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Source') >= 0) === null,
-  renderedBtn === null ? 'no R' : String(renderedBtn.props.title));
-check('each letter keeps its meaning in the tooltip and the accessible name',
-  renderedBtn !== null && renderedBtn.props.title === 'Rendered view' && renderedBtn.props['aria-label'] === 'Rendered view'
-  && sourceBtn !== null && String(sourceBtn.props['aria-label']).indexOf('Source view') >= 0
-  && String(sourceBtn.props.title).indexOf('draw.io XML') >= 0,
-  sourceBtn === null ? 'no S' : String(sourceBtn.props.title));
+// 0.6.34: the `R` / `S` view toggle is gone — the tab always draws the rendered scene — so the
+// row must open with the zoom pair and carry no view control of any spelling. The `Rendered` /
+// `Source` buttons in the *report* view of the InterPSS tab are a different surface and stay.
+const toolbarButtons = toolbarRow === null ? [] : (toolbarRow.kids || [])
+  .filter((k) => k !== null && k !== undefined && k.type === 'button');
+const firstToolbarLabel = toolbarButtons.length === 0 ? null : (toolbarButtons[0].kids || [])[0];
+check('the toolbar carries no view toggle, and starts at the zoom-out control',
+  toolbarRow !== null && firstToolbarLabel === '\u2212'
+  && ['R', 'S', 'Rendered', 'Source'].every((letter) => findInTree(toolbarRow,
+    (n) => n.type === 'button' && (n.kids || []).indexOf(letter) >= 0) === null)
+  && slice.indexOf("const [view, setView]") < 0
+  && slice.indexOf("setView(") < 0
+  && slice.indexOf("view === 'source'") < 0,
+  toolbarRow === null ? 'no toolbar' : String(firstToolbarLabel));
 
 // 0.6.21, the zoom picker, checked structurally: it is a `select` in the toolbar row, it sits
 // exactly between the two step buttons, and its handler exists (the harness's setState is a
@@ -1386,15 +1386,18 @@ if (scene) {
     && typeof found[0].props.hover.onBranch === 'function',
     found.length === 1 ? 'view=' + String(found[0].props.view) : '');
 }
-const sourceTab = renderFlat(withState([
+// 0.6.34: there is no Source view to reach any more. The same file must render, and the raw XML
+// must not be dumped anywhere in the tab.
+const noSourceTab = renderFlat(withState([
   ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
   ['files', tabFiles(1)],
   ['filesLoading', false],
   ['path', 'wspace/data/c/diagram/d0.drawio'],
-  ['view', 'source'],
   ['xml', '<mxfile><diagram/></mxfile>'],
 ]));
-check('the Source view shows the raw file', sourceTab.indexOf('<mxfile><diagram/></mxfile>') >= 0, sourceTab.slice(0, 90));
+check('the raw file is never shown: the tab always renders', 
+  noSourceTab.indexOf('<mxfile><diagram/></mxfile>') < 0 && noSourceTab.indexOf('THREW') < 0,
+  noSourceTab.slice(0, 60));
 // The modal that used to live in InterPssView is gone, so `readDrawio` must have exactly
 // one caller left. A second one would mean a preview surface grew back beside this tab.
 check('the preview has exactly one entry point left, and it is this view',

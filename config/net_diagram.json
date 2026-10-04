@@ -6,5 +6,5 @@
   "Basecase_branch_flow_flag_color": "yellow",
   "Contingency_branch_flow_flag_percent": 90,
   "Contingency_branch_flow_flag_color": "Red",
-  "Show_birdseye_view": false
+  "Show_birdseye_view": true
 }

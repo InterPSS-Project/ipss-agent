@@ -3534,7 +3534,6 @@ module.exports = {
       const [scene, setScene] = React.useState(null)
       const [loading, setLoading] = React.useState(false)
       const [error, setError] = React.useState(null)
-      const [view, setView] = React.useState('rendered')
       const [resultDir, setResultDir] = React.useState(null)
       const [branchFile, setBranchFile] = React.useState(null)
       const [busFile, setBusFile] = React.useState(null)
@@ -3813,7 +3812,6 @@ module.exports = {
         setXml('')
         setScene(null)
         setError(null)
-        setView('rendered')
         setRect(null)
         setEditMsg(null)
         setLoading(true)
@@ -4425,17 +4423,14 @@ module.exports = {
       const toolbar = (path !== '' || picker !== null)
         ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
           picker,
-          // `R` / `S` rather than `Rendered` / `Source` (0.6.17): this row is the drawing's
-          // controls, and the two words took a third of it for the two most obvious buttons. The
-          // tooltip and the accessible name carry the meaning the label no longer spells out.
-          path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), title: 'Rendered view', 'aria-label': 'Rendered view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'R') : null,
-          path !== '' ? React.createElement('button', { onClick: () => setView('source'), title: 'Source view — the raw draw.io XML', 'aria-label': 'Source view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'S') : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
+          // The row is the drawing's controls. The `R` / `S` view toggle that used to lead it is
+          // gone (0.6.34): the tab always draws the rendered scene, so the zoom pair starts here.
+          path !== '' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
           // The readout is the zoom picker (0.6.21): it shows the current level and sets it, and
           // since 0.6.22 it carries **Fit** as its last entry, so the row is `−`, the picker, `+`
           // and nothing else. A level reached with the wheel or a pinch is listed alongside the
           // presets, so going to 100% and back to the old 745% is one click either way.
-          path !== '' && view === 'rendered' && scene !== null
+          path !== '' && scene !== null
             ? (function () {
               const pctNow = drawioZoomPercent(scene, rect)
               const fitted = rect === null
@@ -4456,24 +4451,24 @@ module.exports = {
               }, options)
             })()
             : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
+          path !== '' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
           // Search and filter (0.6.23): two icon buttons after the zoom controls. Each opens a
           // dialog whose OK applies and whose Cancel throws the draft away. The filter button stays
           // lit while a filter is applied, and the status text clears both (a span, not a button --
           // the row's controls are the ones the mock specifies).
-          path !== '' && view === 'rendered' && scene !== null
+          path !== '' && scene !== null
             ? React.createElement('button', {
               onClick: openSearch, title: 'Search the diagram', 'aria-label': 'Search the diagram',
               style: { ...btn, padding: '4px 8px', display: 'flex', alignItems: 'center' },
             }, drawioSearchIcon)
             : null,
-          path !== '' && view === 'rendered' && scene !== null
+          path !== '' && scene !== null
             ? React.createElement('button', {
               onClick: openFilter, title: 'Filter the diagram', 'aria-label': 'Filter the diagram',
               style: { ...btn, padding: '4px 8px', display: 'flex', alignItems: 'center', borderColor: filterApplied === null ? 'var(--dsw-alias-border-l1)' : 'var(--dsw-alias-brand-primary)' },
             }, drawioFilterIcon)
             : null,
-          path !== '' && view === 'rendered' && scene !== null && statusText !== null
+          path !== '' && scene !== null && statusText !== null
             ? React.createElement('span', {
               onClick: clearSearchFilter,
               title: 'Clear the search and the filter',
@@ -4482,7 +4477,7 @@ module.exports = {
             : null,
           // The flag counts, tinted by the config's own colours and clickable to open the gear --
           // so what the thresholds are doing is visible without opening the dialog.
-          path !== '' && view === 'rendered' && scene !== null && flagCounts !== null
+          path !== '' && scene !== null && flagCounts !== null
             ? React.createElement('span', {
               onClick: openConfig,
               title: 'Flagged by config/net_diagram.json \u2014 click to change the thresholds',
@@ -4508,8 +4503,6 @@ module.exports = {
                 ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading diagram…')
                 : error !== null
                   ? React.createElement('pre', { style: { ...mono, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, error)
-                  : view === 'source'
-                    ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, xml || '')
                     : scene !== null
                       ? React.createElement('div', {
                         ref: canvasRef,

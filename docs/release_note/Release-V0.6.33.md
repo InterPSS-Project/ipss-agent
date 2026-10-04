@@ -44,7 +44,7 @@ preview fidelity that matches draw.io’s geometry and label styles.
 
 ## UI / plugin
 
-- Toolbar shape (late 0.6.x): **R · S · − · [level ▾] · + · 🔍 · ▼**, with **draw.io** and **⚙**
+- Toolbar shape (late 0.6.x): **R · S · − · [level ▾] · + · 🔍 · ▼**, with **draw.io** and **⚙** *(the `R` / `S` toggle and its Source view were removed in 0.6.34 — the tab always draws the rendered scene; the rest of this shape still holds)*
   upper-right; optional birdseye over the canvas
 - Flags summary beside the toolbar; click reopens the gear dialog
 - Filter combinations narrow together; loading criteria hide non-incident buses and report

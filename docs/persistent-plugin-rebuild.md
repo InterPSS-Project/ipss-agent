@@ -248,7 +248,8 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   no new endpoint — `reportType` is an added optional input field
 - **Diagram preview** (Client half, since 0.6.1): a `.drawio` file is read through
   `interpss/readDrawio`, decoded with `diagramXmlFrom`, and rendered with `parseDrawioScene` +
-  `DrawioDiagram` as inline SVG with a Rendered / Source toggle. Since 0.6.9 that preview has
+  `DrawioDiagram` as inline SVG. (It carried a Rendered / Source toggle until 0.6.34, which removed
+  it: the tab always draws the rendered scene.) Since 0.6.9 that preview has
   exactly **one** surface — the **Diagram tab** below — and `readDrawio` has exactly one
   caller. 0.6.1–0.6.8 the InterPSS action row also carried a **Diagram** button that opened the
   same preview in a modal, gated by the selected case's `diagram/` folder and nothing else
@@ -380,8 +381,8 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   Trajectory (10) — showing the preview full-size. It has **no heading and no subtitle** (0.6.10):
   the tab bar names the view and the first row (`Simu Case <path>`) says what is drawn, so a
   title block only pushed the diagram down. Its toolbar is controls only — the picker (when the
-  case has several files), `R` / `S` (the Rendered / Source toggle, spelled out only in the
-  tooltip and the accessible name since 0.6.17), `−` / percent / `+`, `Fit`; the
+  case has several files), `−` / percent / `+` and the picker's `Fit` — the `R` / `S` view toggle
+  led this row from 0.6.17 until 0.6.34 removed it; the
   `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped
   in 0.6.11, because the gestures are discoverable without a sentence in the control row.
   The **draw.io-marked edit button** (since 0.6.12) that hands the open file to the local
@@ -564,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 309 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 308 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -602,7 +603,8 @@ mechanism caught the 0.6.0 modal defect as
 `drawioRect is declared 833 chars after the effect`.
 - §12 (since 0.6.8) is the render-time coverage now: it renders the **Diagram tab** idle, with
   no case, with no diagram, with a failed listing, with an open diagram and a live scene, with
-  a tooltip on screen and in its Source view. Overrides are addressed
+  a tooltip on screen, and with the raw XML in state (there is no Source view since 0.6.34).
+  Overrides are addressed
   by the view's **own** `useState` order (a fresh harness renders `DiagramView` alone, so the
   call counter starts at zero), and it proves §7 inspects the new view by requiring that
   regex to parse every one of its effects. Verified by mutation: adding a dep declared below
@@ -610,9 +612,10 @@ mechanism caught the 0.6.0 modal defect as
   renders throw `Cannot access 'fileCount' before initialization` — the blank-tab defect,
   twice over. It also holds the **toolbar's shape**: the edit button's ancestor chain (the
   upper-right corner), that the toolbar row still ends at **Fit** and carries no edit button, and
-  — since 0.6.17 — that the view toggle is the letters `R` / `S` **with** their tooltip and
-  accessible name still saying `Rendered view` / `Source view — the raw draw.io XML`, because a
-  bare letter with no label would be a regression even though the pixels look right.
+  — since 0.6.34 — that the row carries **no view toggle of any spelling** and starts at the
+  zoom-out control (the `R` / `S` letters, with `Rendered view` / `Source view` in their tooltips,
+  were asserted here from 0.6.17 until the toggle was removed), and that neither the state
+  (`const [view, setView]`) nor a `view === 'source'` branch survives anywhere in the tab.
 - §10 asserts the shape of the tab bar's data instead of the button it lost: the host listing
   stays scoped to the case's `diagram/` folder, the action row still carries ACLF / CA /
   Report, it has **no** Diagram button, and `drawioFiles` / `drawioOpen` /
@@ -740,8 +743,8 @@ Client-half change is served with the plugin bundle, so the reload is what picks
 - **Diagram tab** (since 0.6.8): the tab bar reads **Chat · InterPSS · Diagram · Trajectory**,
   and the InterPSS action row reads **ACLF · ⚙ · CA · Report** (the 0.6.9 change). The tab opens
   straight onto its **Simu Case** row — no heading, no subtitle (0.6.10) — with a toolbar of
-  controls that reads **R · S · − · [level ▾] · + · 🔍 · ▼** (`R` / `S` since 0.6.17; hovering them says
-  `Rendered view` / `Source view — the raw draw.io XML`). **The level readout is the zoom picker
+  controls that reads **− · [level ▾] · + · 🔍 · ▼** (`R · S` led it from 0.6.17 until 0.6.34 removed
+  the view toggle, so the drawing is always shown rendered). **The level readout is the zoom picker
   since 0.6.21, and it carries Fit since 0.6.22**: a `select` labelled *Zoom level* offering 25 / 50 /
   75 / 100 / 125 / 150 / 200 / 300 / 400 % **and `Fit` as its last entry**, sitting exactly between
   `−` and `+` — which is now the end of the row, since Fit's own button is gone. A percentage picks
