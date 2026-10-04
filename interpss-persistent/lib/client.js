@@ -1565,6 +1565,53 @@ module.exports = {
       }
     }
 
+    // What a search found, as ONE box in scene coordinates: a matched node from its own rectangle
+    // (a bar, or the `Bus-N` label beside it) and a matched branch from its polyline. The box is
+    // what the view is centred on rather than a cell, so a pair (`Bus-1 -> Bus-2`) frames between
+    // its two bars and a name that found several buses frames all of them.
+    function drawioHitBounds(scene, hits) {
+      if (scene === null || scene === undefined || hits === null || hits === undefined) return null
+      const ids = {}
+      for (const id of Object.keys(hits.buses || {})) ids[id] = true
+      for (const id of Object.keys(hits.edges || {})) ids[id] = true
+      let x0 = Infinity
+      let y0 = Infinity
+      let x1 = -Infinity
+      let y1 = -Infinity
+      const grow = (x, y) => {
+        if (x < x0) x0 = x
+        if (y < y0) y0 = y
+        if (x > x1) x1 = x
+        if (y > y1) y1 = y
+      }
+      for (const n of scene.nodes || []) {
+        if (ids[n.id] !== true) continue
+        grow(n.x, n.y)
+        grow(n.x + n.w, n.y + n.h)
+      }
+      for (const e of scene.edges || []) {
+        if (ids[e.id] !== true) continue
+        for (const p of e.points || []) grow(p.x, p.y)
+      }
+      if (x0 === Infinity || y0 === Infinity) return null
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+    }
+
+    // Where the canvas looks after a search (0.6.37): the same-size window, centred on what was
+    // found and held inside the drawing by the clamp the birdseye already uses. Only the POSITION
+    // moves -- the zoom is the one the user chose, and at Fit the whole drawing is on screen
+    // already, so there the window is as centred as it can be. A query that matched nothing (or a
+    // hit the scene does not carry) leaves the view exactly where it was.
+    function drawioCentreRect(scene, rect, hits) {
+      if (scene === null || scene === undefined || rect === null || rect === undefined) return rect
+      const box = drawioHitBounds(scene, hits)
+      if (box === null) return rect
+      const vb = scene.viewBox
+      const fx = vb.w === 0 ? 0.5 : (box.x + box.w / 2 - vb.x) / vb.w
+      const fy = vb.h === 0 ? 0.5 : (box.y + box.h / 2 - vb.y) / vb.h
+      return drawioBirdseyeRect(scene, rect, fx, fy)
+    }
+
     // The thumbnail. Pointer events are captured here and never bubble: they must not also pan the
     // canvas underneath, which is why every handler stops propagation.
     function DrawioBirdseye(props) {
@@ -4152,7 +4199,17 @@ module.exports = {
       // drawing exactly as it was.
       function applySearch() {
         const q = String(searchText).trim()
-        setSearchQuery(q === '' ? null : q)
+        const next = q === '' ? null : q
+        setSearchQuery(next)
+        // 0.6.37: what the search selects comes to the middle of the view. Read here, on the
+        // deliberate act, and not in an effect keyed on the query -- an effect would re-centre on
+        // every later render and undo the pan the moment the user looked somewhere else. A FITTED
+        // view (`rect === null`) is left alone: the whole drawing is on screen, so there is nothing
+        // to move, and a window equal to the whole page would only cost the picker its `Fit` entry.
+        if (next !== null && scene !== null && rect !== null) {
+          const hits = drawioSearchHits(next, scene.nodes, scene.edges, busNames)
+          if (hits.nBus + hits.nBranch > 0) setRect(drawioCentreRect(scene, rect, hits))
+        }
         setDialog(null)
       }
 

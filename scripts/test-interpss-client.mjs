@@ -131,6 +131,7 @@ function build(overrides) {
       + ' drawioVoltOutsideBand: drawioVoltOutsideBand, drawioVoltColumns: drawioVoltColumns,'
       + ' DRAWIO_MAX_CELLS: DRAWIO_MAX_CELLS,'
       + ' DRAWIO_MATCH_FILL: DRAWIO_MATCH_FILL, DRAWIO_BIRDSEYE_FRAME: DRAWIO_BIRDSEYE_FRAME,'
+      + ' drawioHitBounds: drawioHitBounds, drawioCentreRect: drawioCentreRect,'
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText };');
 
 
@@ -1903,6 +1904,42 @@ check('the search highlight is the mid-luminance green, not a flag colour',
   api.DRAWIO_MATCH_FILL === '#2EA043' && api.DRAWIO_MATCH_FILL !== 'green'
   && api.DRAWIO_MATCH_FILL !== api.DRAWIO_BIRDSEYE_FRAME,
   api.DRAWIO_MATCH_FILL + ' (frame ' + api.DRAWIO_BIRDSEYE_FRAME + ')');
+
+// 0.6.37: what a search selects is brought to the middle of the view. The window keeps its SIZE --
+// the zoom stays the one the user chose -- and is centred on the union of the hit boxes, so a pair
+// frames between its two bars and a name that found several buses frames all of them. The numbers
+// below are the fixture's own: Bus-5's bar+label box (120..190, 174..252) centres on 155,213, and
+// the 1->2 pair (48..298, 22..102) on 173,62 -- whose y cannot be honoured, because centring a
+// 200-tall window there would hang it 38 units above the paper, so the clamp pins it to the top.
+const centreProbe = { x: scene.viewBox.x + 100, y: scene.viewBox.y + 80, w: scene.viewBox.w / 4, h: scene.viewBox.h / 4 };
+const centred5 = api.drawioCentreRect(scene, centreProbe, hit('5'));
+const centredPair = api.drawioCentreRect(scene, centreProbe, hit('1->2'));
+check('a search centres the view on the bus it found, keeping the zoom',
+  centred5.w === centreProbe.w && centred5.h === centreProbe.h
+  && centred5.x + centred5.w / 2 === 155 && centred5.y + centred5.h / 2 === 213,
+  JSON.stringify(centred5));
+check('a branch pair frames between its two bars, with the window held on the paper',
+  centredPair.w === centreProbe.w && centredPair.x + centredPair.w / 2 === 173
+  && centredPair.y === scene.viewBox.y,
+  JSON.stringify(centredPair) + ' vs pair centre x 173');
+check('nothing found, no scene, and Fit all leave the view exactly where it was',
+  JSON.stringify(api.drawioCentreRect(scene, centreProbe, hit('9999'))) === JSON.stringify(centreProbe)
+  && api.drawioCentreRect(null, centreProbe, hit('5')) === centreProbe
+  && api.drawioHitBounds(scene, hit('9999')) === null && api.drawioHitBounds(null, hit('5')) === null
+  && JSON.stringify(api.drawioCentreRect(scene, api.drawioFitRect(scene.viewBox), hit('5')))
+    === JSON.stringify(api.drawioFitRect(scene.viewBox)),
+  JSON.stringify(api.drawioCentreRect(scene, api.drawioFitRect(scene.viewBox), hit('5'))));
+// And it is OK / Enter that moves the view, not an effect that would re-centre on every repaint --
+// in an effect, panning away from a hit would be undone by the next render.
+const applySearchBody = slice.slice(slice.indexOf('function applySearch()'), slice.indexOf('function applyFilter()'));
+check('the recentre rides on OK, only when the search found something, and never at Fit',
+  applySearchBody.indexOf('hits.nBus + hits.nBranch > 0') > 0
+  && applySearchBody.indexOf('setRect(drawioCentreRect(scene, rect, hits))') > 0
+  && applySearchBody.indexOf('drawioSearchHits(next, scene.nodes, scene.edges, busNames)') > 0
+  && applySearchBody.indexOf('next !== null && scene !== null && rect !== null') > 0
+  && applySearchBody.indexOf('setDialog(null)') > 0
+  && slice.indexOf('setRect(drawioCentreRect') === slice.lastIndexOf('setRect(drawioCentreRect'),
+  'the recentre appears once, in applySearch');
 
 check('the sentence names the area and zone, the toolbar label stays numeric',
   (function () {

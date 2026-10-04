@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 312 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 316 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -663,7 +663,11 @@ mechanism caught the 0.6.0 modal defect as
   the filter's hiding rules (nothing when it has no criteria; a bus by area; the band filter keeping
   exactly the flagged buses; a branch hidden when either end is; rings and their group hidden with a
   hidden stub), and the paint path itself -- a hidden cell leaves the tree, a matched bar, label and
-  branch take the search colour.
+  branch take the search colour. Since 0.6.37 it also pins **where a search leaves the view**: the
+  window's own size is kept, it is centred on the union of the hit boxes (`155,213` for Bus-5's
+  bar+label, x `173` for the `1->2` pair with its y clamped to the paper's top edge), a query that
+  found nothing / a null scene / a fitted view are returned untouched, and the one call site is in
+  `applySearch` rather than in an effect.
 - §15 (since 0.6.19) pins the **size limits and their boundary**: the preview cap is 20000 cells, both
   hosts read up to 4 MiB (4 194 304 bytes, 0.6.20 — raised 2 -> 5 MiB in 0.6.19, trimmed to 4 MiB in
   0.6.20 because the largest drawing here is ~2.9 MiB), and the generator's own self-check allows
@@ -774,6 +778,12 @@ Client-half change is served with the plugin bundle, so the reload is what picks
       toolbar shows
       a `N buses, M branches` count, and the bus table is fetched for the names only when the dialog
       opens. A match outranks the violation red; the tooltip still reports the violation.
+      **OK also brings the match to the middle of the view** (0.6.37): the window keeps its size
+      (the zoom is the user's) and moves onto the union of the hit boxes, held on the paper by the
+      birdseye's own clamp, so a hit near an edge is centred as far as the paper allows. A fitted
+      view, a query that found nothing and a scene that is not there all leave the view alone --
+      and the recentre is in the OK handler rather than an effect, so panning away from a hit is
+      not undone by the next repaint.
     - **Filter the diagram** keeps one **area** and/or one **zone** (lists read from the case's bus
       table, the zone list scoped to the chosen area) and/or only the buses outside the 0.9–1.1 pu
       band. Everything else is **hidden** — bar, label, its branches *and* the transformer symbols on

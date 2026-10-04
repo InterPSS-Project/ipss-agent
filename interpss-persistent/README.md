@@ -48,7 +48,8 @@ parameters and results, no build-time Typert compiler required.
   loaded from chat), offers a picker when the folder holds several files — reopening the one
   last viewed — and gives the diagram pan / zoom / fit, a **zoom picker** (25–400 %, plus **Fit** as its last entry — 0.6.21, Fit 0.6.22 — and
   whatever level the wheel reached, selected), **search** (by number, id, name or a branch between
-  two buses — `A-B`, or `Bus-A -> Bus-B` since 0.6.35 — highlighted in **green** since 0.6.36)
+  two buses — `A-B`, or `Bus-A -> Bus-B` since 0.6.35 — highlighted in **green** since 0.6.36 and
+  brought to the middle of the view on OK since 0.6.37)
   and **filter** (by area/zone from the case table, or by the |V| band — 0.6.23) dialogs with OK / Cancel, one view only (the **R** / **S** toggle and its raw-XML Source view were removed in 0.6.34), a **birdseye** thumbnail with click-to-move
   (0.6.28), a **gear** dialog for the flag
   thresholds and colours in `config/net_diagram.json` (0.6.26) and
