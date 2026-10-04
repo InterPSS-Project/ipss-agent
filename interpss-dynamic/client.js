@@ -1059,7 +1059,17 @@ return {
     // scene or the draw.io desktop app. The rules live here, module-level and pure, because they
     // are the only part of the feature with behaviour worth pinning down in the guard -- the rest
     // is a dialog and a pair of buttons.
-    const DRAWIO_MATCH_FILL = '#1F6FEB'
+    // What a search paints its hits with — the bar, the `Bus-N` label text and the branch line.
+    // **Green since 0.6.36** (it was the accent blue `#1F6FEB`): a bus or branch that was *found*
+    // should not read as a link, and this mid-luminance green keeps the label legible on the light
+    // and the dark canvas alike (`green` itself is too dark there). It is deliberately apart from
+    // the flag colours in `config/net_diagram.json`: a search is a deliberate act and outranks
+    // them, so the two must be able to differ on screen.
+    const DRAWIO_MATCH_FILL = '#2EA043'
+
+    // The birdseye's viewport frame: the tab's other accent, and the one that stayed blue when the
+    // search highlight turned green — the frame answers "where am I looking", not "what did I find".
+    const DRAWIO_BIRDSEYE_FRAME = '#1F6FEB'
 
     const drawioIsBusCell = (id) => /^bus\d+$/i.test(String(id === null || id === undefined ? '' : id))
 
@@ -1111,11 +1121,16 @@ return {
     // (`ODESSA`, from the case's bus table), or a branch written with an arrow (`1001->1002`;
     // `-`, `/` and the unicode arrow are accepted too). A bus and a branch are tried together,
     // because `1001` is a valid bus on its own.
+    //
+    // Since 0.6.35 a branch may be written with bus ids as well as numbers — `Bus-1 -> Bus-2`,
+    // the spelling the diagram itself shows. Either end, or both, may carry the `bus` prefix
+    // (its hyphen and the spaces around the arrow are optional), so `Bus-1->Bus-2`,
+    // `bus1 -> bus2` and `1 -> Bus-2` all mean the same pair.
     function drawioSearchHits(query, nodes, edges, busNames) {
       const out = { buses: {}, edges: {}, nBus: 0, nBranch: 0, text: '' }
       const q = String(query === null || query === undefined ? '' : query).trim().toLowerCase()
       if (q === '') {
-        out.text = 'Type a bus number, a name, or a branch like 1001->1002.'
+        out.text = 'Type a bus number, a name, or a branch like 1001->1002 or Bus-1 -> Bus-2.'
         return out
       }
       const index = drawioRingIndex(nodes)
@@ -1135,12 +1150,18 @@ return {
         if (bars[busKey] !== undefined) out.buses[bars[busKey]] = true
         if (labels[busKey] !== undefined) out.buses[labels[busKey]] = true
       }
-      const pair = /^(\d+)\s*(?:->|\u2192|[-\u2013/])\s*(\d+)$/.exec(q)
+      // 0.6.35: an id on either end (`Bus-1 -> Bus-2`), with the prefix's hyphen and the spaces
+      // around the separator all optional — the id spelling and the number spelling reach the
+      // same pair.
+      const pair = /^(?:bus\s*-?\s*)?(\d+)\s*(?:->|\u2192|[-\u2013/])\s*(?:bus\s*-?\s*)?(\d+)$/.exec(q)
       if (pair !== null) {
         const a = 'bus' + pair[1]
         const b = 'bus' + pair[2]
+        // The reply names the buses the way the drawing does, whichever spelling was typed.
+        const from = 'Bus-' + pair[1]
+        const to = 'Bus-' + pair[2]
         if (bars[a] === undefined || bars[b] === undefined) {
-          out.text = 'No branch between ' + pair[1] + ' and ' + pair[2] + ' in this diagram.'
+          out.text = 'No branch between ' + from + ' and ' + to + ' in this diagram.'
           return out
         }
         hit(a)
@@ -1154,8 +1175,8 @@ return {
           }
         }
         out.text = out.nBranch === 0
-          ? 'No branch drawn between ' + pair[1] + ' and ' + pair[2] + '.'
-          : out.nBranch + (out.nBranch === 1 ? ' branch' : ' branches') + ' between ' + pair[1] + ' and ' + pair[2] + '.'
+          ? 'No branch drawn between ' + from + ' and ' + to + '.'
+          : out.nBranch + (out.nBranch === 1 ? ' branch' : ' branches') + ' between ' + from + ' and ' + to + '.'
         return out
       }
       const num = /^bus-?(\d+)$/.exec(q)
@@ -1398,9 +1419,10 @@ return {
     }
 
     // What the search dialog tells the user, for THIS case (0.6.25): the bus count and the range
-    // the diagram actually draws, a branch example built from two of its own numbers, and -- when
-    // the case's result table carries names -- one of them to search on. Without that table it says
-    // so, instead of suggesting a name search that cannot work.
+    // the diagram actually draws, a branch example built from two of its own buses (in the id
+    // spelling since 0.6.35), and -- when the case's result table carries names -- one of them to
+    // search on. Without that table it says so, instead of suggesting a name search that cannot
+    // work.
     function drawioSearchHelp(scene, meta) {
       const nums = []
       if (scene !== null && scene !== undefined && Array.isArray(scene.nodes)) {
@@ -1423,17 +1445,20 @@ return {
       }
       if (uniq.length === 0) {
         return {
-          placeholder: '1001, Bus-1001, 1001->1002',
-          hint: 'A number or id finds one bus, 1001->1002 the branches between two, and part of a name finds every bus whose name contains it.',
+          placeholder: '1001, Bus-1001, Bus-1001 -> Bus-1002',
+          hint: 'A number or id finds one bus, 1001->1002 or Bus-1001 -> Bus-1002 the branches between two, and part of a name finds every bus whose name contains it.',
         }
       }
       const first = uniq[0]
       const second = uniq.length > 1 ? uniq[1] : uniq[0]
+      // 0.6.35: the example is the id spelling (`Bus-1 -> Bus-2`), the one a person copies out of
+      // the drawing; the bare pair is named next to it so both forms are on screen.
       const pair = first + '->' + second
+      const idPair = 'Bus-' + first + ' -> Bus-' + second
       const range = uniq.length === 1 ? 'Bus-' + first : 'Bus-' + first + ' to Bus-' + uniq[uniq.length - 1]
-      const placeholder = [String(first), 'Bus-' + first].concat(word === '' ? [] : [word]).concat([pair]).join(', ')
+      const placeholder = [String(first), 'Bus-' + first].concat(word === '' ? [] : [word]).concat([idPair]).join(', ')
       const hint = uniq.length + (uniq.length === 1 ? ' bus here (' : ' buses here (') + range + '). '
-        + 'A number or id finds one bus, ' + pair + ' the branches between two'
+        + 'A number or id finds one bus, ' + pair + ' or ' + idPair + ' the branches between two'
         + (word === '' ? '; bus names need this case\u2019s ACLF result table, which is not there.'
           : ', and part of a name like "' + word + '" finds every bus whose name contains it.')
         + ' Matches are highlighted in the drawing.'
@@ -1549,7 +1574,7 @@ return {
         React.createElement('rect', {
           key: 'v',
           x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-          fill: DRAWIO_MATCH_FILL, fillOpacity: 0.18, stroke: DRAWIO_MATCH_FILL,
+          fill: DRAWIO_BIRDSEYE_FRAME, fillOpacity: 0.18, stroke: DRAWIO_BIRDSEYE_FRAME,
           strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke',
         }),
       )
@@ -4246,7 +4271,7 @@ return {
 
       const hintStyle = { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }
       // The search dialog's help is about THIS case: how many buses it draws, the range, a branch
-      // example from its own numbers, and a name to try when its result table carries names.
+      // example from its own bus ids, and a name to try when its result table carries names.
       const searchHelp = drawioSearchHelp(scene, busMeta)
       const cfgErrors = dialog === 'config' ? drawioNetConfigErrors(cfgForm) : {}
       const cfgField = (field) => {

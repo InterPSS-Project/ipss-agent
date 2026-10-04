@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 308 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 312 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -614,7 +614,7 @@ mechanism caught the 0.6.0 modal defect as
   upper-right corner), that the toolbar row still ends at **Fit** and carries no edit button, and
   — since 0.6.34 — that the row carries **no view toggle of any spelling** and starts at the
   zoom-out control (the `R` / `S` letters, with `Rendered view` / `Source view` in their tooltips,
-  were asserted here from 0.6.17 until the toggle was removed), and that neither the state
+  led this row and were asserted here from 0.6.17 until the toggle was removed), and that neither the state
   (`const [view, setView]`) nor a `view === 'source'` branch survives anywhere in the tab.
 - §10 asserts the shape of the tab bar's data instead of the button it lost: the host listing
   stays scoped to the case's `diagram/` folder, the action row still carries ACLF / CA /
@@ -656,7 +656,9 @@ mechanism caught the 0.6.0 modal defect as
 - §16 (since 0.6.23; the draft-preview rule since 0.6.24) covers **diagram search and filter**: that
   every edge resolves to a bus pair
   through its transformer group's sibling ring (0 of 25 unresolved on the reference scene, and each
-  transformer's two stubs agree), the query forms (number, `Bus-N`, name substring, `A-B` pair, and
+  transformer's two stubs agree), the query forms (number, `Bus-N`, name substring, a branch as an
+  `A-B` pair or between two ids -- `Bus-A -> Bus-B`, the id spelling added in 0.6.35, with ten
+  spellings pinned and the id/number equivalence and reply wording asserted -- and
   the cases that must say "no match"), the bus-table fold into area/zone lists with page merging,
   the filter's hiding rules (nothing when it has no criteria; a bus by area; the band filter keeping
   exactly the flagged buses; a branch hidden when either end is; rings and their group hidden with a
@@ -758,12 +760,18 @@ Client-half change is served with the plugin bundle, so the reload is what picks
     dialog whose **OK** applies and whose **Cancel** only closes (the fields are a draft, and the
     applied value is written by OK alone, so Cancel really cancels).
     - **Search the diagram** takes a bus number (`1001`), a bus id (`Bus-1001`), part of a case bus
-      name (`ODESSA`), or a branch written with an arrow (`1001->1002` since 0.6.25; `-`, `/` and the
-      unicode arrow still work). Its placeholder and help are **about the case in front of it**:
-      the bus count and range the diagram draws, a branch example from its own numbers, and a name
+      name (`ODESSA`), or a branch written with an arrow (`1001->1002` since 0.6.25, and also with
+      its ends as ids — `Bus-1 -> Bus-2` — since 0.6.35; `-`, `/` and the unicode arrow still work,
+      and each id's hyphen and spacing are optional, so `bus1->bus2` and `1 -> Bus-2` mean the same
+      pair). A branch reply names the buses as ids whichever spelling was typed
+      (`3 branches between Bus-1 and Bus-2.`). Its placeholder and help are **about the case in
+      front of it**: the bus count and range the diagram draws, a branch example from its own bus
+      ids, and a name
       from its own table -- or, when the case has no result table, a statement that names cannot be
       searched (rather than a suggestion that cannot work). Matches are
-      repainted in the search blue — bar, label text and branch (a thicker line) — the toolbar shows
+      repainted in the search green `#2EA043` since 0.6.36 — bar, label text and branch (a thicker
+      line), the blue `#1F6FEB` before that, which the birdseye's viewport frame still wears — the
+      toolbar shows
       a `N buses, M branches` count, and the bus table is fetched for the names only when the dialog
       opens. A match outranks the violation red; the tooltip still reports the violation.
     - **Filter the diagram** keeps one **area** and/or one **zone** (lists read from the case's bus
@@ -802,7 +810,7 @@ Client-half change is served with the plugin bundle, so the reload is what picks
       made the whole family silently invisible until 0.6.31)
       reaches `Contingency_branch_flow_flag_percent` (`blue` by default), and a contingency flag
       outranks a base-case one on the same branch.
-    A search's blue still outranks every flag, because a search is the deliberate act. The dialog's
+    A search's green still outranks every flag, because a search is the deliberate act. The dialog's
     form is a draft (OK saves, Cancel cancels); the Host sanitizes again on save, merges over what
     is on disk (unknown keys survive) and never writes an out-of-range value. Flags are a **preview**
     concern: no colour reaches the `.drawio`, so the desktop app and the PNG stay plain.
