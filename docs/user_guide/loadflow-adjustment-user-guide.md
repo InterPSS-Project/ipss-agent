@@ -6,7 +6,7 @@ sensitivity to size the step and AC load flow to confirm it.
 This guide is the practical how-to for InterPSS DSH Chat. For the engineering detail
 behind the method (B″ vs AC sensitivity, Jacobian convention, Newton loop), see
 [load-q-adjustment.md](../load-q-adjustment.md). The whole sequence below is packaged as the
-`$ipss-case-aclf-adjust` skill, so "adjust load Q to bring Bus N into [0.89, 0.90] pu" can be
+`$ipss-case-aclf-adjust` skill, so "adjust load Q to bring Bus N into [0.90, 0.91] pu" can be
 handed to the agent as one request.
 
 ---
@@ -22,8 +22,9 @@ handed to the agent as one request.
 | Two or more buses must land in the same band and move each other’s voltage | Adjust the loads **together** (N×N `dV/dQ` matrix) |
 
 
-Typical goal: bring a depressed bus into a band such as **[0.89, 0.90]** pu by reducing
-load Q (active power left unchanged).
+Typical goal: bring a depressed bus into a band such as **[0.90, 0.91]** pu by reducing
+load Q (active power left unchanged). The shipped IEEE14 fixtures use that band; older
+`*0p89to0p90*` scripts were replaced by the `*0p90to0p91*` siblings.
 
 ---
 
@@ -94,14 +95,14 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 
 ## Example A — Single bus: IEEE14 Bus14
 
-**Goal:** raise V(Bus14) into **[0.89, 0.90]** pu by reducing Bus14 load Q only.
+**Goal:** raise V(Bus14) into **[0.90, 0.91]** pu by reducing Bus14 load Q only.
 
 
 |                |                                                                  |
 | -------------- | ---------------------------------------------------------------- |
 | Case           | `wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee`              |
 | Starting point | Bus14 = 14.9 MW + j50.0 MVAr, V ≈ 0.871 pu (only bus below 0.90) |
-| Applied result | Q 50.0 → **46.0 MVAr**, V(Bus14) = **0.895** pu                  |
+| Applied result | Q 50.0 → **44.1 MVAr**, V(Bus14) ≈ **0.905** pu                  |
 
 
 
@@ -109,10 +110,11 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 ### Scripts
 
 
-| Script                            | What it does                                                             |
-| --------------------------------- | ------------------------------------------------------------------------ |
-| `ieee14_dvdq_Bus14.gvy`           | Read-only. Prints `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
-| `ieee14_adjBus14Q_0p89to0p90.gvy` | Sets Bus14 load to 14.9 MW + j46.0 MVAr                                  |
+| Script                              | What it does                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------ |
+| `ieee14_dvdq_Bus14.gvy`             | Read-only. Prints `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
+| `ieee14_dvdq_Bus14_0p90to0p91.gvy`  | Read-only. Same sensitivity sized for the **[0.90, 0.91]** window        |
+| `ieee14_adjBus14Q_0p90to0p91.gvy`   | Sets Bus14 load to 14.9 MW + j44.1 MVAr                                  |
 
 
 
@@ -122,8 +124,8 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 ```text
 Load wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee
 Run ACLF
-Run ieee14_dvdq_Bus14.gvy
-Reload and run ieee14_adjBus14Q_0p89to0p90.gvy, then run ACLF
+Run ieee14_dvdq_Bus14_0p90to0p91.gvy
+Reload and run ieee14_adjBus14Q_0p90to0p91.gvy, then run ACLF
 Show the lowest bus voltages
 ```
 
@@ -132,8 +134,8 @@ Equivalent tool sequence:
 ```text
 interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee' })
 interpss_run_aclf()
-interpss_run_gvy({ script: 'ieee14_dvdq_Bus14.gvy' })
-interpss_run_gvy({ script: 'ieee14_adjBus14Q_0p89to0p90.gvy', reload: true })
+interpss_run_gvy({ script: 'ieee14_dvdq_Bus14_0p90to0p91.gvy' })
+interpss_run_gvy({ script: 'ieee14_adjBus14Q_0p90to0p91.gvy', reload: true })
 interpss_run_aclf()
 ```
 
@@ -141,9 +143,9 @@ interpss_run_aclf()
 
 ### What to expect
 
-- B″ may suggest a more aggressive Q cut than AC reality (on this case, B″ window ≈ 43.5–45.8 MVAr;
-AC window ≈ 45.1–46.9 MVAr). Prefer the AC-sized value (**46.0** MVAr midpoint).
-- After ACLF, Bus14 should sit near **0.895** pu inside the band; no bus below 0.89 pu.
+- B″ may suggest a more aggressive Q cut than AC reality (on this case, B″ window ≈ 41.3–43.5 MVAr;
+AC window ≈ 43.1–45.1 MVAr). Prefer the AC-sized value (**44.1** MVAr midpoint).
+- After ACLF, Bus14 should sit near **0.905** pu inside the band; no bus below 0.90 pu.
 
 
 
@@ -153,7 +155,7 @@ AC window ≈ 45.1–46.9 MVAr). Prefer the AC-sized value (**46.0** MVAr midpoi
 busId  = "Bus14";
 loadId = "Bus14-L1";
 loadP  = 0.149;   // MW in pu on system base — leave unchanged
-loadQ  = 0.460;   // MVAr in pu — the adjusted value
+loadQ  = 0.441;   // MVAr in pu — the adjusted value
 
 bus  = aclfnet.getBus(busId);
 load = bus.getContributeLoad(loadId);
@@ -168,7 +170,7 @@ Save under the case `scripts/` folder and run with `$ipss-case-script`, then ACL
 
 ## Example B — Coupled buses: IEEE14 Bus13 + Bus14
 
-**Goal:** bring **both** Bus13 and Bus14 into **[0.89, 0.90]** pu by adjusting both load Q
+**Goal:** bring **both** Bus13 and Bus14 into **[0.90, 0.91]** pu by adjusting both load Q
 values together.
 
 
@@ -176,7 +178,7 @@ values together.
 | -------------- | ------------------------------------------------------------------------------------ |
 | Case           | `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee`                                 |
 | Starting point | Both buses at j50.0 MVAr — past the nose point; ACLF does **not** converge as stored |
-| Applied result | Q13 → **45.505**, Q14 → **21.320** MVAr; V13 = **0.899**, V14 = **0.891** pu         |
+| Applied result | Q13 → **47.33**, Q14 → **17.51** MVAr; V13 ≈ **0.905**, V14 ≈ **0.905** pu           |
 
 
 Do **not** adjust one bus at a time here: near the target, cross terms are ~70–80% of the
@@ -185,11 +187,11 @@ self terms, so each Q move strongly affects the other voltage.
 ### Scripts
 
 
-| Script                              | What it does                                                                          |
-| ----------------------------------- | ------------------------------------------------------------------------------------- |
-| `ieee14_dvdq_matrix.gvy`            | Read-only. Prints the 2×2 B″ matrix and, when solved, the AC finite-difference matrix |
-| `ieee14_qv_adjust.gvy`              | Starts from a solvable anchor and walks both Q values into the band (damped Newton)   |
-| `ieee14_adjBus1314Q_0p89to0p90.gvy` | Sets Bus13 to 13.5 MW + j45.5053 MVAr and Bus14 to 14.9 MW + j21.3202 MVAr (one shot) |
+| Script                                | What it does                                                                          |
+| ------------------------------------- | ------------------------------------------------------------------------------------- |
+| `ieee14_qv_adjust.gvy`                | Older adjuster for the previous band; kept for reference                              |
+| `ieee14_qv_adjust_0p90to0p91.gvy`     | Starts from a solvable anchor and walks both Q values into **[0.90, 0.91]** (Newton)  |
+| `ieee14_adjBus1314Q_0p90to0p91.gvy`   | Sets Bus13 to 13.5 MW + j47.33 MVAr and Bus14 to 14.9 MW + j17.51 MVAr (one shot)     |
 
 
 As in Example A, the adjuster **derives** the two Q values and the setter **applies** them; once the
@@ -199,32 +201,31 @@ values are known, the setter alone reproduces the state.
 
 ```text
 Load wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee
-Reload and run ieee14_qv_adjust.gvy to derive Q13 / Q14
-Reload and run ieee14_adjBus1314Q_0p89to0p90.gvy to apply them
+Reload and run ieee14_qv_adjust_0p90to0p91.gvy to derive Q13 / Q14
+Reload and run ieee14_adjBus1314Q_0p90to0p91.gvy to apply them
 Run ACLF
-Run ieee14_dvdq_matrix.gvy again to see the operating-point matrix at the target
+Show the lowest bus voltages
 ```
 
 Equivalent tool sequence:
 
 ```text
 interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee' })
-interpss_run_gvy({ script: 'ieee14_qv_adjust.gvy', reload: true })                 # derives Q13/Q14 (~7 passes)
-interpss_run_gvy({ script: 'ieee14_adjBus1314Q_0p89to0p90.gvy', reload: true })    # applies those values
+interpss_run_gvy({ script: 'ieee14_qv_adjust_0p90to0p91.gvy', reload: true })   # derives Q13/Q14 (~8 passes)
+interpss_run_gvy({ script: 'ieee14_adjBus1314Q_0p90to0p91.gvy', reload: true }) # applies those values
 interpss_run_aclf()
-interpss_run_gvy({ script: 'ieee14_dvdq_matrix.gvy' })                            # operating-point matrix at the target
 ```
 
 `reload: true` on the adjuster re-parses the stored j50/j50 case; the script then resets to a
-solvable anchor and iterates (~7 passes on this fixture). No ACLF is needed before it — the stored
+solvable anchor and iterates (~8 passes on this fixture). No ACLF is needed before it — the stored
 case does not converge. The setter also runs with `reload: true`, so it starts from the file rather
 than from whatever state the held model is in (see **Common pitfalls**).
 
 ### What to expect
 
 - The stored case may fail ACLF until the adjuster has run — that is intentional.
-- Final voltages: Bus14 ≈ **0.891**, Bus13 ≈ **0.899** (band corner inset by 0.001 pu so both
-stay strictly inside [0.89, 0.90] while maximising load Q).
+- Final voltages: Bus13 ≈ **0.905**, Bus14 ≈ **0.905** (both near the band midpoint, ~0.005 pu
+clear of each edge).
 - Generators may be at Q limits (`GenPQ`); that is why B″ alone is a poor guide on this case.
 
 
@@ -233,7 +234,7 @@ stay strictly inside [0.89, 0.90] while maximising load Q).
 
 ```groovy
 // pu Q on the system base; MW left as stored (13.5 / 14.9 MW)
-def LOAD_Q = ['Bus13': 0.455053d, 'Bus14': 0.213202d]
+def LOAD_Q = ['Bus13': 0.4733d, 'Bus14': 0.1751d]
 
 LOAD_Q.each { id, q ->
     def load = aclfnet.getBus(id).getContributeLoad(id + '-L1')

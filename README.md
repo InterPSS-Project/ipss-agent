@@ -58,6 +58,11 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 - InterPSS Loadflow Adjustment user guide [loadflow-adjustment-user-guide.md](docs/user_guide/loadflow-adjustment-user-guide.md)
 - iPSS Agent Chat (Batch) user guide [batch_chat_user_guide.md](docs/user_guide/batch_chat_user_guide.md)
 
+## Release notes
+
+- Latest: [Release-V0.7.0.md](docs/release_note/Release-V0.7.0.md) (`@deepseek-ai/dsh-interpss` **0.7.0**)
+- Earlier: [docs/release_note/](docs/release_note/)
+
 
 
 ## Reference

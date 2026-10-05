@@ -1088,7 +1088,17 @@ module.exports = {
     // scene or the draw.io desktop app. The rules live here, module-level and pure, because they
     // are the only part of the feature with behaviour worth pinning down in the guard -- the rest
     // is a dialog and a pair of buttons.
-    const DRAWIO_MATCH_FILL = '#1F6FEB'
+    // What a search paints its hits with — the bar, the `Bus-N` label text and the branch line.
+    // **Green since 0.6.36** (it was the accent blue `#1F6FEB`): a bus or branch that was *found*
+    // should not read as a link, and this mid-luminance green keeps the label legible on the light
+    // and the dark canvas alike (`green` itself is too dark there). It is deliberately apart from
+    // the flag colours in `config/net_diagram.json`: a search is a deliberate act and outranks
+    // them, so the two must be able to differ on screen.
+    const DRAWIO_MATCH_FILL = '#2EA043'
+
+    // The birdseye's viewport frame: the tab's other accent, and the one that stayed blue when the
+    // search highlight turned green — the frame answers "where am I looking", not "what did I find".
+    const DRAWIO_BIRDSEYE_FRAME = '#1F6FEB'
 
     const drawioIsBusCell = (id) => /^bus\d+$/i.test(String(id === null || id === undefined ? '' : id))
 
@@ -1140,11 +1150,16 @@ module.exports = {
     // (`ODESSA`, from the case's bus table), or a branch written with an arrow (`1001->1002`;
     // `-`, `/` and the unicode arrow are accepted too). A bus and a branch are tried together,
     // because `1001` is a valid bus on its own.
+    //
+    // Since 0.6.35 a branch may be written with bus ids as well as numbers — `Bus-1 -> Bus-2`,
+    // the spelling the diagram itself shows. Either end, or both, may carry the `bus` prefix
+    // (its hyphen and the spaces around the arrow are optional), so `Bus-1->Bus-2`,
+    // `bus1 -> bus2` and `1 -> Bus-2` all mean the same pair.
     function drawioSearchHits(query, nodes, edges, busNames) {
       const out = { buses: {}, edges: {}, nBus: 0, nBranch: 0, text: '' }
       const q = String(query === null || query === undefined ? '' : query).trim().toLowerCase()
       if (q === '') {
-        out.text = 'Type a bus number, a name, or a branch like 1001->1002.'
+        out.text = 'Type a bus number, a name, or a branch like 1001->1002 or Bus-1 -> Bus-2.'
         return out
       }
       const index = drawioRingIndex(nodes)
@@ -1164,12 +1179,18 @@ module.exports = {
         if (bars[busKey] !== undefined) out.buses[bars[busKey]] = true
         if (labels[busKey] !== undefined) out.buses[labels[busKey]] = true
       }
-      const pair = /^(\d+)\s*(?:->|\u2192|[-\u2013/])\s*(\d+)$/.exec(q)
+      // 0.6.35: an id on either end (`Bus-1 -> Bus-2`), with the prefix's hyphen and the spaces
+      // around the separator all optional — the id spelling and the number spelling reach the
+      // same pair.
+      const pair = /^(?:bus\s*-?\s*)?(\d+)\s*(?:->|\u2192|[-\u2013/])\s*(?:bus\s*-?\s*)?(\d+)$/.exec(q)
       if (pair !== null) {
         const a = 'bus' + pair[1]
         const b = 'bus' + pair[2]
+        // The reply names the buses the way the drawing does, whichever spelling was typed.
+        const from = 'Bus-' + pair[1]
+        const to = 'Bus-' + pair[2]
         if (bars[a] === undefined || bars[b] === undefined) {
-          out.text = 'No branch between ' + pair[1] + ' and ' + pair[2] + ' in this diagram.'
+          out.text = 'No branch between ' + from + ' and ' + to + ' in this diagram.'
           return out
         }
         hit(a)
@@ -1183,8 +1204,8 @@ module.exports = {
           }
         }
         out.text = out.nBranch === 0
-          ? 'No branch drawn between ' + pair[1] + ' and ' + pair[2] + '.'
-          : out.nBranch + (out.nBranch === 1 ? ' branch' : ' branches') + ' between ' + pair[1] + ' and ' + pair[2] + '.'
+          ? 'No branch drawn between ' + from + ' and ' + to + '.'
+          : out.nBranch + (out.nBranch === 1 ? ' branch' : ' branches') + ' between ' + from + ' and ' + to + '.'
         return out
       }
       const num = /^bus-?(\d+)$/.exec(q)
@@ -1427,9 +1448,10 @@ module.exports = {
     }
 
     // What the search dialog tells the user, for THIS case (0.6.25): the bus count and the range
-    // the diagram actually draws, a branch example built from two of its own numbers, and -- when
-    // the case's result table carries names -- one of them to search on. Without that table it says
-    // so, instead of suggesting a name search that cannot work.
+    // the diagram actually draws, a branch example built from two of its own buses (in the id
+    // spelling since 0.6.35), and -- when the case's result table carries names -- one of them to
+    // search on. Without that table it says so, instead of suggesting a name search that cannot
+    // work.
     function drawioSearchHelp(scene, meta) {
       const nums = []
       if (scene !== null && scene !== undefined && Array.isArray(scene.nodes)) {
@@ -1452,17 +1474,20 @@ module.exports = {
       }
       if (uniq.length === 0) {
         return {
-          placeholder: '1001, Bus-1001, 1001->1002',
-          hint: 'A number or id finds one bus, 1001->1002 the branches between two, and part of a name finds every bus whose name contains it.',
+          placeholder: '1001, Bus-1001, Bus-1001 -> Bus-1002',
+          hint: 'A number or id finds one bus, 1001->1002 or Bus-1001 -> Bus-1002 the branches between two, and part of a name finds every bus whose name contains it.',
         }
       }
       const first = uniq[0]
       const second = uniq.length > 1 ? uniq[1] : uniq[0]
+      // 0.6.35: the example is the id spelling (`Bus-1 -> Bus-2`), the one a person copies out of
+      // the drawing; the bare pair is named next to it so both forms are on screen.
       const pair = first + '->' + second
+      const idPair = 'Bus-' + first + ' -> Bus-' + second
       const range = uniq.length === 1 ? 'Bus-' + first : 'Bus-' + first + ' to Bus-' + uniq[uniq.length - 1]
-      const placeholder = [String(first), 'Bus-' + first].concat(word === '' ? [] : [word]).concat([pair]).join(', ')
+      const placeholder = [String(first), 'Bus-' + first].concat(word === '' ? [] : [word]).concat([idPair]).join(', ')
       const hint = uniq.length + (uniq.length === 1 ? ' bus here (' : ' buses here (') + range + '). '
-        + 'A number or id finds one bus, ' + pair + ' the branches between two'
+        + 'A number or id finds one bus, ' + pair + ' or ' + idPair + ' the branches between two'
         + (word === '' ? '; bus names need this case\u2019s ACLF result table, which is not there.'
           : ', and part of a name like "' + word + '" finds every bus whose name contains it.')
         + ' Matches are highlighted in the drawing.'
@@ -1540,6 +1565,53 @@ module.exports = {
       }
     }
 
+    // What a search found, as ONE box in scene coordinates: a matched node from its own rectangle
+    // (a bar, or the `Bus-N` label beside it) and a matched branch from its polyline. The box is
+    // what the view is centred on rather than a cell, so a pair (`Bus-1 -> Bus-2`) frames between
+    // its two bars and a name that found several buses frames all of them.
+    function drawioHitBounds(scene, hits) {
+      if (scene === null || scene === undefined || hits === null || hits === undefined) return null
+      const ids = {}
+      for (const id of Object.keys(hits.buses || {})) ids[id] = true
+      for (const id of Object.keys(hits.edges || {})) ids[id] = true
+      let x0 = Infinity
+      let y0 = Infinity
+      let x1 = -Infinity
+      let y1 = -Infinity
+      const grow = (x, y) => {
+        if (x < x0) x0 = x
+        if (y < y0) y0 = y
+        if (x > x1) x1 = x
+        if (y > y1) y1 = y
+      }
+      for (const n of scene.nodes || []) {
+        if (ids[n.id] !== true) continue
+        grow(n.x, n.y)
+        grow(n.x + n.w, n.y + n.h)
+      }
+      for (const e of scene.edges || []) {
+        if (ids[e.id] !== true) continue
+        for (const p of e.points || []) grow(p.x, p.y)
+      }
+      if (x0 === Infinity || y0 === Infinity) return null
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+    }
+
+    // Where the canvas looks after a search (0.6.37): the same-size window, centred on what was
+    // found and held inside the drawing by the clamp the birdseye already uses. Only the POSITION
+    // moves -- the zoom is the one the user chose, and at Fit the whole drawing is on screen
+    // already, so there the window is as centred as it can be. A query that matched nothing (or a
+    // hit the scene does not carry) leaves the view exactly where it was.
+    function drawioCentreRect(scene, rect, hits) {
+      if (scene === null || scene === undefined || rect === null || rect === undefined) return rect
+      const box = drawioHitBounds(scene, hits)
+      if (box === null) return rect
+      const vb = scene.viewBox
+      const fx = vb.w === 0 ? 0.5 : (box.x + box.w / 2 - vb.x) / vb.w
+      const fy = vb.h === 0 ? 0.5 : (box.y + box.h / 2 - vb.y) / vb.h
+      return drawioBirdseyeRect(scene, rect, fx, fy)
+    }
+
     // The thumbnail. Pointer events are captured here and never bubble: they must not also pan the
     // canvas underneath, which is why every handler stops propagation.
     function DrawioBirdseye(props) {
@@ -1578,7 +1650,7 @@ module.exports = {
         React.createElement('rect', {
           key: 'v',
           x: rect.x, y: rect.y, width: rect.w, height: rect.h,
-          fill: DRAWIO_MATCH_FILL, fillOpacity: 0.18, stroke: DRAWIO_MATCH_FILL,
+          fill: DRAWIO_BIRDSEYE_FRAME, fillOpacity: 0.18, stroke: DRAWIO_BIRDSEYE_FRAME,
           strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke',
         }),
       )
@@ -3534,7 +3606,6 @@ module.exports = {
       const [scene, setScene] = React.useState(null)
       const [loading, setLoading] = React.useState(false)
       const [error, setError] = React.useState(null)
-      const [view, setView] = React.useState('rendered')
       const [resultDir, setResultDir] = React.useState(null)
       const [branchFile, setBranchFile] = React.useState(null)
       const [busFile, setBusFile] = React.useState(null)
@@ -3813,7 +3884,6 @@ module.exports = {
         setXml('')
         setScene(null)
         setError(null)
-        setView('rendered')
         setRect(null)
         setEditMsg(null)
         setLoading(true)
@@ -4129,7 +4199,17 @@ module.exports = {
       // drawing exactly as it was.
       function applySearch() {
         const q = String(searchText).trim()
-        setSearchQuery(q === '' ? null : q)
+        const next = q === '' ? null : q
+        setSearchQuery(next)
+        // 0.6.37: what the search selects comes to the middle of the view. Read here, on the
+        // deliberate act, and not in an effect keyed on the query -- an effect would re-centre on
+        // every later render and undo the pan the moment the user looked somewhere else. A FITTED
+        // view (`rect === null`) is left alone: the whole drawing is on screen, so there is nothing
+        // to move, and a window equal to the whole page would only cost the picker its `Fit` entry.
+        if (next !== null && scene !== null && rect !== null) {
+          const hits = drawioSearchHits(next, scene.nodes, scene.edges, busNames)
+          if (hits.nBus + hits.nBranch > 0) setRect(drawioCentreRect(scene, rect, hits))
+        }
         setDialog(null)
       }
 
@@ -4276,7 +4356,7 @@ module.exports = {
 
       const hintStyle = { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }
       // The search dialog's help is about THIS case: how many buses it draws, the range, a branch
-      // example from its own numbers, and a name to try when its result table carries names.
+      // example from its own bus ids, and a name to try when its result table carries names.
       const searchHelp = drawioSearchHelp(scene, busMeta)
       const cfgErrors = dialog === 'config' ? drawioNetConfigErrors(cfgForm) : {}
       const cfgField = (field) => {
@@ -4425,17 +4505,14 @@ module.exports = {
       const toolbar = (path !== '' || picker !== null)
         ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
           picker,
-          // `R` / `S` rather than `Rendered` / `Source` (0.6.17): this row is the drawing's
-          // controls, and the two words took a third of it for the two most obvious buttons. The
-          // tooltip and the accessible name carry the meaning the label no longer spells out.
-          path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), title: 'Rendered view', 'aria-label': 'Rendered view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'R') : null,
-          path !== '' ? React.createElement('button', { onClick: () => setView('source'), title: 'Source view — the raw draw.io XML', 'aria-label': 'Source view', style: { ...btn, padding: '4px 0', minWidth: '34px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'S') : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
+          // The row is the drawing's controls. The `R` / `S` view toggle that used to lead it is
+          // gone (0.6.34): the tab always draws the rendered scene, so the zoom pair starts here.
+          path !== '' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
           // The readout is the zoom picker (0.6.21): it shows the current level and sets it, and
           // since 0.6.22 it carries **Fit** as its last entry, so the row is `−`, the picker, `+`
           // and nothing else. A level reached with the wheel or a pinch is listed alongside the
           // presets, so going to 100% and back to the old 745% is one click either way.
-          path !== '' && view === 'rendered' && scene !== null
+          path !== '' && scene !== null
             ? (function () {
               const pctNow = drawioZoomPercent(scene, rect)
               const fitted = rect === null
@@ -4456,24 +4533,24 @@ module.exports = {
               }, options)
             })()
             : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
+          path !== '' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
           // Search and filter (0.6.23): two icon buttons after the zoom controls. Each opens a
           // dialog whose OK applies and whose Cancel throws the draft away. The filter button stays
           // lit while a filter is applied, and the status text clears both (a span, not a button --
           // the row's controls are the ones the mock specifies).
-          path !== '' && view === 'rendered' && scene !== null
+          path !== '' && scene !== null
             ? React.createElement('button', {
               onClick: openSearch, title: 'Search the diagram', 'aria-label': 'Search the diagram',
               style: { ...btn, padding: '4px 8px', display: 'flex', alignItems: 'center' },
             }, drawioSearchIcon)
             : null,
-          path !== '' && view === 'rendered' && scene !== null
+          path !== '' && scene !== null
             ? React.createElement('button', {
               onClick: openFilter, title: 'Filter the diagram', 'aria-label': 'Filter the diagram',
               style: { ...btn, padding: '4px 8px', display: 'flex', alignItems: 'center', borderColor: filterApplied === null ? 'var(--dsw-alias-border-l1)' : 'var(--dsw-alias-brand-primary)' },
             }, drawioFilterIcon)
             : null,
-          path !== '' && view === 'rendered' && scene !== null && statusText !== null
+          path !== '' && scene !== null && statusText !== null
             ? React.createElement('span', {
               onClick: clearSearchFilter,
               title: 'Clear the search and the filter',
@@ -4482,7 +4559,7 @@ module.exports = {
             : null,
           // The flag counts, tinted by the config's own colours and clickable to open the gear --
           // so what the thresholds are doing is visible without opening the dialog.
-          path !== '' && view === 'rendered' && scene !== null && flagCounts !== null
+          path !== '' && scene !== null && flagCounts !== null
             ? React.createElement('span', {
               onClick: openConfig,
               title: 'Flagged by config/net_diagram.json \u2014 click to change the thresholds',
@@ -4508,8 +4585,6 @@ module.exports = {
                 ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading diagram…')
                 : error !== null
                   ? React.createElement('pre', { style: { ...mono, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, error)
-                  : view === 'source'
-                    ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, xml || '')
                     : scene !== null
                       ? React.createElement('div', {
                         ref: canvasRef,

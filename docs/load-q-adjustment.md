@@ -18,7 +18,7 @@ confirm sequence with the tool calls; this note is the engineering behind it.
 | When           | One bus is outside the voltage band; coupling to other targets is weak | Two or more buses must land in the same band and are strongly coupled                   |
 | Sensitivity    | Scalar `dV/dQ` at the monitor bus                                      | N×N `dV/dQ` matrix among the adjusted buses                                             |
 | Sizing         | B″ first cut, then AC secant steps; target = midpoint of the band      | Re-measure the matrix by finite differences each pass; damped Newton with a line search |
-| IEEE14 example | Bus14 only → Q 50.0 → 46.0 MVAr, V = 0.895 pu                          | Bus13 + Bus14 → Q 50.0/50.0 → 45.5/21.3 MVAr, V = 0.899 / 0.891 pu                      |
+| IEEE14 example (shipped **[0.90, 0.91]** band) | Bus14 only → Q 50.0 → **44.1** MVAr, V ≈ **0.905** pu | Bus13 + Bus14 → Q → **47.33 / 17.51** MVAr, V ≈ **0.905 / 0.905** pu |
 
 
 ---
@@ -111,10 +111,14 @@ Raise V(Bus14) into **[0.89, 0.90]** pu by reducing Bus14 load Q only.
 ### Scripts
 
 
-| File                                                            | Role                                                              |
-| --------------------------------------------------------------- | ----------------------------------------------------------------- |
-|  Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window | Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
-| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_adjBus14Q_0p89to0p90.gvy` | Mutating. Sets Bus14 load to 14.9 MW + j46.0 MVAr                 |
+| File                                                              | Role                                                              |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`             | Read-only. `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
+| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14_0p90to0p91.gvy`  | Read-only. Same for the shipped **[0.90, 0.91]** band (Example A′) |
+| `…/Ieee14Bus_LargeLoadQ/scripts/ieee14_adjBus14Q_0p90to0p91.gvy`   | Mutating. Sets Bus14 load to 14.9 MW + j44.1 MVAr (shipped)       |
+
+The historical `[0.89, 0.90]` setter (`ieee14_adjBus14Q_0p89to0p90.gvy`) is **not in the checkout**;
+use the `*0p90to0p91*` scripts (Example A′) for the current fixtures.
 
 
 Bare script names resolve to the case folder's `scripts/` directory under `interpss_run_gvy`.
@@ -175,16 +179,16 @@ Converged; lowest voltages: Bus14 **0.895243**, Bus13 0.979, Bus10 0.988. No bus
 ```text
 interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee' })
 interpss_run_aclf({ case: '…' })
-interpss_run_gvy({ case: '…', script: 'ieee14_dvdq_Bus14.gvy' })
-interpss_run_gvy({ case: '…', script: 'ieee14_adjBus14Q_0p89to0p90.gvy', reload: true })
+interpss_run_gvy({ case: '…', script: 'ieee14_dvdq_Bus14_0p90to0p91.gvy' })
+interpss_run_gvy({ case: '…', script: 'ieee14_adjBus14Q_0p90to0p91.gvy', reload: true })
 interpss_run_aclf({ case: '…' })
 ```
 
 There is no CLI path for these scripts: `IpssCmd` has no `gvy` subcommand, and a CLI `aclf`
 run is its own JVM — nothing stays loaded for the next command.
 
-**Lesson from this example:** aiming at exactly 0.90 pu landed at 0.900423 (outside the band);
-the working target is the midpoint of [0.89, 0.90].
+**Lesson from this example:** aiming at exactly a band edge overshoots; the working target is the
+midpoint (see Example A′ for the shipped **[0.90, 0.91]** numbers).
 
 ---
 
@@ -236,7 +240,7 @@ Example A — yet still 1.5 MVAr optimistic at the 0.90 edge.
 
 |         |                                                                                    |
 | ------- | ---------------------------------------------------------------------------------- |
-| Case    | `wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee.ieee` → same case as Example A          |
+| Case    | `wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee` — same case as Example A        |
 | Problem | Bus14 at 14.9 MW + j50.0 MVAr, V = 0.871352 pu; target band **[0.90, 0.91]**        |
 | Result  | Q 50.0 → **44.1 MVAr**, **V(Bus14) = 0.905016 pu** — the band midpoint              |
 
@@ -377,15 +381,15 @@ alone, which is why the reference matrix and the AC Jacobian diverge so far.
 
 ```text
 interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee' })
-interpss_run_gvy({ script: 'ieee14_qv_adjust.gvy', reload: true })                 # derives Q13/Q14 (7 passes)
-interpss_run_gvy({ script: 'ieee14_adjBus1314Q_0p89to0p90.gvy', reload: true })    # applies the values
-interpss_run_aclf()                                                               # confirm V13 / V14
-interpss_run_gvy({ script: 'ieee14_dvdq_matrix.gvy' })                            # matrices at the target
+interpss_run_gvy({ script: 'ieee14_qv_adjust_0p90to0p91.gvy', reload: true })   # derives Q13/Q14 (8 passes)
+interpss_run_gvy({ script: 'ieee14_adjBus1314Q_0p90to0p91.gvy', reload: true }) # applies the values
+interpss_run_aclf()                                                            # confirm V13 / V14
 ```
 
 No ACLF is needed before the first step: the stored case does not converge, and the adjuster anchors
 itself. Once the two Q values are known, the setter reproduces the state on its own — run it with
-`reload: true` so it starts from the stored case.
+`reload: true` so it starts from the stored case. Prefer the shipped **[0.90, 0.91]** pair
+(Example B′); `ieee14_qv_adjust.gvy` is the older band adjuster kept for reference.
 
 **Lessons from this example:** solve the pair together; re-measure every pass; start from a
 solvable anchor; mind the injection vs load convention (`J = −M`).
@@ -407,8 +411,11 @@ setter on a fresh parse (`reload: true`), which is also what makes the result re
 - `docs/user_guide/loadflow-adjustment-user-guide.md` — practical how-to for DSH Chat
 - `docs/groovy-script-adapter-architecture.md` — `aclfnet` / `senAlgo` binding and sensitivity semantics
 - `docs/interpss-tools.md` — `interpss_run_gvy` / `interpss_run_aclf` contracts
-- Example A: `Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14.gvy`, `ieee14_adjBus14Q_0p89to0p90.gvy`
-- Example B: `Ieee14Bus_LargeLoadQ2/scripts/ieee14_dvdq_matrix.gvy`, `ieee14_qv_adjust.gvy`,
-  `ieee14_adjBus1314Q_0p89to0p90.gvy`
+- Example A′ (shipped): `Ieee14Bus_LargeLoadQ/scripts/ieee14_dvdq_Bus14_0p90to0p91.gvy`,
+  `ieee14_adjBus14Q_0p90to0p91.gvy`
+- Example B′ (shipped): `Ieee14Bus_LargeLoadQ2/scripts/ieee14_qv_adjust_0p90to0p91.gvy`,
+  `ieee14_adjBus1314Q_0p90to0p91.gvy`
 - Skills: `ipss-case-aclf-adjust` (the packaged workflow), `ipss-case-script`, `ipss-case-aclf`
+- Release: [Release-V0.7.0.md](release_note/Release-V0.7.0.md) (Diagram line); load-Q fixtures
+  refreshed with the 0.6.33 → 0.7.0 workspace updates
 

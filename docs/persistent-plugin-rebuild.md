@@ -248,7 +248,8 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   no new endpoint — `reportType` is an added optional input field
 - **Diagram preview** (Client half, since 0.6.1): a `.drawio` file is read through
   `interpss/readDrawio`, decoded with `diagramXmlFrom`, and rendered with `parseDrawioScene` +
-  `DrawioDiagram` as inline SVG with a Rendered / Source toggle. Since 0.6.9 that preview has
+  `DrawioDiagram` as inline SVG. (It carried a Rendered / Source toggle until 0.6.34, which removed
+  it: the tab always draws the rendered scene.) Since 0.6.9 that preview has
   exactly **one** surface — the **Diagram tab** below — and `readDrawio` has exactly one
   caller. 0.6.1–0.6.8 the InterPSS action row also carried a **Diagram** button that opened the
   same preview in a modal, gated by the selected case's `diagram/` folder and nothing else
@@ -380,8 +381,8 @@ registrar of the browser-facing `/api` endpoints (the dynamic host consumes
   Trajectory (10) — showing the preview full-size. It has **no heading and no subtitle** (0.6.10):
   the tab bar names the view and the first row (`Simu Case <path>`) says what is drawn, so a
   title block only pushed the diagram down. Its toolbar is controls only — the picker (when the
-  case has several files), `R` / `S` (the Rendered / Source toggle, spelled out only in the
-  tooltip and the accessible name since 0.6.17), `−` / percent / `+`, `Fit`; the
+  case has several files), `−` / percent / `+` and the picker's `Fit` — the `R` / `S` view toggle
+  led this row from 0.6.17 until 0.6.34 removed it; the
   `Scroll to zoom · drag to pan` hint that followed `Fit` was dropped
   in 0.6.11, because the gestures are discoverable without a sentence in the control row.
   The **draw.io-marked edit button** (since 0.6.12) that hands the open file to the local
@@ -517,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.6.3.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.0.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.6.3.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.0.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -564,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 309 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 316 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -602,7 +603,8 @@ mechanism caught the 0.6.0 modal defect as
 `drawioRect is declared 833 chars after the effect`.
 - §12 (since 0.6.8) is the render-time coverage now: it renders the **Diagram tab** idle, with
   no case, with no diagram, with a failed listing, with an open diagram and a live scene, with
-  a tooltip on screen and in its Source view. Overrides are addressed
+  a tooltip on screen, and with the raw XML in state (there is no Source view since 0.6.34).
+  Overrides are addressed
   by the view's **own** `useState` order (a fresh harness renders `DiagramView` alone, so the
   call counter starts at zero), and it proves §7 inspects the new view by requiring that
   regex to parse every one of its effects. Verified by mutation: adding a dep declared below
@@ -610,9 +612,10 @@ mechanism caught the 0.6.0 modal defect as
   renders throw `Cannot access 'fileCount' before initialization` — the blank-tab defect,
   twice over. It also holds the **toolbar's shape**: the edit button's ancestor chain (the
   upper-right corner), that the toolbar row still ends at **Fit** and carries no edit button, and
-  — since 0.6.17 — that the view toggle is the letters `R` / `S` **with** their tooltip and
-  accessible name still saying `Rendered view` / `Source view — the raw draw.io XML`, because a
-  bare letter with no label would be a regression even though the pixels look right.
+  — since 0.6.34 — that the row carries **no view toggle of any spelling** and starts at the
+  zoom-out control (the `R` / `S` letters, with `Rendered view` / `Source view` in their tooltips,
+  led this row and were asserted here from 0.6.17 until the toggle was removed), and that neither the state
+  (`const [view, setView]`) nor a `view === 'source'` branch survives anywhere in the tab.
 - §10 asserts the shape of the tab bar's data instead of the button it lost: the host listing
   stays scoped to the case's `diagram/` folder, the action row still carries ACLF / CA /
   Report, it has **no** Diagram button, and `drawioFiles` / `drawioOpen` /
@@ -653,12 +656,18 @@ mechanism caught the 0.6.0 modal defect as
 - §16 (since 0.6.23; the draft-preview rule since 0.6.24) covers **diagram search and filter**: that
   every edge resolves to a bus pair
   through its transformer group's sibling ring (0 of 25 unresolved on the reference scene, and each
-  transformer's two stubs agree), the query forms (number, `Bus-N`, name substring, `A-B` pair, and
+  transformer's two stubs agree), the query forms (number, `Bus-N`, name substring, a branch as an
+  `A-B` pair or between two ids -- `Bus-A -> Bus-B`, the id spelling added in 0.6.35, with ten
+  spellings pinned and the id/number equivalence and reply wording asserted -- and
   the cases that must say "no match"), the bus-table fold into area/zone lists with page merging,
   the filter's hiding rules (nothing when it has no criteria; a bus by area; the band filter keeping
   exactly the flagged buses; a branch hidden when either end is; rings and their group hidden with a
   hidden stub), and the paint path itself -- a hidden cell leaves the tree, a matched bar, label and
-  branch take the search colour.
+  branch take the search colour. Since 0.6.37 it also pins **where a search leaves the view**: the
+  window's own size is kept, it is centred on the union of the hit boxes (`155,213` for Bus-5's
+  bar+label, x `173` for the `1->2` pair with its y clamped to the paper's top edge), a query that
+  found nothing / a null scene / a fitted view are returned untouched, and the one call site is in
+  `applySearch` rather than in an effect.
 - §15 (since 0.6.19) pins the **size limits and their boundary**: the preview cap is 20000 cells, both
   hosts read up to 4 MiB (4 194 304 bytes, 0.6.20 — raised 2 -> 5 MiB in 0.6.19, trimmed to 4 MiB in
   0.6.20 because the largest drawing here is ~2.9 MiB), and the generator's own self-check allows
@@ -740,8 +749,8 @@ Client-half change is served with the plugin bundle, so the reload is what picks
 - **Diagram tab** (since 0.6.8): the tab bar reads **Chat · InterPSS · Diagram · Trajectory**,
   and the InterPSS action row reads **ACLF · ⚙ · CA · Report** (the 0.6.9 change). The tab opens
   straight onto its **Simu Case** row — no heading, no subtitle (0.6.10) — with a toolbar of
-  controls that reads **R · S · − · [level ▾] · + · 🔍 · ▼** (`R` / `S` since 0.6.17; hovering them says
-  `Rendered view` / `Source view — the raw draw.io XML`). **The level readout is the zoom picker
+  controls that reads **− · [level ▾] · + · 🔍 · ▼** (`R · S` led it from 0.6.17 until 0.6.34 removed
+  the view toggle, so the drawing is always shown rendered). **The level readout is the zoom picker
   since 0.6.21, and it carries Fit since 0.6.22**: a `select` labelled *Zoom level* offering 25 / 50 /
   75 / 100 / 125 / 150 / 200 / 300 / 400 % **and `Fit` as its last entry**, sitting exactly between
   `−` and `+` — which is now the end of the row, since Fit's own button is gone. A percentage picks
@@ -755,14 +764,26 @@ Client-half change is served with the plugin bundle, so the reload is what picks
     dialog whose **OK** applies and whose **Cancel** only closes (the fields are a draft, and the
     applied value is written by OK alone, so Cancel really cancels).
     - **Search the diagram** takes a bus number (`1001`), a bus id (`Bus-1001`), part of a case bus
-      name (`ODESSA`), or a branch written with an arrow (`1001->1002` since 0.6.25; `-`, `/` and the
-      unicode arrow still work). Its placeholder and help are **about the case in front of it**:
-      the bus count and range the diagram draws, a branch example from its own numbers, and a name
+      name (`ODESSA`), or a branch written with an arrow (`1001->1002` since 0.6.25, and also with
+      its ends as ids — `Bus-1 -> Bus-2` — since 0.6.35; `-`, `/` and the unicode arrow still work,
+      and each id's hyphen and spacing are optional, so `bus1->bus2` and `1 -> Bus-2` mean the same
+      pair). A branch reply names the buses as ids whichever spelling was typed
+      (`3 branches between Bus-1 and Bus-2.`). Its placeholder and help are **about the case in
+      front of it**: the bus count and range the diagram draws, a branch example from its own bus
+      ids, and a name
       from its own table -- or, when the case has no result table, a statement that names cannot be
       searched (rather than a suggestion that cannot work). Matches are
-      repainted in the search blue — bar, label text and branch (a thicker line) — the toolbar shows
+      repainted in the search green `#2EA043` since 0.6.36 — bar, label text and branch (a thicker
+      line), the blue `#1F6FEB` before that, which the birdseye's viewport frame still wears — the
+      toolbar shows
       a `N buses, M branches` count, and the bus table is fetched for the names only when the dialog
       opens. A match outranks the violation red; the tooltip still reports the violation.
+      **OK also brings the match to the middle of the view** (0.6.37): the window keeps its size
+      (the zoom is the user's) and moves onto the union of the hit boxes, held on the paper by the
+      birdseye's own clamp, so a hit near an edge is centred as far as the paper allows. A fitted
+      view, a query that found nothing and a scene that is not there all leave the view alone --
+      and the recentre is in the OK handler rather than an effect, so panning away from a hit is
+      not undone by the next repaint.
     - **Filter the diagram** keeps one **area** and/or one **zone** (lists read from the case's bus
       table, the zone list scoped to the chosen area) and/or only the buses outside the 0.9–1.1 pu
       band. Everything else is **hidden** — bar, label, its branches *and* the transformer symbols on
@@ -799,7 +820,7 @@ Client-half change is served with the plugin bundle, so the reload is what picks
       made the whole family silently invisible until 0.6.31)
       reaches `Contingency_branch_flow_flag_percent` (`blue` by default), and a contingency flag
       outranks a base-case one on the same branch.
-    A search's blue still outranks every flag, because a search is the deliberate act. The dialog's
+    A search's green still outranks every flag, because a search is the deliberate act. The dialog's
     form is a draft (OK saves, Cancel cancels); the Host sanitizes again on save, merges over what
     is on disk (unknown keys survive) and never writes an out-of-range value. Flags are a **preview**
     concern: no colour reaches the `.drawio`, so the desktop app and the PNG stay plain.

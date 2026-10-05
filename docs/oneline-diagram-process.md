@@ -174,7 +174,7 @@ bus/branch tooltips resolve against.
 - **Preview** (the **Diagram** tab, plugin 0.6.8+; 0.6.1–0.6.8 also had a **Diagram** button
   on the InterPSS tab that opened the same preview in a modal — 0.6.9 removed button and modal,
   so the tab is the only surface): lists the selected case's `diagram/*.drawio`, renders inline
-  SVG with a **Source** toggle, pans/zooms/fits, follows the app theme (near-grey colours are
+  SVG (always rendered — the `R`/`S` toggle and its Source view were removed in 0.6.34), pans/zooms/fits, follows the app theme (near-grey colours are
   re-expressed as theme tokens; a deliberately coloured element keeps its colour), and
   shows bus/branch tooltips built from the case's result tables. It renders the subset these
   diagrams use — square rects (`rounded=0`, honoured since 0.6.33), ellipses, text with its

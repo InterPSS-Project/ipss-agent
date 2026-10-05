@@ -130,6 +130,8 @@ function build(overrides) {
       + ' drawioBusAlerts: drawioBusAlerts, drawioBusCellId: drawioBusCellId,'
       + ' drawioVoltOutsideBand: drawioVoltOutsideBand, drawioVoltColumns: drawioVoltColumns,'
       + ' DRAWIO_MAX_CELLS: DRAWIO_MAX_CELLS,'
+      + ' DRAWIO_MATCH_FILL: DRAWIO_MATCH_FILL, DRAWIO_BIRDSEYE_FRAME: DRAWIO_BIRDSEYE_FRAME,'
+      + ' drawioHitBounds: drawioHitBounds, drawioCentreRect: drawioCentreRect,'
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText };');
 
 
@@ -987,8 +989,11 @@ check('the edit button sits in the tab\'s top row, right-aligned (the upper-righ
 check('the button no longer needs the retired sticky-strip workaround',
   styleOf(editButton).position === undefined && styleOf(editButton).pointerEvents === undefined
   && slice.slice(slice.indexOf('function DiagramView(')).indexOf("position: 'sticky'") < 0);
+// 0.6.34 removed the `R` / `S` view toggle, so the row is located by a control that remains:
+// the Search button. (It used to key on the button labelled `R`.)
 const toolbarRow = findInTree(editTree, (n) => n.type === 'div' && Array.isArray(n.kids)
-  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button' && (k.kids || []).indexOf('R') >= 0));
+  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button'
+    && String(k.props.title || '') === 'Search the diagram'));
 check('the toolbar row ends at the filter button, with no draw.io and no separate Fit button',
   toolbarRow !== null
   // the EDIT button's own title — the bare word `draw.io` now also appears in the Source tooltip
@@ -1004,23 +1009,20 @@ check('the toolbar row ends at the filter button, with no draw.io and no separat
     return last !== undefined && String(last.props.title) === 'Filter the diagram';
   })());
 
-// Asked for in 0.6.17: the view toggle is `R` / `S`. The letters only work because the tooltip
-// and the accessible name still say the words, so assert both halves of that bargain — a bare
-// letter with no label would be a UI regression even though the pixels look right.
-const viewButton = (letter) => findInTree(toolbarRow, (n) => n.type === 'button'
-  && (n.kids || []).indexOf(letter) >= 0 && String(n.props.title || '').indexOf('view') >= 0);
-const renderedBtn = toolbarRow === null ? null : viewButton('R');
-const sourceBtn = toolbarRow === null ? null : viewButton('S');
-check('the view toggle is the single letters R and S',
-  renderedBtn !== null && sourceBtn !== null
-  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Rendered') >= 0) === null
-  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Source') >= 0) === null,
-  renderedBtn === null ? 'no R' : String(renderedBtn.props.title));
-check('each letter keeps its meaning in the tooltip and the accessible name',
-  renderedBtn !== null && renderedBtn.props.title === 'Rendered view' && renderedBtn.props['aria-label'] === 'Rendered view'
-  && sourceBtn !== null && String(sourceBtn.props['aria-label']).indexOf('Source view') >= 0
-  && String(sourceBtn.props.title).indexOf('draw.io XML') >= 0,
-  sourceBtn === null ? 'no S' : String(sourceBtn.props.title));
+// 0.6.34: the `R` / `S` view toggle is gone — the tab always draws the rendered scene — so the
+// row must open with the zoom pair and carry no view control of any spelling. The `Rendered` /
+// `Source` buttons in the *report* view of the InterPSS tab are a different surface and stay.
+const toolbarButtons = toolbarRow === null ? [] : (toolbarRow.kids || [])
+  .filter((k) => k !== null && k !== undefined && k.type === 'button');
+const firstToolbarLabel = toolbarButtons.length === 0 ? null : (toolbarButtons[0].kids || [])[0];
+check('the toolbar carries no view toggle, and starts at the zoom-out control',
+  toolbarRow !== null && firstToolbarLabel === '\u2212'
+  && ['R', 'S', 'Rendered', 'Source'].every((letter) => findInTree(toolbarRow,
+    (n) => n.type === 'button' && (n.kids || []).indexOf(letter) >= 0) === null)
+  && slice.indexOf("const [view, setView]") < 0
+  && slice.indexOf("setView(") < 0
+  && slice.indexOf("view === 'source'") < 0,
+  toolbarRow === null ? 'no toolbar' : String(firstToolbarLabel));
 
 // 0.6.21, the zoom picker, checked structurally: it is a `select` in the toolbar row, it sits
 // exactly between the two step buttons, and its handler exists (the harness's setState is a
@@ -1113,7 +1115,7 @@ const searchDialogFlat = renderFlat(withState([
 ]));
 check('the search dialog shows this case\'s help and an arrow placeholder',
   searchDialogFlat.indexOf('14 buses here (Bus-1 to Bus-14)') > 0
-  && searchDialogFlat.indexOf('1->2') > 0 && searchDialogFlat.indexOf('ODESSA') > 0
+  && searchDialogFlat.indexOf('Bus-1 -> Bus-2') > 0 && searchDialogFlat.indexOf('ODESSA') > 0
   && searchDialogFlat.indexOf('1001-1002') < 0,
   searchDialogFlat.slice(searchDialogFlat.indexOf('14 buses'), searchDialogFlat.indexOf('14 buses') + 70));
 check('the search dialog keeps OK and Cancel wired, and Cancel only closes',
@@ -1308,6 +1310,14 @@ check('the canvas carries a birdseye with the whole scene and the visible rectan
   && birdseye.props.viewBox === scene.viewBox.x + ' ' + scene.viewBox.y + ' ' + scene.viewBox.w + ' ' + scene.viewBox.h
   && birdseyeRect !== undefined && birdseyeRect.props.width === scene.viewBox.w && birdseyeRect.props.height === scene.viewBox.h,
   birdseye === null ? 'no birdseye' : String(birdseye.props.viewBox));
+// 0.6.36: two accents, deliberately apart. The search highlight turned green; the viewport frame
+// kept the blue, because the frame answers "where am I looking", not "what did I find" -- so it
+// must not follow the match colour when that colour changes again.
+check('the viewport frame wears the frame colour, not the search highlight',
+  birdseyeRect !== undefined && birdseyeRect.props.fill === api.DRAWIO_BIRDSEYE_FRAME
+  && birdseyeRect.props.stroke === api.DRAWIO_BIRDSEYE_FRAME
+  && api.DRAWIO_MATCH_FILL !== api.DRAWIO_BIRDSEYE_FRAME,
+  (birdseyeRect === undefined ? 'no rect' : birdseyeRect.props.fill) + ' vs match ' + api.DRAWIO_MATCH_FILL);
 check('the birdseye sits inside the canvas, which is a positioning context',
   String(birdseye.props.style.position) === 'absolute'
   && slice.indexOf("position: 'relative', height: '70vh'") >= 0
@@ -1386,15 +1396,18 @@ if (scene) {
     && typeof found[0].props.hover.onBranch === 'function',
     found.length === 1 ? 'view=' + String(found[0].props.view) : '');
 }
-const sourceTab = renderFlat(withState([
+// 0.6.34: there is no Source view to reach any more. The same file must render, and the raw XML
+// must not be dumped anywhere in the tab.
+const noSourceTab = renderFlat(withState([
   ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
   ['files', tabFiles(1)],
   ['filesLoading', false],
   ['path', 'wspace/data/c/diagram/d0.drawio'],
-  ['view', 'source'],
   ['xml', '<mxfile><diagram/></mxfile>'],
 ]));
-check('the Source view shows the raw file', sourceTab.indexOf('<mxfile><diagram/></mxfile>') >= 0, sourceTab.slice(0, 90));
+check('the raw file is never shown: the tab always renders', 
+  noSourceTab.indexOf('<mxfile><diagram/></mxfile>') < 0 && noSourceTab.indexOf('THREW') < 0,
+  noSourceTab.slice(0, 60));
 // The modal that used to live in InterPssView is gone, so `readDrawio` must have exactly
 // one caller left. A second one would mean a preview surface grew back beside this tab.
 check('the preview has exactly one entry point left, and it is this view',
@@ -1752,7 +1765,23 @@ check('the arrow spellings are equivalent, and a branch says which one it found'
     && hit(q).buses.bus1 === true && hit(q).buses.bus2 === true),
   ['1->2', '1-2', '1/2', '1\u21922'].map((q) => q + ':' + hit(q).nBranch).join(' '));
 check('a pair with no branch says so instead of highlighting nothing',
-  hit('1-99').nBus === 0 && hit('1-99').text.indexOf('99') >= 0, hit('1-99').text);
+  hit('1-99').nBus === 0 && hit('1-99').text.indexOf('99') >= 0
+  && hit('Bus-1 -> Bus-99').nBus === 0
+  && hit('Bus-1 -> Bus-99').text.indexOf('No branch between Bus-1 and Bus-99') >= 0,
+  hit('1-99').text + ' | ' + hit('Bus-1 -> Bus-99').text);
+// 0.6.35: a branch may name its ends the way the drawing does -- `Bus-1 -> Bus-2`. The `bus`
+// prefix, its hyphen and any spacing are optional on either end, so every one of these is the
+// same pair, and the reply names the buses as ids whichever spelling was typed.
+const idPairForms = ['Bus-1 -> Bus-2', 'Bus-1->Bus-2', 'bus-1 -> bus-2', 'Bus1->Bus2', 'bus 1 -> bus 2',
+  'Bus-1 - Bus-2', 'Bus-1/2', 'Bus-1\u21922', '1 -> Bus-2', 'Bus-1 -> 2'];
+check('a branch may be written with bus ids, in any case or spacing, on either end',
+  idPairForms.every((q) => hit(q).nBranch >= 1 && hit(q).buses.bus1 === true && hit(q).buses.bus2 === true),
+  idPairForms.map((q) => q + ':' + hit(q).nBranch).join(' '));
+check('an id pair strips the ids down to the same buses, and answers in the drawing\'s spelling',
+  hit('Bus-1 -> Bus-2').nBranch === hit('1->2').nBranch
+  && hit('Bus-1 -> Bus-2').text === hit('1->2').text
+  && hit('Bus-1 -> Bus-2').text.indexOf('between Bus-1 and Bus-2.') > 0,
+  hit('1->2').text + ' | ' + hit('Bus-1 -> Bus-2').text);
 check('an unknown query says nothing matches, and an empty one asks for input',
   hit('9999').nBus === 0 && hit('9999').text.indexOf('Nothing matches') >= 0 && hit('').text.indexOf('Type a bus number') >= 0);
 check('a bus number that is also a name substring is still one hit per bus',
@@ -1820,23 +1849,23 @@ check('a hidden transformer stub hides its rings and their group too',
     return true;
   })());
 // The search dialog's help is about the case in front of it (0.6.25): its own bus count and range,
-// a branch example from its own numbers, and a name from its own table -- or a plain statement that
-// there is no table to get names from.
+// a branch example from its own buses (ids since 0.6.35), and a name from its own table -- or a
+// plain statement that there is no table to get names from.
 const helpWithNames = api.drawioSearchHelp(scene, { ofBus: { bus1: { name: 'ODESSA 2 0' }, bus2: { name: 'PRESIDIO' } } });
 check('the search help names this case\'s bus count, range and branch example',
   helpWithNames.hint.indexOf('14 buses here (Bus-1 to Bus-14)') === 0
-  && helpWithNames.hint.indexOf('1->2 the branches between two') > 0
+  && helpWithNames.hint.indexOf('1->2 or Bus-1 -> Bus-2 the branches between two') > 0
   && helpWithNames.hint.indexOf('"ODESSA"') > 0
-  && helpWithNames.placeholder === '1, Bus-1, ODESSA, 1->2',
+  && helpWithNames.placeholder === '1, Bus-1, ODESSA, Bus-1 -> Bus-2',
   helpWithNames.placeholder + ' | ' + helpWithNames.hint);
 const helpNoNames = api.drawioSearchHelp(scene, null);
 check('without a bus table the help says names cannot be searched',
   helpNoNames.hint.indexOf('need this case\u2019s ACLF result table') > 0
-  && helpNoNames.placeholder.indexOf('Bus-1') > 0 && helpNoNames.placeholder.indexOf('1->2') > 0,
+  && helpNoNames.placeholder.indexOf('Bus-1') > 0 && helpNoNames.placeholder.indexOf('Bus-1 -> Bus-2') > 0,
   helpNoNames.placeholder + ' | ' + helpNoNames.hint);
 check('the search help survives having no scene at all',
-  api.drawioSearchHelp(null, null).hint.indexOf('1001->1002') > 0
-  && api.drawioSearchHelp({ nodes: [] }, null).placeholder.indexOf('1001') >= 0,
+  api.drawioSearchHelp(null, null).hint.indexOf('1001->1002 or Bus-1001 -> Bus-1002') > 0
+  && api.drawioSearchHelp({ nodes: [] }, null).placeholder === '1001, Bus-1001, Bus-1001 -> Bus-1002',
   JSON.stringify([api.drawioSearchHelp(null, null), api.drawioSearchHelp({ nodes: [] }, null)]));
 
 // The paint path itself: `hidden` must remove a cell from the tree entirely (not merely recolour
@@ -1867,6 +1896,50 @@ check('a matched branch is thicker and in the search colour',
     return line !== undefined && line.props.stroke === '#1F6FEB'
       && line.props.strokeWidth > (scene.edges[0].strokeWidth || 1);
   })());
+// 0.6.36: the highlight is green, not the accent blue it shipped with -- a bus or branch that was
+// *found* should not read as a link. `green` itself would be too dark on the dark canvas, so the
+// mid-luminance `#2EA043` it is, and it stays distinct from the config's own flag colours (the
+// base-case flag's default is plain `green`, which a search must outrank rather than match).
+check('the search highlight is the mid-luminance green, not a flag colour',
+  api.DRAWIO_MATCH_FILL === '#2EA043' && api.DRAWIO_MATCH_FILL !== 'green'
+  && api.DRAWIO_MATCH_FILL !== api.DRAWIO_BIRDSEYE_FRAME,
+  api.DRAWIO_MATCH_FILL + ' (frame ' + api.DRAWIO_BIRDSEYE_FRAME + ')');
+
+// 0.6.37: what a search selects is brought to the middle of the view. The window keeps its SIZE --
+// the zoom stays the one the user chose -- and is centred on the union of the hit boxes, so a pair
+// frames between its two bars and a name that found several buses frames all of them. The numbers
+// below are the fixture's own: Bus-5's bar+label box (120..190, 174..252) centres on 155,213, and
+// the 1->2 pair (48..298, 22..102) on 173,62 -- whose y cannot be honoured, because centring a
+// 200-tall window there would hang it 38 units above the paper, so the clamp pins it to the top.
+const centreProbe = { x: scene.viewBox.x + 100, y: scene.viewBox.y + 80, w: scene.viewBox.w / 4, h: scene.viewBox.h / 4 };
+const centred5 = api.drawioCentreRect(scene, centreProbe, hit('5'));
+const centredPair = api.drawioCentreRect(scene, centreProbe, hit('1->2'));
+check('a search centres the view on the bus it found, keeping the zoom',
+  centred5.w === centreProbe.w && centred5.h === centreProbe.h
+  && centred5.x + centred5.w / 2 === 155 && centred5.y + centred5.h / 2 === 213,
+  JSON.stringify(centred5));
+check('a branch pair frames between its two bars, with the window held on the paper',
+  centredPair.w === centreProbe.w && centredPair.x + centredPair.w / 2 === 173
+  && centredPair.y === scene.viewBox.y,
+  JSON.stringify(centredPair) + ' vs pair centre x 173');
+check('nothing found, no scene, and Fit all leave the view exactly where it was',
+  JSON.stringify(api.drawioCentreRect(scene, centreProbe, hit('9999'))) === JSON.stringify(centreProbe)
+  && api.drawioCentreRect(null, centreProbe, hit('5')) === centreProbe
+  && api.drawioHitBounds(scene, hit('9999')) === null && api.drawioHitBounds(null, hit('5')) === null
+  && JSON.stringify(api.drawioCentreRect(scene, api.drawioFitRect(scene.viewBox), hit('5')))
+    === JSON.stringify(api.drawioFitRect(scene.viewBox)),
+  JSON.stringify(api.drawioCentreRect(scene, api.drawioFitRect(scene.viewBox), hit('5'))));
+// And it is OK / Enter that moves the view, not an effect that would re-centre on every repaint --
+// in an effect, panning away from a hit would be undone by the next render.
+const applySearchBody = slice.slice(slice.indexOf('function applySearch()'), slice.indexOf('function applyFilter()'));
+check('the recentre rides on OK, only when the search found something, and never at Fit',
+  applySearchBody.indexOf('hits.nBus + hits.nBranch > 0') > 0
+  && applySearchBody.indexOf('setRect(drawioCentreRect(scene, rect, hits))') > 0
+  && applySearchBody.indexOf('drawioSearchHits(next, scene.nodes, scene.edges, busNames)') > 0
+  && applySearchBody.indexOf('next !== null && scene !== null && rect !== null') > 0
+  && applySearchBody.indexOf('setDialog(null)') > 0
+  && slice.indexOf('setRect(drawioCentreRect') === slice.lastIndexOf('setRect(drawioCentreRect'),
+  'the recentre appears once, in applySearch');
 
 check('the sentence names the area and zone, the toolbar label stays numeric',
   (function () {

@@ -69,7 +69,7 @@ file, or asks to **reload** the case, the step is a scripted reset instead:
 
 ```
 interpss_run_gvy({ case: 'data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee',
-                   script: 'ieee14_adjBus1314Q_0p89to0p90.gvy',
+                   script: 'ieee14_adjBus1314Q_0p90to0p91.gvy',
                    reload: true })
 ```
 
@@ -81,9 +81,9 @@ the script.
 
 Reading a call that carries a script path:
 
-- `@wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/ieee14_adjBus1314Q_0p89to0p90.gvy` → case
+- `@wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/ieee14_adjBus1314Q_0p90to0p91.gvy` → case
   `data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee` (the `.ieee` / `.RAW` file in the folder **above**
-  `scripts/`), script `ieee14_adjBus1314Q_0p89to0p90.gvy`.
+  `scripts/`), script `ieee14_adjBus1314Q_0p90to0p91.gvy`.
 - A bare `x.gvy` → the script in the resolved case's `scripts/` folder (argument → tab → bridge), so
   name `case` explicitly when the tab selection may differ.
 - If that folder holds no case file, or several, do not guess — pass `case` explicitly or ask.
