@@ -1,7 +1,7 @@
 # Release V0.7.0
 
 **Date:** 2026-10-05  
-**Range:** `Release-V0.6.33` → `0.7.0` (`dsh-dev`)  
+**Range:** `Release-V0.6.33` → `0.7.0` (`master`)  
 **Package:** `@deepseek-ai/dsh-interpss` **0.6.33 → 0.7.0**
 
 This release opens the **0.7.0** line. The version number is the release: no Host or Client file
