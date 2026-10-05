@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.6.3.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.0.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.6.3.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.0.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```

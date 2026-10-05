@@ -63,10 +63,20 @@ You can then run the power system simulation workflow or chat following the proc
 
 The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
 one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
-folder). Hover buses/branches for tooltips, zoom/pan with the toolbar, and use the **draw.io**
-button (0.6.12+; the desktop-app path is configurable per OS via `config/ipss_plugin_env.json`,
-0.6.16+) to edit in the desktop app. If the case has no diagram yet, generate one with
-`$ipss-case-diagram` after ACLF.
+folder). Plugin **0.7.0** (Diagram line through 0.6.37) is the recommended install.
+
+On the tab you can:
+
+- **Zoom / pan** with the toolbar (**− · [level ▾] · +**; **Fit** is the picker’s last entry)
+- **Search** (🔍) for a bus number, `Bus-N`, part of a name, or a branch as `A->B` / `Bus-A -> Bus-B` — matches paint **green** and **OK** centres the view (not at Fit)
+- **Filter** (▼) by area / zone / |V| band / base-case or contingency loading
+- **Gear** (⚙) to edit flag colours and thresholds in `config/net_diagram.json` (and the birdseye switch)
+- Open the file in the local **draw.io** desktop app (0.6.12+; path from `config/ipss_plugin_env.json`, 0.6.16+)
+
+There is no Rendered / Source toggle on this tab (removed in 0.6.34) — the drawing is always the
+rendered scene. Hover buses/branches for tooltips (including base-case and contingency loadings
+when result CSVs exist). If the case has no diagram yet, generate one with `$ipss-case-diagram`
+after ACLF.
 
 Full how-to (generate, edit, troubleshoot): [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
 
@@ -328,7 +338,7 @@ For the full tool contract (inputs, cards, version history), see [interpss-tools
 | Load the selected (or named) case | `Load the IEEE 118-bus case` / `Load the selected InterPSS case` | `$ipss-case-load` / `interpss_case_load`       |
 | Network info                      | `Show network info for the current case`                         | `$ipss-case-info` / `interpss_network_info`    |
 | Run AC load flow                  | `Run ACLF on the selected case`                                  | `$ipss-case-aclf` / `interpss_run_aclf`        |
-| Adjust load Q to a voltage band   | `Adjust Bus14 load Q to bring it into [0.89, 0.90] pu`           | `$ipss-case-aclf-adjust` / `interpss_run_gvy` + `interpss_run_aclf` |
+| Adjust load Q to a voltage band   | `Adjust Bus14 load Q to bring it into [0.90, 0.91] pu`           | `$ipss-case-aclf-adjust` / `interpss_run_gvy` + `interpss_run_aclf` |
 | Case summary / top-N              | `Summarize the current case` / `Find the lowest voltage buses`   | `$ipss-case-summary` / `interpss_case_summary` |
 | What-if scenario script           | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve`             | `$ipss-case-script` / `interpss_run_gvy`       |
 | One-line diagram for the case     | `Draw the one-line diagram for the current case`                 | `$ipss-case-diagram` (script)                  |
