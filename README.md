@@ -48,8 +48,8 @@ Install DeepSeek Harness (Desktop version is recommended). Prompt DeepSeek Harne
 ```text
 Install(update) InterPSS DSH plugin
 ```
-Open the iPSS Agent folder as a workspace in DSH. You can then run the power system simulation workflow or chat following the DSH plugin user guide.
 
+Open the iPSS Agent folder as a workspace in DSH. You can then run the power system simulation workflow or chat following the DSH plugin user guide.
 
 ## User Guide
 
@@ -58,15 +58,15 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 - InterPSS Loadflow Adjustment user guide [loadflow-adjustment-user-guide.md](docs/user_guide/loadflow-adjustment-user-guide.md)
 - iPSS Agent Chat (Batch) user guide [batch_chat_user_guide.md](docs/user_guide/batch_chat_user_guide.md)
 
+
+
 ## Tutorial Video
 
 - [1 Install InterPSS DSH Plugin and run /ipss-sim](https://youtu.be/welo0g3OT3s)
-
 - [2 Run InterPSS in GUI or Chat Model](https://youtu.be/PGy_3Cq-ptQ)
-
 - [3 Run Loadflow Adjustment](https://youtu.be/RfymNnoaJ0Y)
-
 - [4 Use or Create Oneline Diagram](https://youtu.be/dnOhrwHh_6c)
+
 
 
 ## Release notes
@@ -79,23 +79,12 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 ## Reference
 
 
-| Topic                                     | Document                                                                                   |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------ |
-| Layout, build, JARs, agent skills         | [Setup.md](Setup.md)                                                                       |
-| `IpssCmd` (Java CLI) usage                | [IpssCmd.md](IpssCmd.md)                                                                   |
-| Markdown report generator                 | [GenReport.md](GenReport.md)                                                               |
-| DeepSeek Harness DSH plugin               | [InstallDSHPlugin.md](InstallDSHPlugin.md)                                                 |
-| DSH plugin package                        | [interpss-persistent/README.md](interpss-persistent/README.md)                             |
-| InterPSS chat tools                       | [docs/interpss-tools.md](docs/interpss-tools.md)                                           |
-| Interactive HTML dashboards               | `[.agents/skills/nerc-report-html/SKILL.md](.agents/skills/nerc-report-html/SKILL.md)`     |
-| NERC slide decks                          | `[.agents/skills/nerc-report-slides/SKILL.md](.agents/skills/nerc-report-slides/SKILL.md)` |
-| Load a simulation case into the bridge    | [.agents/skills/ipss-case-load/SKILL.md](.agents/skills/ipss-case-load/SKILL.md)           |
-| Run DC contingency analysis for the current case | [.agents/skills/ipss-case-ca/SKILL.md](.agents/skills/ipss-case-ca/SKILL.md)             |
-| Current case network info                 | [.agents/skills/ipss-case-info/SKILL.md](.agents/skills/ipss-case-info/SKILL.md)           |
-| Run ACLF for the current case             | [.agents/skills/ipss-case-aclf/SKILL.md](.agents/skills/ipss-case-aclf/SKILL.md)           |
-| Adjust load Q to a bus-voltage band       | [.agents/skills/ipss-case-aclf-adjust/SKILL.md](.agents/skills/ipss-case-aclf-adjust/SKILL.md) |
-| Summary report for the current case       | [.agents/skills/ipss-case-summary/SKILL.md](.agents/skills/ipss-case-summary/SKILL.md)     |
-| Run a scenario script on the current case | [.agents/skills/ipss-case-script/SKILL.md](.agents/skills/ipss-case-script/SKILL.md)       |
-| Draw a one-line diagram for the case      | [.agents/skills/ipss-case-diagram/SKILL.md](.agents/skills/ipss-case-diagram/SKILL.md)     |
+| Topic                             | Document                                         |
+| --------------------------------- | ------------------------------------------------ |
+| Layout, build, JARs, agent skills | [Setup.md](Setup.md)                             |
+| `IpssCmd` (Java CLI) usage        | [IpssCmd.md](IpssCmd.md)                         |
+| Markdown report generator         | [GenReport.md](GenReport.md)                     |
+| DeepSeek Harness DSH plugin       | [InstallDSHPlugin.md](InstallDSHPlugin.md)       |
+| InterPSS chat tools               | [docs/interpss-tools.md](docs/interpss-tools.md) |
 
 
