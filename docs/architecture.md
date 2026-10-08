@@ -100,7 +100,7 @@ ipss-agent/
 `org.interpss.agent.IpssCmd` is the CLI main class packaged in the uber JAR. It dispatches two command families:
 
 ```
-java -jar …/ipss-agent-cmd-1.0.0-uber.jar <aclf|ca> <ieee|psse> <input> [cont_file monitor_file]
+java -jar …/ipss-agent-cmd-1.0.0-uber.jar <aclf|ca> <ieee|psse|bpa> <input> [cont_file monitor_file]
 java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" <result_dir> [csv_prefix]
 ```
 
@@ -110,7 +110,7 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 | `CliArgs`, `ReportCliArgs` | `cli` | Argument parsing and usage text |
 | `ProjectPaths` | `util` | Resolve `wspace/`, result dirs, ACLF config lookup |
 | `NetworkLoader` | `input` | Route to format-specific adapters |
-| `IeeeFileAdapter`, `PsseFileAdapter` | `input` | Import `.ieee` / `.raw` via `IpssAdapter` |
+| `IeeeFileAdapter`, `PsseFileAdapter`, `BpaFileAdapter` | `input` | Import `.ieee` / `.raw` / BPA `.dat` via `IpssAdapter` |
 | `AclfRunner` | `runner` | Newton–Raphson AC load flow → CSV + network info |
 | `GvyScriptRunner` | `runner` | Evaluate a Groovy `.gvy` script against a live `AclfNetwork` (`aclfnet` binding) → mutation digest |
 | `ContingencyRunner` | `runner` | DC N-1 contingency → contingency CSV |
@@ -139,12 +139,12 @@ Agent code does **not** reimplement power-flow math. It orchestrates InterPSS pl
 
 ```
 .ieee / .raw  →  NetworkLoader.loadNetwork(format, path)
-              →  IeeeFileAdapter | PsseFileAdapter
+              →  IeeeFileAdapter | PsseFileAdapter | BpaFileAdapter
               →  IpssAdapter.importAclfNet()
               →  AclfNetwork
 ```
 
-Supported formats: `ieee` (IEEE Common Format / CDF) and `psse` (PSS/E RAW).
+Supported formats: `ieee` (IEEE Common Format / CDF), `psse` (PSS/E RAW), and `bpa` (BPA IPF).
 
 ### Step 2 — AC load flow (ACLF)
 
@@ -284,7 +284,7 @@ Four-step workflow:
 Invocation modes:
 
 - **Directory mode** — auto-discover case + JSON companions
-- **Single-file mode** — explicit paths; optional `[in ieee|psse]`
+- **Single-file mode** — explicit paths; optional `[in ieee|psse|bpa]`
 - **ACLF-only shortcut** — skip CA and NERC sections
 
 ### Post-report skills
@@ -426,7 +426,7 @@ JUnit 5 + AssertJ; fixtures under `src/test/resources/`.
 | End-to-end CLI | `IpssCmdTest`, `ReportCliTest` |
 | Runners | `AclfRunnerTest`, `ContingencyRunnerTest` |
 | Bridge | `IpssAgentBridgeTest`, `SimuModelRepositoryTest` |
-| Input adapters | `IeeeFileAdapterTest`, `PsseFileAdapterTest`, `NetworkLoaderTest` |
+| Input adapters | `IeeeFileAdapterTest`, `PsseFileAdapterTest`, `BpaFileAdapterTest`, `NetworkLoaderTest` |
 | Report analyzers | `AnalyzerTest` |
 | Golden Markdown | `ReportGoldenTest` (compares against `report-golden/*.md`) |
 | Utilities | `ProjectPathsTest`, `CliArgsTest` |

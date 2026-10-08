@@ -3,7 +3,7 @@ package org.interpss.agent.input;
 import com.interpss.core.aclf.AclfNetwork;
 
 /**
- * Loads an {@link AclfNetwork} from IEEE or PSS/E case files.
+ * Loads an {@link AclfNetwork} from IEEE, PSS/E, or BPA case files.
  */
 public final class NetworkLoader {
 
@@ -14,7 +14,7 @@ public final class NetworkLoader {
         return switch (format) {
             case "ieee" -> IeeeFileAdapter.createAclfNet(filePath);
             case "psse" -> PsseFileAdapter.createAclfNet(filePath);
-            // TODO: add support for bpa format
+            case "bpa" -> BpaFileAdapter.createAclfNet(filePath);
             default -> throw new IllegalArgumentException("Invalid format: " + format);
         };
     }

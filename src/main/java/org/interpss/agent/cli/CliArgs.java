@@ -29,7 +29,7 @@ public record CliArgs(String simutype, String format, String input, String contF
         if (!simutype.equals("aclf") && !simutype.equals("ca")) {
             throw new IllegalArgumentException("Invalid simulation type: " + simutype);
         }
-        if (!format.equals("ieee") && !format.equals("psse")) {
+        if (!format.equals("ieee") && !format.equals("psse") && !format.equals("bpa")) {
             throw new IllegalArgumentException("Invalid format: " + format);
         }
         return new CliArgs(simutype, format, input, contFile, monitorFile);
@@ -38,7 +38,7 @@ public record CliArgs(String simutype, String format, String input, String contF
     public static void printUsage() {
         System.err.println("Usage: IpssCmd <simutype> <format> <input> [<cont_file> <monitor_file>]");
         System.err.println("  simutype: aclf | ca");
-        System.err.println("  format:   ieee | psse");
+        System.err.println("  format:   ieee | psse | bpa");
         System.err.println("  paths are relative to wspace/");
     }
 }

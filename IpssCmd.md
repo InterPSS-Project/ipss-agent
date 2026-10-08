@@ -35,7 +35,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar <simutype> <format> <input> [<
 | Argument                 | Values         | Description                                          |
 | ------------------------ | -------------- | ---------------------------------------------------- |
 | `simutype`               | `aclf`, `ca`   | Simulation type: load flow or contingency analysis   |
-| `format`                 | `ieee`, `psse` | Input file format                                    |
+| `format`                 | `ieee`, `psse`, `bpa` | Input file format                              |
 | `input`                  | path           | Case file path (relative to `wspace/`)               |
 | `cont_file` / `monitor_file` | path       | Optional contingency / monitored-branches JSON (relative to `wspace/`); each overrides the matching `ca_run.json` entry for `ca` |
 

@@ -50,7 +50,7 @@ ipss-agent/
 │   │   ├── IpssCmd.java
 │   │   ├── cli/ (CliArgs, ReportCliArgs)
 │   │   ├── report/ (Markdown report generators)
-│   │   ├── input/ (IeeeFileAdapter, PsseFileAdapter, NetworkLoader)
+│   │   ├── input/ (IeeeFileAdapter, PsseFileAdapter, BpaFileAdapter, NetworkLoader)
 │   │   ├── runner/ (AclfRunner, ContingencyRunner)
 │   │   └── util/ (IpssNetworkInfo, ProjectPaths)
 ├── target/
@@ -150,7 +150,7 @@ artifacts).
 | `ipss_runnable.jar`          | InterPSS build | Plugin core 1.4.2 (adapters, ACLF, contingency) |
 | `ipss.core.lib-1.4.0.jar`    | InterPSS build | ACLF engine, algorithms, EMF model             |
 
-IEEE CDF / PSS/E import no longer requires separate IEEE ODM JARs; parsers live in
+IEEE CDF / PSS/E / BPA import no longer requires separate IEEE ODM JARs; parsers live in
 `ipss_runnable.jar` (`org.interpss.fadapter`).
 
 ### Sparse Solver JARs
@@ -252,7 +252,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar <simutype> <format> <input> [<
 | Argument   | Values         | Description                                        |
 | ---------- | -------------- | -------------------------------------------------- |
 | `simutype` | `aclf`, `ca`   | Simulation type: load flow or contingency analysis |
-| `format`   | `ieee`, `psse` | Input file format                                  |
+| `format`   | `ieee`, `psse`, `bpa` | Input file format                            |
 | `input`    | path           | Input file path (relative to `wspace/`)            |
 | `cont_file` / `monitor_file` | path | Contingency / monitored-branches JSON (required for `ca`) |
 

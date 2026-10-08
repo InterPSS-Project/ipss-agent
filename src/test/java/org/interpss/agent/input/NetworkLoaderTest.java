@@ -29,6 +29,15 @@ class NetworkLoaderTest {
     }
 
     @Test
+    void loadNetwork_dispatchesToBpaAdapter() throws Exception {
+        AclfNetwork net = NetworkLoader.loadNetwork(
+                "bpa",
+                AgentTestSupport.absoluteResourcePath(AgentTestSupport.BPA9_CASE).toString());
+
+        assertThat(net.getNoActiveBus()).isEqualTo(9);
+    }
+
+    @Test
     void loadNetwork_rejectsInvalidFormat() {
         assertThatThrownBy(() -> NetworkLoader.loadNetwork("matpower", "case.ieee"))
                 .isInstanceOf(IllegalArgumentException.class)
