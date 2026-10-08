@@ -141,7 +141,11 @@ const DESCRIPTORS = METHODS.map((method) => ({
 // in the tab (preset switch, custom path, file picker, remount) already calls
 // the `checkResult` RPC, so the Host records the selection there instead of
 // adding a client-side call or a new Typert endpoint.
-const CASE_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/
+// Case-file types the tab and the tools accept: IEEE CDF (.ieee), PSS/E RAW (.raw/.RAW) and
+// BPA Dat (.dat/.DAT). The extension maps to the format string `NetworkLoader` dispatches on,
+// and the regexes are case-insensitive so an upper-case `.DAT`/`.RAW` is a case file too.
+const CASE_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|dat)$/i
+const CASE_FORMATS = ['ieee', 'psse', 'bpa']
 // Anchor on the unique "/wspace/data/" marker: the DSH home itself may live
 // under a directory also named "wspace" (e.g. ~/Documents/wspace/…).
 const WS_DATA_MARKER = '/wspace/data/'
@@ -153,7 +157,19 @@ function sessionKey(sessionId) {
 }
 
 function formatOfCasePath(casePath) {
-  return /\.raw$/i.test(casePath) ? 'psse' : 'ieee'
+  if (/\.raw$/i.test(casePath)) return 'psse'
+  if (/\.dat$/i.test(casePath)) return 'bpa'
+  return 'ieee'
+}
+
+// The format a request declares, when it is one we know; otherwise the path decides.
+function normalizeCaseFormat(format, casePath) {
+  return CASE_FORMATS.indexOf(format) >= 0 ? format : formatOfCasePath(casePath)
+}
+
+// `IEEE9.dat` -> `IEEE9` (matches the Java `ProjectPaths.stem`, any extension stripped).
+function caseStem(fileName) {
+  return String(fileName).replace(/\.(ieee|raw|dat)$/i, '')
 }
 
 // Record (or clear, for an empty path) the case selected in the InterPSS tab.
@@ -165,7 +181,7 @@ function rememberSelectedCase(sessionId, casePath, format) {
   }
   selectedCaseBySession.set(key, {
     input: casePath,
-    format: format === 'psse' ? 'psse' : formatOfCasePath(casePath),
+    format: normalizeCaseFormat(format, casePath),
   })
 }
 
@@ -529,7 +545,7 @@ async function isIpssWorkspace(ctx, root) {
 function casePartsOf(caseInput) {
   const slash = caseInput.lastIndexOf('/')
   const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
-  const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+  const stem = caseStem(caseInput.slice(slash + 1))
   return { parent, stem }
 }
 
@@ -884,6 +900,7 @@ async function scanCases(fs, dirTarget, relDir, out) {
     } else if (entry.type === 'file') {
       if (/\.ieee$/i.test(entry.name)) out.push({ path: rel, format: 'ieee' })
       else if (/\.raw$/i.test(entry.name)) out.push({ path: rel, format: 'psse' })
+      else if (/\.dat$/i.test(entry.name)) out.push({ path: rel, format: 'bpa' })
     }
   }
 }
@@ -1290,7 +1307,7 @@ class InterpssService extends TypertRemoteService {
     const wspace = root + '/wspace'
     const slash = casePath.lastIndexOf('/')
     const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-    const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+    const stem = caseStem(casePath.slice(slash + 1))
     const infoRel = parent + '/result/' + stem + '_network_info.txt'
     try {
       const target = await fs.resolve(wspace + '/' + infoRel)
@@ -1323,7 +1340,7 @@ class InterpssService extends TypertRemoteService {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
     const casePath = input && typeof input.input === 'string' ? input.input : ''
-    if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+    if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
       return { ok: false, error: 'Invalid case path: ' + casePath }
     }
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
@@ -1331,7 +1348,7 @@ class InterpssService extends TypertRemoteService {
     const wspace = root + '/wspace'
     const slash = casePath.lastIndexOf('/')
     const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-    const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+    const stem = caseStem(casePath.slice(slash + 1))
     const resultDir = parent + '/result'
     const files = [
       stem + '_DF_bus.csv',
@@ -1381,7 +1398,7 @@ class InterpssService extends TypertRemoteService {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
     const caseInput = input && typeof input.case === 'string' ? input.case : ''
-    if (caseInput === '' || caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+    if (caseInput === '' || caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
@@ -1643,9 +1660,9 @@ class InterpssService extends TypertRemoteService {
       }
 
   async runAclf(input) {
-    const format = input && input.format === 'psse' ? 'psse' : 'ieee'
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
-    if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+    const format = normalizeCaseFormat(input && input.format, caseInput)
+    if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
 
@@ -1744,9 +1761,9 @@ class InterpssService extends TypertRemoteService {
   }
 
   async runCa(input) {
-    const format = input && input.format === 'psse' ? 'psse' : 'ieee'
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
-    if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+    const format = normalizeCaseFormat(input && input.format, caseInput)
+    if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
 
@@ -1828,8 +1845,8 @@ class InterpssService extends TypertRemoteService {
   }
 
   async loadCase(input) {
-    const format = input && input.format === 'psse' ? 'psse' : 'ieee'
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
+    const format = normalizeCaseFormat(input && input.format, caseInput)
     if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
@@ -1900,7 +1917,7 @@ class InterpssService extends TypertRemoteService {
 
   async runReport(input) {
     const casePath = input && typeof input.input === 'string' ? input.input : ''
-    if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+    if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
       return { ok: false, error: 'Invalid case path: ' + casePath }
     }
 
@@ -3576,7 +3593,7 @@ export default {
         const bridge = await ensureBridge(rootFor(target))
         let reused = true
         if (target !== lastLoadedAbs) {
-          const raw = await bridge.loadCase(format === 'psse' ? 'psse' : 'ieee', target)
+          const raw = await bridge.loadCase(normalizeCaseFormat(format, target), target)
           let parsed = null
           try { parsed = JSON.parse(raw) } catch (e) {}
           if (!parsed || parsed.ok !== true) return raw

@@ -1,6 +1,6 @@
 ---
 name: ipss-case-load
-description: Use when asked to load a power-system simulation case into the embedded InterPSS bridge — the case selected in the InterPSS tab, or a named IEEE CDF / PSS/E RAW case — and to report its active bus and branch counts, including switching the bridge to a different case, re-parsing the held case from disk ("reload"), and loading with a Groovy .gvy script applied in the same call.
+description: Use when asked to load a power-system simulation case into the embedded InterPSS bridge — the case selected in the InterPSS tab, or a named IEEE CDF / PSS/E RAW / BPA Dat case — and to report its active bus and branch counts, including switching the bridge to a different case, re-parsing the held case from disk ("reload"), and loading with a Groovy .gvy script applied in the same call.
 metadata:
   short-description: Load a simulation case, optionally with a .gvy script
 ---
@@ -45,6 +45,7 @@ interpss_case_load({ case: 'wspace/data/ieee/Ieee14Bus/ieee14.ieee' })
 | Workspace-relative path | `data/ieee/Ieee118Bus/ieee118.ieee` |
 | Workspace-relative, as the session shows it | `wspace/data/ieee/Ieee118Bus/ieee118.ieee` (the `wspace/` and `./wspace/` prefixes are stripped; plugin 0.3.18+) |
 | Absolute path containing `/wspace/data/` | `/…/ipss-agent/wspace/data/ieee/Ieee14Bus/ieee14.ieee` |
+| BPA Dat case (plugin 0.7.1+) | `data/bpa/ieee9/IEEE9.dat` — a `.dat`/`.DAT` path resolves as `bpa` |
 | Preset label (case-insensitive) | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
 
 Anything else fails with `unrecognized case selector …` before the bridge is touched.

@@ -132,7 +132,10 @@ function build(overrides) {
       + ' DRAWIO_MAX_CELLS: DRAWIO_MAX_CELLS,'
       + ' DRAWIO_MATCH_FILL: DRAWIO_MATCH_FILL, DRAWIO_BIRDSEYE_FRAME: DRAWIO_BIRDSEYE_FRAME,'
       + ' drawioHitBounds: drawioHitBounds, drawioCentreRect: drawioCentreRect,'
-      + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText };');
+      + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText,'
+      + ' CASE_FORMATS: CASE_FORMATS, caseFormatOfPath: caseFormatOfPath, caseFormatEntry: caseFormatEntry,'
+      + ' casePickerEmptyText: casePickerEmptyText, caseStem: caseStem,'
+      + ' bridgeCaseSelection: bridgeCaseSelection };');
 
 
   return factory(makeReact(overrides || {}), { call: () => Promise.resolve({}) }, { get: () => undefined },
@@ -2349,6 +2352,105 @@ check('the other reference diagram\'s title is left-aligned with a wide box, so 
   ref39Title !== undefined && ref39Title.align === 'left' && ref39Title.vAlign === 'middle'
   && ref39Title.w > 400,
   ref39Title === undefined ? 'no title' : ref39Title.w + ' wide');
+
+// --- 20. the case file types the picker offers (0.7.1) ---------------------
+console.log('\n20. the case file types the picker offers (BPA Dat, 0.7.1)');
+// The Simu Case row offers IEEE CDF / PSS/E RAW / BPA Dat. One table drives the select, the
+// picker's badge and empty text and the path placeholder, and the values must be the ones the
+// Host's CASE_PATH_RE and the bridge's NetworkLoader dispatch on: a label-only change would
+// list the BPA files and then refuse to load them.
+check('the picker offers exactly three case types, in dropdown order',
+  api.CASE_FORMATS.length === 3
+  && api.CASE_FORMATS.map((f) => f.format).join(',') === 'ieee,psse,bpa'
+  && api.CASE_FORMATS[2].label === 'BPA Dat' && api.CASE_FORMATS[2].badge === 'BPA',
+  api.CASE_FORMATS.map((f) => f.label).join(' / '));
+check('every type names its own extension and a workspace example of that type',
+  api.CASE_FORMATS.every((f) => typeof f.ext === 'string' && f.ext.charAt(0) === '.'
+    && typeof f.example === 'string' && f.example.indexOf('data/') === 0
+    && f.example.slice(-f.ext.length).toLowerCase() === f.ext),
+  api.CASE_FORMATS.map((f) => f.ext + ' -> ' + f.example).join('; '));
+check('a .dat path is a BPA case, .raw is PSS/E and anything else is IEEE CDF',
+  api.caseFormatOfPath('data/bpa/ieee9/IEEE9.dat') === 'bpa'
+  && api.caseFormatOfPath('data/bpa/IEEE90/IEEE90.DAT') === 'bpa'
+  && api.caseFormatOfPath('data/psse/Texas2K/x.RAW') === 'psse'
+  && api.caseFormatOfPath('data/ieee/Ieee14Bus/ieee14.ieee') === 'ieee'
+  && api.caseFormatOfPath('') === 'ieee' && api.caseFormatOfPath(null) === 'ieee');
+check('an unknown format reads as the IEEE row rather than blank',
+  api.caseFormatEntry('bpa').label === 'BPA Dat'
+  && api.caseFormatEntry('nope').format === 'ieee');
+check('the empty picker names the selected type and its extension',
+  api.casePickerEmptyText('bpa') === 'No BPA Dat (.dat) files found under wspace/data.'
+  && api.casePickerEmptyText('ieee') === 'No IEEE CDF (.ieee) files found under wspace/data.'
+  && api.casePickerEmptyText('psse') === 'No PSS/E RAW (.raw) files found under wspace/data.');
+// The result files carry the stem, and the Java side strips any extension (ProjectPaths.stem),
+// so `.dat` must go or the tab would look for `IEEE9.dat_network_info.txt` and report "no prior
+// results" on a case whose run wrote `IEEE9_network_info.txt`.
+check('a case stem drops the extension whichever type it is',
+  api.caseStem('IEEE9.dat') === 'IEEE9' && api.caseStem('IEEE90.DAT') === 'IEEE90'
+  && api.caseStem('ieee14.ieee') === 'ieee14' && api.caseStem('x.RAW') === 'x'
+  && api.caseStem('noextension') === 'noextension');
+check('a BPA case loaded by a tool lands on the BPA Dat row of the picker',
+  (function () {
+    const s = api.bridgeCaseSelection('data/bpa/IEEE30/ieee30.dat');
+    const p = api.bridgeCaseSelection('data/ieee/Ieee14Bus/ieee14.ieee');
+    return s.mode === 'custom' && s.customFormat === 'bpa' && s.customInput === 'data/bpa/IEEE30/ieee30.dat'
+      && p.mode === '1' && p.customFormat === 'ieee';
+  })());
+// The select itself is rendered from the table, so a type cannot be added to the Host and
+// forgotten in the UI (or the other way round). Overrides are addressed by InterPssView's own
+// useState order, the way §12 renders the Diagram tab, and a throw is a failed check rather
+// than a crashed suite because a throw in this view blanks the tab.
+const ipssNames = [...slice.slice(slice.indexOf('function InterPssView('))
+  .matchAll(/const \[([A-Za-z0-9_]+), set[A-Za-z0-9_]+\] = React\.useState/g)].map((m) => m[1]);
+const ipssIdx = (n) => ipssNames.indexOf(n);
+check('the tab state list parsed by name, so an override cannot retarget',
+  ipssNames.length >= 15 && ipssNames.every((n, i) => ipssNames.indexOf(n) === i)
+  && ipssIdx('activated') === 0 && ipssIdx('mode') > 0 && ipssIdx('customFormat') > 0,
+  ipssNames.length + ' states');
+const renderIpss = (over) => {
+  try { return build(over).InterPssView(props); } catch (e) { return { type: 'threw', message: e.constructor.name + ': ' + e.message }; }
+};
+const bpaTab = renderIpss({ 0: true, [ipssIdx('mode')]: 'custom', [ipssIdx('customFormat')]: 'bpa' });
+const ieeeTab = renderIpss({ 0: true, [ipssIdx('mode')]: 'custom', [ipssIdx('customFormat')]: 'ieee' });
+check('the custom row renders for both a BPA and an IEEE selection',
+  bpaTab.type !== 'threw' && ieeeTab.type !== 'threw',
+  bpaTab.type === 'threw' ? bpaTab.message : (ieeeTab.type === 'threw' ? ieeeTab.message : 'ok'));
+// createElement(...kids) wraps an array of children in one more array, so flatten one level
+// before looking for the options; the Simu Case select carries options too, so the format
+// select is the one holding a `bpa` option.
+const flatKids = (n) => (n.kids || []).reduce((a, k) => a.concat(Array.isArray(k) ? k : [k]), []);
+const fmtSelect = findInTree(bpaTab, (n) => n.type === 'select'
+  && flatKids(n).some((k) => k && k.type === 'option' && k.props.value === 'bpa'));
+const fmtOptions = (fmtSelect === null ? [] : flatKids(fmtSelect)).filter((k) => k && k.type === 'option');
+check('the format select renders the table: IEEE CDF / PSS/E RAW / BPA Dat',
+  fmtOptions.length === 3
+  && fmtOptions.map((o) => o.props.value).join(',') === 'ieee,psse,bpa'
+  && fmtOptions.map((o) => (o.kids || []).join('')).join('|') === 'IEEE CDF|PSS/E RAW|BPA Dat',
+  fmtOptions.map((o) => o.props.value).join(','));
+const bpaPlaceholder = findInTree(bpaTab, (n) => n.type === 'input' && typeof n.props.placeholder === 'string');
+const ieeePlaceholder = findInTree(ieeeTab, (n) => n.type === 'input' && typeof n.props.placeholder === 'string');
+check('the path placeholder follows the selected type',
+  bpaPlaceholder !== null && bpaPlaceholder.props.placeholder === 'data/bpa/ieee9/IEEE9.dat'
+  && ieeePlaceholder !== null && ieeePlaceholder.props.placeholder === 'data/ieee/Ieee118Bus/ieee118.ieee',
+  bpaPlaceholder === null ? 'no input' : bpaPlaceholder.props.placeholder);
+// Both halves of every artifact must know the third type. The Host gate is what lets a `.dat`
+// reach the bridge at all — a Client-only change would list the file, pick it, and then answer
+// "Invalid case path" — and the sync script keeps the two client copies identical.
+check('every host half accepts a .dat path and maps it to the bpa format',
+  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js', 'interpss-dynamic/index.js'].every((p) => {
+    const src = readFileSync(join(ROOT, p), 'utf8');
+    return src.indexOf('/^data\\/[A-Za-z0-9_.\\/-]+\\.(ieee|raw|dat)$/i') >= 0
+      && src.indexOf("if (/\\.dat$/i.test(casePath)) return 'bpa'") >= 0
+      && src.indexOf("else if (/\\.dat$/i.test(entry.name)) out.push({ path: rel, format: 'bpa' })") >= 0
+      && src.indexOf('function normalizeCaseFormat(') >= 0;
+  }));
+check('both client copies carry the BPA Dat row and the path->format rule',
+  [DYN_BODYP, LIB_CLIENT].every((p) => {
+    const src = rd(p);
+    return src.indexOf("{ format: 'bpa', label: 'BPA Dat', badge: 'BPA', ext: '.dat'") >= 0
+      && src.indexOf('function caseFormatOfPath(') >= 0
+      && src.indexOf("CASE_FORMATS.map((f) => React.createElement('option'") >= 0;
+  }));
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

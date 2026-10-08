@@ -8,6 +8,40 @@ return {
       { label: 'Texas 2K-bus', format: 'psse', input: 'data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW' },
     ]
 
+    // The three case-file types the picker offers, in dropdown order. One table so the select,
+    // the picker's badge / empty text and the placeholder cannot drift; the values are the ones
+    // the Host's CASE_PATH_RE and the bridge's NetworkLoader dispatch on.
+    const CASE_FORMATS = [
+      { format: 'ieee', label: 'IEEE CDF', badge: 'IEEE', ext: '.ieee', example: 'data/ieee/Ieee118Bus/ieee118.ieee' },
+      { format: 'psse', label: 'PSS/E RAW', badge: 'PSSE', ext: '.raw', example: 'data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW' },
+      { format: 'bpa', label: 'BPA Dat', badge: 'BPA', ext: '.dat', example: 'data/bpa/ieee9/IEEE9.dat' },
+    ]
+
+    // Which type a case path is: PSS/E for .raw, BPA Dat for .dat, IEEE CDF otherwise.
+    function caseFormatOfPath(input) {
+      const path = typeof input === 'string' ? input : ''
+      if (/\.raw$/i.test(path)) return 'psse'
+      if (/\.dat$/i.test(path)) return 'bpa'
+      return 'ieee'
+    }
+
+    // The table row for a format; an unknown format reads as IEEE CDF rather than blank.
+    function caseFormatEntry(format) {
+      const found = CASE_FORMATS.find((f) => f.format === format)
+      return found === undefined ? CASE_FORMATS[0] : found
+    }
+
+    function casePickerEmptyText(format) {
+      const f = caseFormatEntry(format)
+      return 'No ' + f.label + ' (' + f.ext + ') files found under wspace/data.'
+    }
+
+    // `IEEE9.dat` -> `IEEE9`. The Java side strips any extension (ProjectPaths.stem), so the
+    // tab must too or the result files it looks for would not be the ones the run wrote.
+    function caseStem(name) {
+      return String(name).replace(/\.(ieee|raw|dat)$/i, '')
+    }
+
     let lastSelection = { mode: '0', customFormat: 'ieee', customInput: '' }
     let checkSeq = 0
     let reportSeq = 0
@@ -24,7 +58,8 @@ return {
     let bridgeCaseSeen = ''
 
     // Which picker state shows a case path: a preset index, or the custom-path row
-    // (PSS/E for .raw, IEEE CDF otherwise). Pure, so the sync effect stays a one-liner.
+    // (PSS/E for .raw, BPA Dat for .dat, IEEE CDF otherwise). Pure, so the sync effect
+    // stays a one-liner.
     function bridgeCaseSelection(input) {
       const index = PRESETS.findIndex((p) => p.input === input)
       if (index >= 0) {
@@ -33,7 +68,7 @@ return {
       return {
         mode: 'custom',
         customInput: input,
-        customFormat: /\.raw$/i.test(input) ? 'psse' : 'ieee',
+        customFormat: caseFormatOfPath(input),
       }
     }
 
@@ -2424,7 +2459,7 @@ return {
           const input = customInput.trim()
           const slash = input.lastIndexOf('/')
           const base = slash >= 0 ? input.slice(slash + 1) : input
-          const displayName = base.replace(/\.(ieee|raw|RAW)$/, '')
+          const displayName = caseStem(base)
           return { format: customFormat, input: input, displayName: displayName }
         }
         const p = PRESETS[Number(mode)]
@@ -2996,14 +3031,13 @@ return {
       ]
       const caseInputRow = isCustom ? [
         React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: selectStyle },
-          React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
-          React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
+          CASE_FORMATS.map((f) => React.createElement('option', { key: f.format, value: f.format }, f.label)),
         ),
         React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', width: '380px', maxWidth: '100%' } },
           React.createElement('input', {
             type: 'text',
             value: customInput,
-            placeholder: 'data/ieee/Ieee118Bus/ieee118.ieee',
+            placeholder: caseFormatEntry(customFormat).example,
             onChange: (e) => { const v = e.target.value; lastSelection.customInput = v; setCustomInput(v); onCaseChanged(v.trim()) },
             style: { ...selectStyle, flex: '1 1 auto', minWidth: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' },
           }),
@@ -3040,7 +3074,7 @@ return {
         } else if (cases !== null) {
           const filtered = cases.filter((c) => c && c.format === customFormat)
           if (filtered.length === 0) {
-            pickerBody = React.createElement('div', { style: { padding: '12px', color: 'var(--dsw-alias-label-secondary)' } }, customFormat === 'psse' ? 'No PSS/E RAW (.raw) files found under wspace/data.' : 'No IEEE CDF (.ieee) files found under wspace/data.')
+            pickerBody = React.createElement('div', { style: { padding: '12px', color: 'var(--dsw-alias-label-secondary)' } }, casePickerEmptyText(customFormat))
           } else {
             pickerBody = filtered.map((c) =>
               React.createElement('button', {
@@ -3048,7 +3082,7 @@ return {
                 onClick: () => pickCase(c),
                 style: { display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: 'none', borderBottom: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' },
               },
-                React.createElement('span', { style: { opacity: 0.65, marginRight: '10px' } }, c.format === 'psse' ? 'PSSE' : 'IEEE'),
+                React.createElement('span', { style: { opacity: 0.65, marginRight: '10px' } }, caseFormatEntry(c.format).badge),
                 c.path,
               ),
             )

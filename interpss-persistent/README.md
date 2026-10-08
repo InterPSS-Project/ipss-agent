@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.0**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
-flow on IEEE CDF / PSS/E RAW cases, exploring the bus/branch/gen/load results,
+GUI (**0.7.1**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.0**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.1**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -26,8 +26,8 @@ parameters and results, no build-time Typert compiler required.
 
 ## Features
 
-- AC load flow runner (`ACLF` button) for IEEE CDF (`.ieee`) and PSS/E RAW (`.raw`/`.RAW`) cases.
-- Case selection: presets (IEEE 118 / IEEE 14 / Texas 2K) plus a custom path with a filtered file picker.
+- AC load flow runner (`ACLF` button) for IEEE CDF (`.ieee`), PSS/E RAW (`.raw`/`.RAW`) and BPA Dat (`.dat`/`.DAT`) cases — BPA since 0.7.1.
+- Case selection: presets (IEEE 118 / IEEE 14 / Texas 2K) plus a custom path with a file-type choice (IEEE CDF / PSS/E RAW / BPA Dat since 0.7.1) and a picker filtered by it.
 - **Auto-display** of an existing converged result on case selection (and on first open), read from `*_network_info.txt`.
 - Bus / Branch / Gen / Load CSV explorer with infinite scroll and sticky headers.
 - Selectable bus IDs with a branch-connection popup: **Diagram** (bus info tooltips on hover, transformer styling, double-click a node to navigate), **Branch**, **Gen**, and **Load** tabs.

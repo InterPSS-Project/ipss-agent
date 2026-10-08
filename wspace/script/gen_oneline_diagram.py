@@ -125,6 +125,31 @@ class Branch:
         self.is_xfmr, self.circuit, self.name = is_xfmr, circuit, name
 
 
+def bus_number(bus_id, column, taken):
+    """The number the diagram builds `busN` / `Bus-N` from.
+
+    IEEE CDF and PSS/E tables fill `Number`; a BPA case leaves it `0` for every bus (the
+    DirectParser assigns no bus numbers), which would collapse every bar onto `bus0` and every
+    branch onto that one cell. The bus `ID` carries the same number for every case in this
+    workspace (`Bus30`) and is always present, so its trailing digits decide first; the column
+    is the fallback, then the next free index -- and a candidate already taken is replaced the
+    same way, so two buses can never share a bar id.
+    """
+    m = re.search(r"(\d+)\s*$", (bus_id or "").strip())
+    digits = int(m.group(1)) if m else None
+    try:
+        column_n = int(str(column).strip())
+    except (TypeError, ValueError):
+        column_n = None
+    for n in (digits, column_n):
+        if n is not None and n > 0 and n not in taken:
+            return n
+    n = 1
+    while n in taken:
+        n += 1
+    return n
+
+
 def read_case(case_dir):
     res = os.path.join(case_dir, "result")
     buses_csv = branch_csv = None
@@ -138,12 +163,15 @@ def read_case(case_dir):
     stem = os.path.basename(buses_csv)[: -len("_DF_bus.csv")]
 
     buses, by_id, nominal, anchor = [], {}, [], None
+    taken = set()
     with open(buses_csv, newline="", encoding="utf-8-sig") as fh:
         for row in csv.DictReader(fh):
             name = row["Name"].strip()
             tail = re.search(r"\b(V\d)\s*$", name)
             volt = VOLT_BY_SUFFIX.get(tail.group(1), "") if tail else ""
-            b = Bus(row["ID"], int(row["Number"]), name, volt, BAR_FILL, BAR_STROKE,
+            num = bus_number(row["ID"], row.get("Number"), taken)
+            taken.add(num)
+            b = Bus(row["ID"], num, name, volt, BAR_FILL, BAR_STROKE,
                     row.get("BusType", ""), float(row.get("LoadP") or 0.0),
                     float(row.get("GenP") or 0.0))
             buses.append(b)

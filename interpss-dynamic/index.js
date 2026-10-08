@@ -72,6 +72,28 @@ const DEFAULT_ACLF_CONFIG = {
   psXfrPContrlAccFactor: 1.0,
 }
 
+// Case-file types the tab and the tools accept: IEEE CDF (.ieee), PSS/E RAW (.raw/.RAW) and
+// BPA Dat (.dat/.DAT). The extension maps to the format string `NetworkLoader` dispatches on,
+// and the regexes are case-insensitive so an upper-case `.DAT`/`.RAW` is a case file too.
+const CASE_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|dat)$/i
+const CASE_FORMATS = ['ieee', 'psse', 'bpa']
+
+function formatOfCasePath(casePath) {
+  if (/\.raw$/i.test(casePath)) return 'psse'
+  if (/\.dat$/i.test(casePath)) return 'bpa'
+  return 'ieee'
+}
+
+// The format a request declares, when it is one we know; otherwise the path decides.
+function normalizeCaseFormat(format, casePath) {
+  return CASE_FORMATS.indexOf(format) >= 0 ? format : formatOfCasePath(casePath)
+}
+
+// `IEEE9.dat` -> `IEEE9` (matches the Java `ProjectPaths.stem`, any extension stripped).
+function caseStem(fileName) {
+  return String(fileName).replace(/\.(ieee|raw|dat)$/i, '')
+}
+
 async function scanCases(fs, dirTarget, relDir, out) {
   let entries
   try {
@@ -86,6 +108,7 @@ async function scanCases(fs, dirTarget, relDir, out) {
     } else if (entry.type === 'file') {
       if (/\.ieee$/i.test(entry.name)) out.push({ path: rel, format: 'ieee' })
       else if (/\.raw$/i.test(entry.name)) out.push({ path: rel, format: 'psse' })
+      else if (/\.dat$/i.test(entry.name)) out.push({ path: rel, format: 'bpa' })
     }
   }
 }
@@ -370,7 +393,7 @@ export default {
     function caseParts(caseInput) {
       const slash = caseInput.lastIndexOf('/')
       const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
-      const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+      const stem = caseStem(caseInput.slice(slash + 1))
       return { parent: parent, stem: stem }
     }
 
@@ -664,7 +687,7 @@ function caConfigPath(root, parent) {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const casePath = args && typeof args.input === 'string' ? args.input : ''
-        if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+        if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
           return { ok: false, error: 'Invalid case path: ' + casePath }
         }
         const root = resolveWorkspaceRoot(args && args.sessionId)
@@ -672,7 +695,7 @@ function caConfigPath(root, parent) {
         const wspace = root + '/wspace'
         const slash = casePath.lastIndexOf('/')
         const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-        const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+        const stem = caseStem(casePath.slice(slash + 1))
         const infoRel = parent + '/result/' + stem + '_network_info.txt'
         try {
           const target = await fs.resolve(wspace + '/' + infoRel)
@@ -704,7 +727,7 @@ function caConfigPath(root, parent) {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const casePath = args && typeof args.input === 'string' ? args.input : ''
-        if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+        if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
           return { ok: false, error: 'Invalid case path: ' + casePath }
         }
         const root = resolveWorkspaceRoot(args && args.sessionId)
@@ -712,7 +735,7 @@ function caConfigPath(root, parent) {
         const wspace = root + '/wspace'
         const slash = casePath.lastIndexOf('/')
         const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-        const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+        const stem = caseStem(casePath.slice(slash + 1))
         const resultDir = parent + '/result'
         const files = [
           stem + '_DF_bus.csv',
@@ -763,7 +786,7 @@ function caConfigPath(root, parent) {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const caseInput = args && typeof args.case === 'string' ? args.case : ''
-        if (caseInput === '' || caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+        if (caseInput === '' || caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
           return { ok: false, error: 'Invalid case path: ' + caseInput }
         }
         const root = resolveWorkspaceRoot(args && args.sessionId)
@@ -1025,9 +1048,9 @@ function caConfigPath(root, parent) {
       },
 
       async runAclf(args) {
-        const format = args && args.format === 'psse' ? 'psse' : 'ieee'
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
-        if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+        const format = normalizeCaseFormat(args && args.format, caseInput)
+        if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
           return { ok: false, error: 'Invalid case path: ' + caseInput }
         }
 
@@ -1128,9 +1151,9 @@ function caConfigPath(root, parent) {
       },
 
       async runCa(args) {
-        const format = args && args.format === 'psse' ? 'psse' : 'ieee'
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
-        if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+        const format = normalizeCaseFormat(args && args.format, caseInput)
+        if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
           return { ok: false, error: 'Invalid case path: ' + caseInput }
         }
 
@@ -1211,9 +1234,9 @@ function caConfigPath(root, parent) {
       },
 
       async loadCase(args) {
-        const format = args && args.format === 'psse' ? 'psse' : 'ieee'
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
-        if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+        const format = normalizeCaseFormat(args && args.format, caseInput)
+        if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
           return { ok: false, error: 'Invalid case path: ' + caseInput }
         }
         if (javaBridge === undefined || typeof javaBridge.loadCase !== 'function') {
@@ -1289,7 +1312,7 @@ function caConfigPath(root, parent) {
 
       async runReport(args) {
         const casePath = args && typeof args.input === 'string' ? args.input : ''
-        if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+        if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
           return { ok: false, error: 'Invalid case path: ' + casePath }
         }
 
@@ -1298,7 +1321,7 @@ function caConfigPath(root, parent) {
 
         const slash = casePath.lastIndexOf('/')
         const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-        const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+        const stem = caseStem(casePath.slice(slash + 1))
         const resultDir = parent + '/result'
 
         let displayName = args && typeof args.displayName === 'string' && args.displayName.trim() !== '' ? args.displayName.trim() : stem

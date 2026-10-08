@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.7.0.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.1.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.0.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.1.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 316 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 329 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -587,6 +587,13 @@ its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
   It also asserts the **tracked reference diagrams**: ieee14's 14 labels are masked `text` cells and
   its 14 bars are square, its legend text is anchored to its top-left, and ieee39's title is
   left-aligned in its 440-unit box.
+- §20 (since 0.7.1) covers the **case file types the picker offers**: the three-row table in
+  dropdown order with its labels (`IEEE CDF` / `PSS/E RAW` / `BPA Dat`), badges and extensions, that
+  `.dat`/`.DAT` maps to `bpa`, `.raw`/`.RAW` to `psse` and anything else to `ieee`, the stem for
+  all four extensions, the picker row a tool-loaded BPA case lands on, the rendered format `<select>`
+  and the placeholder that follows it — and the source pin that all three host halves and both client
+  copies carry the third type. That last check is the one that catches a **Client-only** change,
+  which would list the `.dat` file, pick it, and then answer `Invalid case path`.
 - §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
   draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
   was never going to survive a round trip through the editor.

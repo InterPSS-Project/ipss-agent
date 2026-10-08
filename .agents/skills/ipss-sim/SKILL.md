@@ -1,6 +1,6 @@
 ---
 name: ipss-sim
-description: Use when running InterPSS AC load flow, DC contingency analysis, or generating NERC TPL-001-5 reports from IEEE CDF or PSS/E RAW case files. Supports directory auto-discovery and explicit single-file workflows.
+description: Use when running InterPSS AC load flow, DC contingency analysis, or generating NERC TPL-001-5 reports from IEEE CDF, PSS/E RAW or BPA Dat case files. Supports directory auto-discovery and explicit single-file workflows.
 metadata:
   short-description: Run InterPSS simulations and reports
 ---
@@ -54,7 +54,7 @@ Auto-discovers case + companion JSON files in one folder:
 /ipss-sim <directory_path> "<Report Name>"
 ```
 
-- **Case file:** `*.RAW`, `*.raw`, or `*.ieee`
+- **Case file:** `*.RAW`, `*.raw`, `*.ieee`, `*.dat` or `*.DAT`
 - **Contingency JSON:** filename contains `contingency` or `contingencies`
 - **Monitored branches JSON:** filename contains `monitor`
 
@@ -72,9 +72,9 @@ Format is inferred from the case file extension.
 /ipss-sim <input_path> [<contingency_json> <monitored_branches_json>] [in <format>] "<Report Name>"
 ```
 
-- `input_path` — IEEE CDF (`.ieee`) or PSS/E RAW (`.raw`/`.RAW`)
+- `input_path` — IEEE CDF (`.ieee`), PSS/E RAW (`.raw`/`.RAW`) or BPA Dat (`.dat`/`.DAT`)
 - `contingency_json`, `monitored_branches_json` — optional; required for CA
-- `format` — `ieee` or `psse` (inferred from extension when omitted)
+- `format` — `ieee`, `psse` or `bpa` (inferred from extension when omitted)
 
 ### ACLF-only shortcut
 
@@ -93,7 +93,7 @@ cd wspace
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf <format> <input_path>
 ```
 
-Formats: `ieee` (`.ieee`) | `psse` (`.raw`/`.RAW`)
+Formats: `ieee` (`.ieee`) | `psse` (`.raw`/`.RAW`) | `bpa` (`.dat`/`.DAT`)
 
 Examples:
 

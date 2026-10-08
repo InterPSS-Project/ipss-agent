@@ -33,7 +33,7 @@ load Q (active power left unchanged). The shipped IEEE14 fixtures use that band;
 ## Prerequisites
 
 - InterPSS DSH Plugin with Chat tools available — see [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md)
-- A loaded simulation case (IEEE CDF or PSS/E RAW) under `wspace/data/**`
+- A loaded simulation case (IEEE CDF, PSS/E RAW or BPA Dat) under `wspace/data/**`
 - Groovy scripts under the case folder’s `scripts/` directory (or an absolute / relative path the agent can resolve)
 - Prefer **Creater** mode in Chat so the agent can call `interpss_case_load`, `interpss_run_aclf`, and `interpss_run_gvy`
 

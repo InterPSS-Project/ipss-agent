@@ -165,7 +165,11 @@ bus/branch tooltips resolve against.
 ## How the app reads a diagram
 
 - **Bus cells** are `busN` (lowercase) and their labels read `Bus-N`; either resolves to the bus, and
-  the host matches the id against the result tables' spelling (`bus118` -> `Bus118`).
+  the host matches the id against the result tables' spelling (`bus118` -> `Bus118`). The number
+  behind both comes from the bus **ID**'s trailing digits (`Bus30` -> `bus30` -> `Bus-30`), with the
+  table's `Number` column as the fallback and the next free index after that: a **BPA** case leaves
+  `Number` at `0` for every bus (the DirectParser assigns no bus numbers), so keying on the column
+  alone collapsed every bar onto `bus0` and every branch onto that one cell.
 - **A branch** is one edge between two bus cells, or two stub edges chained through the transformer's
   `group` cell — the group is what pairs both rings *and* both stubs with the same branch, so
   hovering any part of a transformer gives one tooltip.

@@ -1,6 +1,6 @@
 ---
 name: ipss-case-ca
-description: Use when asked to run a DC contingency analysis (CA / N-1 screening) for the current InterPSS simulation case, or for a named IEEE CDF / PSS/E RAW case, and to report the overload summary or the contingency result CSV the NERC report needs.
+description: Use when asked to run a DC contingency analysis (CA / N-1 screening) for the current InterPSS simulation case, or for a named IEEE CDF / PSS/E RAW / BPA Dat case, and to report the overload summary or the contingency result CSV the NERC report needs.
 metadata:
   short-description: Run DC contingency analysis
 ---

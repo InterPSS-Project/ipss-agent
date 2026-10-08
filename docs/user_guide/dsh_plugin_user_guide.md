@@ -4,7 +4,7 @@
 
 The InterPSS DSH Plugin adds an **InterPSS** tab to the DeepSeek Harness GUI. Use it to:
 
-- Load IEEE CDF (`.ieee`) or PSS/E RAW (`.raw` / `.RAW`) cases
+- Load IEEE CDF (`.ieee`), PSS/E RAW (`.raw` / `.RAW`) or BPA Dat (`.dat` / `.DAT`) cases
 - Run AC load flow (ACLF) and DC contingency analysis (CA)
 - Explore bus / branch / gen / load / contingency result CSVs
 - Inspect bus connection relationships (diagram and tables)
@@ -63,7 +63,8 @@ You can then run the power system simulation workflow or chat following the proc
 
 The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
 one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
-folder). Plugin **0.7.0** (Diagram line through 0.6.37) is the recommended install.
+folder). Plugin **0.7.1** (Diagram line through 0.6.37; case file types IEEE CDF / PSS/E RAW /
+BPA Dat) is the recommended install.
 
 On the tab you can:
 
@@ -94,9 +95,9 @@ InterPSS DSH Plugin uses an In-Memory Computing (IMC) approach. When a simulatio
   - **Texas 2K-bus** — PSS/E RAW under `data/psse/Texas2K/`
   - **Select…** — custom case
 2. For a custom case:
-  - Set format to **IEEE CDF** or **PSS/E RAW**.
-  - Enter a path relative to the workspace (for example `data/ieee/Ieee118Bus/ieee118.ieee`), or click the search icon to open the case picker.
-  - The picker lists matching files under `wspace/data`, filtered by the selected format.
+  - Set format to **IEEE CDF**, **PSS/E RAW** or **BPA Dat** (0.7.1+; the path placeholder follows the choice).
+  - Enter a path relative to the workspace (for example `data/ieee/Ieee118Bus/ieee118.ieee`, or `data/bpa/ieee9/IEEE9.dat` for a BPA case), or click the search icon to open the case picker.
+  - The picker lists matching files under `wspace/data`, filtered by the selected format — each row is tagged `IEEE` / `PSSE` / `BPA`, so a BPA Dat selection lists the `.dat` cases (`data/bpa/…`).
 3. Click **Load**.
   - Success: `✓ Loaded: N buses, M branches`, plus a **Network info** panel.
   - Failure: `⚠` with an error message.
@@ -362,6 +363,7 @@ You can name a case as:
 | Form                       | Example                                       |
 | -------------------------- | --------------------------------------------- |
 | Workspace-relative path    | `data/ieee/Ieee118Bus/ieee118.ieee`           |
+| BPA Dat case (0.7.1+)      | `data/bpa/ieee9/IEEE9.dat` (`.DAT` is accepted too) |
 | Path with `wspace/` prefix | `wspace/data/ieee/Ieee14Bus/ieee14.ieee`      |
 | Preset label               | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
 

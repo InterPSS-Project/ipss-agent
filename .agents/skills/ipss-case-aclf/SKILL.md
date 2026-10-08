@@ -1,6 +1,6 @@
 ---
 name: ipss-case-aclf
-description: Use when asked to run an AC load flow (ACLF) for the current InterPSS simulation case — the case selected in the InterPSS tab — or for a named IEEE CDF / PSS/E RAW case, and to report convergence plus the result files the run writes.
+description: Use when asked to run an AC load flow (ACLF) for the current InterPSS simulation case — the case selected in the InterPSS tab — or for a named IEEE CDF / PSS/E RAW / BPA Dat case, and to report convergence plus the result files the run writes.
 metadata:
   short-description: Run ACLF for the selected case
 ---
@@ -43,6 +43,7 @@ Do not ask the user which case to run: with no argument the tool resolves the ca
 |---|---|
 | Workspace-relative path | `data/ieee/Ieee118Bus/ieee118.ieee` |
 | Absolute path containing `/wspace/data/` | `/…/ipss-agent/wspace/data/ieee/Ieee14Bus/ieee14.ieee` |
+| BPA Dat case (plugin 0.7.1+) | `data/bpa/ieee9/IEEE9.dat` |
 | Preset label (case-insensitive) | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
 
 Pass `case` only to solve a different case than the selected one.
