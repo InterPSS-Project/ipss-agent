@@ -65,6 +65,8 @@ ipss-agent/
 
 JAR file names and versions under `lib/deps/` follow [`pom.xml`](pom.xml) and
 whatever Maven resolves; the `lib/deps` fragment in the tree above is illustrative.
+`./mvnw package` (and any lifecycle through `process-resources`) wipes `lib/deps/*.jar`
+and recopies the current runtime tree so only one version of each artifact remains.
 
 ## Prerequisites
 

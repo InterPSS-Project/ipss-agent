@@ -210,6 +210,23 @@
         <artifactId>maven-antrun-plugin</artifactId>
         <version>${maven.antrun.plugin.version}</version>
         <executions>
+          <!-- Wipe lib/deps before copy so upgraded coordinates do not leave stale
+               versioned jars (e.g. AMDJ-1.0.1 next to AMDJ-1.0.3). -->
+          <execution>
+            <id>clean-deps-dir</id>
+            <phase>process-resources</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <target>
+                <mkdir dir="${ipss.deps.output.dir}"/>
+                <delete>
+                  <fileset dir="${ipss.deps.output.dir}" includes="*.jar"/>
+                </delete>
+              </target>
+            </configuration>
+          </execution>
           <execution>
             <id>unpack-runtime-libs</id>
             <phase>prepare-package</phase>
@@ -280,12 +297,18 @@
         <executions>
           <execution>
             <id>copy-deps</id>
+            <phase>process-resources</phase>
             <goals>
               <goal>copy-dependencies</goal>
             </goals>
             <configuration>
               <includeScope>runtime</includeScope>
               <outputDirectory>${ipss.deps.output.dir}</outputDirectory>
+              <!-- Runnable lives at lib/ipss_runnable.jar; do not also copy into deps. -->
+              <excludeArtifactIds>ipss-runnable</excludeArtifactIds>
+              <overWriteReleases>true</overWriteReleases>
+              <overWriteSnapshots>true</overWriteSnapshots>
+              <overWriteIfNewer>true</overWriteIfNewer>
             </configuration>
           </execution>
         </executions>

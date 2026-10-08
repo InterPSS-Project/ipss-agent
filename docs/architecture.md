@@ -405,10 +405,11 @@ Loaded by `ReportConfig` for Markdown report analyzers:
 
 Build pipeline (`pom.xml`):
 
-1. `maven-dependency-plugin` — copy runtime deps to `lib/deps/`
-2. `maven-antrun-plugin` — unzip `ipss_runnable.jar`, deps, and compiled classes into `target/uber-classes/`
-3. `maven-assembly-plugin` + `src/assembly/uber.xml` — produce self-contained uber JAR
-4. `jacoco-maven-plugin` — coverage on `./mvnw test`
+1. `maven-antrun-plugin` (`clean-deps-dir`) — wipe `lib/deps/*.jar` so stale versions do not accumulate
+2. `maven-dependency-plugin` — copy the current runtime tree to `lib/deps/` (excludes `ipss-runnable`, which lives at `lib/ipss_runnable.jar`)
+3. `maven-antrun-plugin` (`unpack-runtime-libs`) — unzip `ipss_runnable.jar`, deps, and compiled classes into `target/uber-classes/`
+4. `maven-assembly-plugin` + `src/assembly/uber.xml` — produce self-contained uber JAR
+5. `jacoco-maven-plugin` — coverage on `./mvnw test`
 
 ```bash
 ./mvnw -q clean package    # build uber JAR
