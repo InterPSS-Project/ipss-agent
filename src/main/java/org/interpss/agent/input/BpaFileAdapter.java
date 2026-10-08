@@ -1,8 +1,6 @@
 package org.interpss.agent.input;
 
-import static org.interpss.plugin.pssl.plugin.IpssAdapter.FileFormat.BPA;
-
-import org.interpss.plugin.pssl.plugin.IpssAdapter;
+import org.interpss.fadapter.bpa.BPADirectParser;
 
 import com.interpss.core.CoreObjectFactory;
 import com.interpss.core.aclf.AclfBus;
@@ -19,10 +17,7 @@ public final class BpaFileAdapter {
     }
 
     public static AclfNetwork createAclfNet(String filePath) throws Exception {
-        AclfNetwork net = IpssAdapter.importAclfNet(filePath)
-                .setFormat(BPA)
-                .load()
-                .getImportedObj();
+        AclfNetwork net = new BPADirectParser().parse(filePath);
         ensureAreaAndZone(net);
         return net;
     }
