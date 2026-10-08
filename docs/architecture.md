@@ -437,14 +437,12 @@ JUnit 5 + AssertJ; fixtures under `src/test/resources/`.
 
 ## External Dependencies
 
-### InterPSS / IEEE ODM (from `lib/m2-repo`)
+### InterPSS (from `lib/m2-repo`)
 
 | Artifact | Version | Role |
 |----------|---------|------|
-| `com.interpss:ipss-runnable` | 1.0 | Runnable InterPSS bundle |
-| `com.interpss:ipss.core.lib` | 1.0.16 | Core engine: `AclfNetwork`, algorithms |
-| `org.ieee.odm:ieee.odm.schema` | 1.0.1 | IEEE Open Data Model schema |
-| `org.ieee.odm:ieee.odm_pss` | 1.0.1 | PSS/E data exchange types |
+| `com.interpss:ipss-runnable` | 1.0 | Runnable bundle (`ipss.plugin.core` 1.4.2) |
+| `com.interpss:ipss.core.lib` | 1.4.0 | Core engine: `AclfNetwork`, algorithms |
 
 ### ipss-plugin classes (inside `ipss_runnable.jar`)
 

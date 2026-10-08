@@ -14,6 +14,7 @@ public final class NetworkLoader {
         return switch (format) {
             case "ieee" -> IeeeFileAdapter.createAclfNet(filePath);
             case "psse" -> PsseFileAdapter.createAclfNet(filePath);
+            // TODO: add support for bpa format
             default -> throw new IllegalArgumentException("Invalid format: " + format);
         };
     }

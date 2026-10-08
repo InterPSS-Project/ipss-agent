@@ -26,8 +26,8 @@
     <ipss.deps.output.dir>${project.basedir}/lib/deps</ipss.deps.output.dir>
     <ipss.lib.dir>${project.basedir}/lib</ipss.lib.dir>
     <ipss.local.repo>${project.basedir}/lib/m2-repo</ipss.local.repo>
-    <ipss.core.version>1.0.16</ipss.core.version>
-    <ieee.odm.version>1.0.1</ieee.odm.version>
+    <!-- Matches ipss-plugin 1.4.2 (ipss_runnable.jar = ipss.plugin.core-1.4.2). -->
+    <ipss.core.version>1.4.0</ipss.core.version>
     <!-- Groovy backs org.interpss.script.gvy (AclfNetGvyScriptProcessor), which ships
          inside ipss_runnable.jar without its own dependency: 4.0.x matches the
          GroovyShell/Binding API that class was compiled against. -->
@@ -48,7 +48,7 @@
   </repositories>
 
   <dependencies>
-    <!-- InterPSS and ODM (from lib/m2-repo, symlinks to lib/) -->
+    <!-- InterPSS (from lib/m2-repo, symlinks to lib/ and lib/deps/) -->
     <dependency>
       <groupId>com.interpss</groupId>
       <artifactId>ipss-runnable</artifactId>
@@ -59,18 +59,9 @@
       <artifactId>ipss.core.lib</artifactId>
       <version>${ipss.core.version}</version>
     </dependency>
-    <dependency>
-      <groupId>org.ieee.odm</groupId>
-      <artifactId>ieee.odm.schema</artifactId>
-      <version>${ieee.odm.version}</version>
-    </dependency>
-    <dependency>
-      <groupId>org.ieee.odm</groupId>
-      <artifactId>ieee.odm_pss</artifactId>
-      <version>${ieee.odm.version}</version>
-    </dependency>
 
-    <!-- Third-party (also in lib/deps; included in uber assembly from Maven for compile) -->
+    <!-- Third-party (also in lib/deps; included in uber assembly from Maven for compile).
+         Versions aligned with ipss-plugin 1.4.2 / ipss-core 1.4.0 where they overlap. -->
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>
@@ -84,7 +75,7 @@
     <dependency>
       <groupId>org.eclipse.emf</groupId>
       <artifactId>org.eclipse.emf.ecore</artifactId>
-      <version>2.38.0</version>
+      <version>2.42.0</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.emf</groupId>
@@ -119,7 +110,7 @@
     <dependency>
       <groupId>com.github.rwl</groupId>
       <artifactId>JKLU</artifactId>
-      <version>1.0.0</version>
+      <version>2.0.2</version>
     </dependency>
     <dependency>
       <groupId>net.sourceforge.csparsej</groupId>
@@ -129,17 +120,17 @@
     <dependency>
       <groupId>org.dflib</groupId>
       <artifactId>dflib</artifactId>
-      <version>2.0.0-M6</version>
+      <version>2.0.0-M7</version>
     </dependency>
     <dependency>
       <groupId>org.dflib</groupId>
       <artifactId>dflib-csv</artifactId>
-      <version>2.0.0-M6</version>
+      <version>2.0.0-M7</version>
     </dependency>
     <dependency>
       <groupId>org.dflib</groupId>
       <artifactId>dflib-json</artifactId>
-      <version>2.0.0-M6</version>
+      <version>2.0.0-M7</version>
     </dependency>
     <dependency>
       <groupId>org.apache.commons</groupId>
@@ -149,7 +140,7 @@
     <dependency>
       <groupId>com.google.code.gson</groupId>
       <artifactId>gson</artifactId>
-      <version>2.11.0</version>
+      <version>2.13.1</version>
     </dependency>
 
     <!-- Groovy script adapter (org.interpss.script.gvy) runtime -->

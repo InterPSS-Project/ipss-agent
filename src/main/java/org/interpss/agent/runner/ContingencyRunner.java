@@ -24,7 +24,6 @@ import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.contingency.DclfContingencyConfig;
 import org.interpss.plugin.contingency.ParallelDclfContingencyAnalyzer;
 import org.interpss.plugin.contingency.definition.BranchContingencyRecord;
-import org.interpss.plugin.contingency.definition.MonitoredBranchRecord;
 import org.interpss.plugin.contingency.util.ContingencyFileUtil;
 import org.interpss.plugin.contingency.util.DclfContingencyHelper;
 import org.interpss.plugin.result.dframe.ca.DclfContingencyDFrameAdapter;
@@ -37,6 +36,7 @@ import com.interpss.core.algo.dclf.DclfMethod;
 import com.interpss.core.contingency.ContingencyBranchOutageType;
 import com.interpss.core.contingency.dclf.DclfBranchOutage;
 import com.interpss.core.contingency.dclf.DclfOutageBranch;
+import com.interpss.monitor.definition.MonitoredBranchRecord;
 
 /**
  * Runs DC contingency analysis and writes contingency CSV results.

@@ -30,22 +30,21 @@ ipss-agent/
 │   ├── aclf_run.json              # ACLF NR / limit-control settings (used by IpssCmd)
 │   └── gen_report.json            # Report band thresholds (used by org.interpss.agent.report)
 ├── lib/
-│   ├── ipss_runnable.jar          # Main InterPSS runnable JAR
-│   └── deps/                      # Third-party JARs
-│       ├── ipss.core.lib-1.0.16.jar
-│       ├── ieee.odm.schema-1.0.1.jar
-│       ├── ieee.odm_pss-1.0.1.jar
+│   ├── ipss_runnable.jar          # Main InterPSS runnable JAR (ipss.plugin.core 1.4.2)
+│   ├── m2-repo/                   # Local Maven POMs + jar symlinks for InterPSS artifacts
+│   └── deps/                      # Runtime JARs (core + third-party resolved by Maven)
+│       ├── ipss.core.lib-1.4.0.jar
 │       ├── slf4j-api-1.7.36.jar / slf4j-simple-1.7.36.jar
-│       ├── org.eclipse.emf.common-2.45.0.jar / .ecore-2.38.0.jar
+│       ├── org.eclipse.emf.common-2.45.0.jar / .ecore-2.42.0.jar
 │       ├── hazelcast-5.3.6.jar
 │       ├── jaxb-api-2.3.1.jar / jaxb-impl-2.3.1.jar
 │       ├── javax.activation-api-1.2.0.jar
 │       ├── commons-math3-3.6.1.jar
-│       ├── JKLU-1.0.0.jar / BTFJ-1.0.1.jar / AMDJ-1.0.1.jar / COLAMDJ-1.0.1.jar
+│       ├── JKLU-2.0.2.jar
 │       ├── csparsej-1.1.1.jar
-│       ├── dflib-2.0.0-M6.jar / dflib-csv-2.0.0-M6.jar / dflib-json-2.0.0-M6.jar
+│       ├── dflib-2.0.0-M7.jar / dflib-csv-2.0.0-M7.jar / dflib-json-2.0.0-M7.jar
 │       ├── commons-csv-1.10.0.jar
-│       └── gson-2.11.0.jar
+│       └── gson-2.13.1.jar
 ├── src/
 │   ├── main/java/org/interpss/agent/   # IpssCmd Java sources
 │   │   ├── IpssCmd.java
@@ -100,6 +99,18 @@ This compiles `src/main/java` and assembles `target/ipss-agent-cmd-1.0.0-uber.ja
 which bundles the InterPSS runtime, all dependency JARs, and the CLI classes. The
 manifest declares `org.interpss.agent.IpssCmd` as the main class.
 
+After replacing `lib/ipss_runnable.jar` or `lib/deps/ipss.core.lib-*.jar`, refresh the
+local Maven cache so `~/.m2` does not keep a stale `ipss-runnable:1.0`:
+
+```bash
+./mvnw -q install:install-file \
+  -Dfile=lib/ipss_runnable.jar \
+  -DpomFile=lib/m2-repo/com/interpss/ipss-runnable/1.0/ipss-runnable-1.0.pom
+./mvnw -q install:install-file \
+  -Dfile=lib/deps/ipss.core.lib-1.4.0.jar \
+  -DpomFile=lib/m2-repo/com/interpss/ipss.core.lib/1.4.0/ipss.core.lib-1.4.0.pom
+```
+
 The compiled `target/` output and downloaded Maven distribution are local build
 artifacts and are not committed.
 
@@ -134,30 +145,28 @@ artifacts).
 
 ### InterPSS Core JARs
 
-| JAR                           | Source         | Purpose                            |
-| ----------------------------- | -------------- | ---------------------------------- |
-| `ipss_runnable.jar`           | InterPSS build | Plugin core, adapters, samples     |
-| `ipss.core.lib-1.0.16.jar`    | InterPSS build | ACLF engine, algorithms, EMF model |
-| `ieee.odm.schema-1.0.1.jar`   | InterPSS build | IEEE ODM XML schema                |
-| `ieee.odm_pss-1.0.1.jar`      | InterPSS build | IEEE ODM PSS types                 |
+| JAR                          | Source         | Purpose                                        |
+| ---------------------------- | -------------- | ---------------------------------------------- |
+| `ipss_runnable.jar`          | InterPSS build | Plugin core 1.4.2 (adapters, ACLF, contingency) |
+| `ipss.core.lib-1.4.0.jar`    | InterPSS build | ACLF engine, algorithms, EMF model             |
+
+IEEE CDF / PSS/E import no longer requires separate IEEE ODM JARs; parsers live in
+`ipss_runnable.jar` (`org.interpss.fadapter`).
 
 ### Sparse Solver JARs
 
 | JAR                  | Purpose                                  |
 | -------------------- | ---------------------------------------- |
-| `JKLU-1.0.0.jar`     | KLU sparse LU solver                     |
-| `BTFJ-1.0.1.jar`     | Block Triangular Form permutation        |
-| `AMDJ-1.0.1.jar`     | Approximate Minimum Degree ordering      |
-| `COLAMDJ-1.0.1.jar`  | Column AMD ordering                      |
+| `JKLU-2.0.2.jar`     | KLU sparse LU solver                     |
 | `csparsej-1.1.1.jar` | CSPARSEJ — CSparse sparse matrix library |
 
 ### DataFrame Export JARs (for CSV output)
 
 | JAR                       | Maven Central Coordinates               | Purpose           |
 | ------------------------- | --------------------------------------- | ----------------- |
-| `dflib-2.0.0-M6.jar`      | `org.dflib:dflib:2.0.0-M6`              | DataFrame library |
-| `dflib-csv-2.0.0-M6.jar`  | `org.dflib:dflib-csv:2.0.0-M6`          | CSV save support  |
-| `dflib-json-2.0.0-M6.jar` | `org.dflib:dflib-json:2.0.0-M6`         | JSON support      |
+| `dflib-2.0.0-M7.jar`      | `org.dflib:dflib:2.0.0-M7`              | DataFrame library |
+| `dflib-csv-2.0.0-M7.jar`  | `org.dflib:dflib-csv:2.0.0-M7`          | CSV save support  |
+| `dflib-json-2.0.0-M7.jar` | `org.dflib:dflib-json:2.0.0-M7`         | JSON support      |
 | `commons-csv-1.10.0.jar`  | `org.apache.commons:commons-csv:1.10.0` | CSV parsing       |
 
 ### Third-Party Support JARs
@@ -165,11 +174,12 @@ artifacts).
 | JAR                                                       | Purpose                    |
 | --------------------------------------------------------- | -------------------------- |
 | `slf4j-api-1.7.36.jar` / `slf4j-simple-1.7.36.jar`        | Logging                    |
-| `org.eclipse.emf.common-2.45.0.jar` / `.ecore-2.38.0.jar` | Eclipse Modeling Framework |
+| `org.eclipse.emf.common-2.45.0.jar` / `.ecore-2.42.0.jar` | Eclipse Modeling Framework |
 | `hazelcast-5.3.6.jar`                                     | Distributed computing      |
 | `jaxb-api-2.3.1.jar` / `jaxb-impl-2.3.1.jar`              | XML binding                |
 | `javax.activation-api-1.2.0.jar`                          | Java Activation Framework  |
 | `commons-math3-3.6.1.jar`                                 | Math utilities             |
+| `gson-2.13.1.jar`                                         | JSON (bridge / config)     |
 
 ## Step 3: ACLF run configuration
 
