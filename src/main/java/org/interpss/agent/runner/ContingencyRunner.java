@@ -21,8 +21,6 @@ import org.interpss.agent.cli.CliArgs;
 import org.interpss.agent.input.NetworkLoader;
 import org.interpss.agent.util.CaRunConfig;
 import org.interpss.agent.util.ProjectPaths;
-import org.interpss.plugin.contingency.DclfContingencyConfig;
-import org.interpss.plugin.contingency.ParallelDclfContingencyAnalyzer;
 import org.interpss.plugin.contingency.definition.BranchContingencyRecord;
 import org.interpss.plugin.contingency.util.ContingencyFileUtil;
 import org.interpss.plugin.contingency.util.DclfContingencyHelper;
@@ -32,7 +30,9 @@ import com.interpss.algo.parallel.BranchCAResultRec;
 import com.interpss.core.aclf.AclfBranch;
 import com.interpss.core.aclf.AclfNetwork;
 import com.interpss.core.algo.dclf.ContingencyAnalysisAlgorithm;
+import com.interpss.core.algo.dclf.DclfContingencyConfig;
 import com.interpss.core.algo.dclf.DclfMethod;
+import com.interpss.core.algo.dclf.solver.ParallelDclfContingencyAnalyzer;
 import com.interpss.core.contingency.ContingencyBranchOutageType;
 import com.interpss.core.contingency.dclf.DclfBranchOutage;
 import com.interpss.core.contingency.dclf.DclfOutageBranch;
@@ -114,12 +114,11 @@ public final class ContingencyRunner {
         System.out.println("Using " + threads + " threads for contingency analysis");
 
         ConcurrentLinkedQueue<BranchCAResultRec> results =
-                ParallelDclfContingencyAnalyzer.performContingencyAnalysis(
+                ParallelDclfContingencyAnalyzer.executeContingencyAnalysis(
                         net,
                         dclfContList,
                         monitoredBranchIds,
-                        dclfConfig.getOverloadThreshold(),
-                        dclfConfig.isDclfInclLoss(),
+                        dclfConfig,
                         threads);
 
         DclfContingencyDFrameAdapter dfAdapter = new DclfContingencyDFrameAdapter();
