@@ -31,7 +31,7 @@ aclfnet.createAclfGenUIDLookupTable(true).values().each { gen ->
 
 branches = 0
 aclfnet.branchList.each { branch ->
-	branch.ratingMva1 = 600.0
+	branch.ratingMva1 = branch.isLine() ? 600.0 : 800.0
 	branches++
 }
 
