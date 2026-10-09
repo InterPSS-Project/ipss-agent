@@ -444,6 +444,59 @@ return {
       // lands in the result CSV. The CA dialog's field and config/ca_run.json both feed
       // this one number.
       overloadThreshold: 90,
+      // The solver knobs behind the DC contingency analysis (0.7.2) — the fields of
+      // ipss.core.lib's `DclfContingencyConfig`, which the runner copies onto the solver, plus
+      // the runner's worker count. Every default is the value the runner used before they
+      // became selectable, so a ca_run.json that names none of them behaves as it always did.
+      dclfInclLoss: true,
+      dclfScreening: false,
+      dcLoadingCutoff: 100,
+      dcFlowChangeCutoff: 200,
+      solutionMethod: 'SparseEqnSolve',
+      kluEndpointRhsBatchSize: 0,
+      cacheViolationCombinedShiftFactors: false,
+      islandingTreatment: 'ANCHORED_COMPENSATE_ONE_BUS',
+      n1IslandingReplayEnabled: false,
+      multiOutageReplayMode: 'EXACT_TOPOLOGY',
+      highImpedanceReactancePu: 10000,
+      turnOffIslandBus: true,
+      autoTurnLine2Xfr: true,
+      // Which branch rating the overload check compares against: the library's own provider
+      // (rating MVA 2 — measured as `RATING_B` on ipss.core.lib 1.4.0), or either rating pinned.
+      ratingProvider: 'default',
+      // 0 = one worker per available processor, the runner's historical choice.
+      threads: 0,
+    }
+
+    // The solver knobs, by kind: validation, the dialog and the guard read one table. The enum
+    // lists are the Java enums' constant names verbatim, and the Java `CaRunConfig` rejects the
+    // same values with the same wording.
+    const CA_SOLUTION_METHODS = ['SparseEqnSolve', 'WoodburyMatrixUpdate']
+    const CA_ISLANDING_TREATMENTS = ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY']
+    const CA_MULTI_OUTAGE_REPLAY_MODES = ['EXACT_TOPOLOGY', 'HIGH_IMPEDANCE']
+    const CA_RATING_PROVIDERS = ['default', 'RATING_A', 'RATING_B']
+    const CA_BOOL_KEYS = ['dclfInclLoss', 'dclfScreening', 'cacheViolationCombinedShiftFactors',
+      'n1IslandingReplayEnabled', 'turnOffIslandBus', 'autoTurnLine2Xfr']
+    const CA_CHOICE_KEYS = [
+      ['solutionMethod', CA_SOLUTION_METHODS],
+      ['islandingTreatment', CA_ISLANDING_TREATMENTS],
+      ['multiOutageReplayMode', CA_MULTI_OUTAGE_REPLAY_MODES],
+      ['ratingProvider', CA_RATING_PROVIDERS],
+    ]
+    const CA_COUNT_KEYS = ['kluEndpointRhsBatchSize', 'threads']
+    const CA_CUTOFF_KEYS = ['dcLoadingCutoff', 'dcFlowChangeCutoff']
+    const CA_POSITIVE_KEYS = ['highImpedanceReactancePu']
+    const CA_CONFIG_KEYS = Object.keys(DEFAULT_CA_CONFIG)
+
+    // The file's key order, and the exact payload written to config/ca_run.json and handed to
+    // the bridge: one list so the dialog, the tool and the file cannot drift.
+    function caConfigPayload(config) {
+      const source = config && typeof config === 'object' ? config : DEFAULT_CA_CONFIG
+      const out = {}
+      for (const key of CA_CONFIG_KEYS) {
+        out[key] = source[key] === undefined ? DEFAULT_CA_CONFIG[key] : source[key]
+      }
+      return out
     }
 
     // The dialog reports how many entries a candidate file holds, which means
@@ -629,6 +682,51 @@ function caConfigPath(root, parent) {
           return { ok: false, error: fileKey + ' not found: ' + rel }
         }
         out[fileKey] = rel
+      }
+
+      // The solver knobs (0.7.2). An absent key keeps its default; a present one must be usable —
+      // the Java runner rejects the same values, and a knob silently replaced by a default is a
+      // run that ignores what the dialog said. Numbers accept the dialog's string form, and a
+      // missing value ('') means "unset", exactly like the threshold above.
+      const number = (key, lo, hi, message) => {
+        const raw = value[key]
+        if (raw === undefined || raw === null || raw === '') return null
+        const n = Number(raw)
+        if (!Number.isFinite(n) || n < lo || n > hi) return message
+        out[key] = n
+        return null
+      }
+      for (const key of CA_BOOL_KEYS) {
+        const raw = value[key]
+        if (raw === undefined || raw === null) continue
+        if (typeof raw !== 'boolean') {
+          return { ok: false, error: key + ' must be true or false (got ' + JSON.stringify(raw) + ')' }
+        }
+        out[key] = raw
+      }
+      for (const entry of CA_CHOICE_KEYS) {
+        const key = entry[0]
+        const allowed = entry[1]
+        const raw = value[key]
+        if (raw === undefined || raw === null || raw === '') continue
+        if (allowed.indexOf(raw) < 0) {
+          return { ok: false, error: 'unsupported ' + key + ' ' + JSON.stringify(raw) +
+            ' (expected ' + allowed.join('|') + ')' }
+        }
+        out[key] = raw
+      }
+      for (const key of CA_COUNT_KEYS) {
+        const bad = number(key, 0, Number.MAX_SAFE_INTEGER, key + ' must be 0 or more')
+        if (bad !== null) return { ok: false, error: bad }
+        out[key] = Math.floor(out[key])
+      }
+      for (const key of CA_CUTOFF_KEYS) {
+        const bad = number(key, 0, 1000, key + ' must be a percentage between 0 and 1000')
+        if (bad !== null) return { ok: false, error: bad }
+      }
+      for (const key of CA_POSITIVE_KEYS) {
+        const bad = number(key, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER, key + ' must be a positive number')
+        if (bad !== null) return { ok: false, error: bad }
       }
       return { ok: true, config: out }
     }
@@ -1180,8 +1278,14 @@ function caConfigPath(root, parent) {
             const absCont = contRel !== null ? root + '/wspace/' + contRel : null
             const absMon = monRel !== null ? root + '/wspace/' + monRel : null
             const absResults = root + '/wspace/' + resultDir
-            const raw = await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
-              caConfig.overloadThreshold)
+            // The whole run config goes over, not just the threshold, so the dialog's solver
+            // knobs reach the runner; a provider without the config entry point still runs
+            // with the threshold alone, which is what it did before the knobs existed.
+            const raw = typeof javaBridge.runContingencyWithConfig === 'function'
+              ? await javaBridge.runContingencyWithConfig(format, absCase, absCont, absMon, absResults, stem,
+                JSON.stringify(caConfigPayload(caConfig)))
+              : await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
+                caConfig.overloadThreshold)
             const parsed = JSON.parse(raw)
             if (parsed && parsed.ok) {
               return {
@@ -1594,15 +1698,10 @@ function caConfigPath(root, parent) {
         if (!validated.ok) return { ok: false, error: validated.error }
 
         const cfgRel = caConfigRel(parent)
-        const payload = {
-          contingencyMode: validated.config.contingencyMode,
-          contingencyFile: validated.config.contingencyFile,
-          monitorMode: validated.config.monitorMode,
-          monitoredBranchFile: validated.config.monitoredBranchFile,
-          // The dialog's over loading threshold. It must round-trip, or the next dialog
-          // open and the CLI silently fall back to 90.
-          overloadThreshold: validated.config.overloadThreshold,
-        }
+        // The whole validated config, in the file's key order: the two mode/file pairs, the over
+        // loading threshold and the solver knobs. It must round-trip, or the next dialog open and
+        // the CLI silently fall back to the defaults.
+        const payload = caConfigPayload(validated.config)
         try {
           const target = await fs.resolve(caConfigPath(root, parent))
           await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n')

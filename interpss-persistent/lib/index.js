@@ -666,6 +666,61 @@ const DEFAULT_CA_CONFIG = {
   // lands in the result CSV. The CA dialog's field, the tool's `overloadThreshold` and
   // config/ca_run.json all feed this one number.
   overloadThreshold: 90,
+  // The solver knobs behind the DC contingency analysis (0.7.2). They are the fields of
+  // ipss.core.lib's `DclfContingencyConfig`, which the runner copies onto the solver, plus
+  // the runner's own worker count — every default is the value the runner used before they
+  // became selectable, so a `ca_run.json` (or tool call) that names none of them behaves
+  // exactly as it always did.
+  dclfInclLoss: true,
+  dclfScreening: false,
+  dcLoadingCutoff: 100,
+  dcFlowChangeCutoff: 200,
+  solutionMethod: 'SparseEqnSolve',
+  kluEndpointRhsBatchSize: 0,
+  cacheViolationCombinedShiftFactors: false,
+  islandingTreatment: 'ANCHORED_COMPENSATE_ONE_BUS',
+  n1IslandingReplayEnabled: false,
+  multiOutageReplayMode: 'EXACT_TOPOLOGY',
+  highImpedanceReactancePu: 10000,
+  turnOffIslandBus: true,
+  autoTurnLine2Xfr: true,
+  // Which branch rating the overload check compares against: the library's own provider
+  // (rating MVA 2 — measured as `RATING_B` on ipss.core.lib 1.4.0), or either rating pinned.
+  ratingProvider: 'default',
+  // 0 = one worker per available processor, the runner's historical choice.
+  threads: 0,
+}
+
+// The solver knobs, by kind, so validation, the dialog and the guard read one table. The
+// enum lists are the Java enums' constant names verbatim: a value not in them is rejected
+// by the Host as well as by `CaRunConfig`, with the same wording.
+const CA_SOLUTION_METHODS = ['SparseEqnSolve', 'WoodburyMatrixUpdate']
+const CA_ISLANDING_TREATMENTS = ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY']
+const CA_MULTI_OUTAGE_REPLAY_MODES = ['EXACT_TOPOLOGY', 'HIGH_IMPEDANCE']
+const CA_RATING_PROVIDERS = ['default', 'RATING_A', 'RATING_B']
+const CA_BOOL_KEYS = ['dclfInclLoss', 'dclfScreening', 'cacheViolationCombinedShiftFactors',
+  'n1IslandingReplayEnabled', 'turnOffIslandBus', 'autoTurnLine2Xfr']
+const CA_CHOICE_KEYS = [
+  ['solutionMethod', CA_SOLUTION_METHODS],
+  ['islandingTreatment', CA_ISLANDING_TREATMENTS],
+  ['multiOutageReplayMode', CA_MULTI_OUTAGE_REPLAY_MODES],
+  ['ratingProvider', CA_RATING_PROVIDERS],
+]
+const CA_COUNT_KEYS = ['kluEndpointRhsBatchSize', 'threads']
+const CA_CUTOFF_KEYS = ['dcLoadingCutoff', 'dcFlowChangeCutoff']
+const CA_POSITIVE_KEYS = ['highImpedanceReactancePu']
+
+// The file's key order, and the exact payload written to config/ca_run.json and handed to
+// the bridge: one list so the dialog, the tool and the file cannot drift.
+const CA_CONFIG_KEYS = Object.keys(DEFAULT_CA_CONFIG)
+
+function caConfigPayload(config) {
+  const source = config && typeof config === 'object' ? config : DEFAULT_CA_CONFIG
+  const out = {}
+  for (const key of Object.keys(DEFAULT_CA_CONFIG)) {
+    out[key] = source[key] === undefined ? DEFAULT_CA_CONFIG[key] : source[key]
+  }
+  return out
 }
 
 // The dialog reports how many entries a candidate file holds, which means
@@ -853,6 +908,51 @@ async function validateCaConfig(ctx, root, value, requireFiles) {
       return { ok: false, error: fileKey + ' not found: ' + rel }
     }
     out[fileKey] = rel
+  }
+
+  // The solver knobs (0.7.2). An absent key keeps its default; a present one must be usable —
+  // the Java runner rejects the same values, and a knob silently replaced by a default is a run
+  // that ignores what the dialog said. Numbers accept the dialog's string form, and a missing
+  // value ('') means "unset", exactly like the threshold above.
+  const number = (key, lo, hi, message) => {
+    const raw = value[key]
+    if (raw === undefined || raw === null || raw === '') return null
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n < lo || n > hi) return message
+    out[key] = n
+    return null
+  }
+  for (const key of CA_BOOL_KEYS) {
+    const raw = value[key]
+    if (raw === undefined || raw === null) continue
+    if (typeof raw !== 'boolean') {
+      return { ok: false, error: key + ' must be true or false (got ' + JSON.stringify(raw) + ')' }
+    }
+    out[key] = raw
+  }
+  for (const entry of CA_CHOICE_KEYS) {
+    const key = entry[0]
+    const allowed = entry[1]
+    const raw = value[key]
+    if (raw === undefined || raw === null || raw === '') continue
+    if (allowed.indexOf(raw) < 0) {
+      return { ok: false, error: 'unsupported ' + key + ' ' + JSON.stringify(raw) +
+        ' (expected ' + allowed.join('|') + ')' }
+    }
+    out[key] = raw
+  }
+  for (const key of CA_COUNT_KEYS) {
+    const bad = number(key, 0, Number.MAX_SAFE_INTEGER, key + ' must be 0 or more')
+    if (bad !== null) return { ok: false, error: bad }
+    out[key] = Math.floor(out[key])
+  }
+  for (const key of CA_CUTOFF_KEYS) {
+    const bad = number(key, 0, 1000, key + ' must be a percentage between 0 and 1000')
+    if (bad !== null) return { ok: false, error: bad }
+  }
+  for (const key of CA_POSITIVE_KEYS) {
+    const bad = number(key, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER, key + ' must be a positive number')
+    if (bad !== null) return { ok: false, error: bad }
   }
   return { ok: true, config: out }
 }
@@ -1202,6 +1302,23 @@ function captureStdio() {
     }
   }
   return { out: () => '', err: () => '', stop: () => {} }
+}
+
+// Attach the intercepted stdout/stderr (e.g. "Using N threads…") to a bridge reply, so the GUI
+// can surface them instead of the dsh terminal, and mirror the case the run adopted. Shared by the
+// javaBridge provider's `runContingency` and `runContingencyWithConfig`, which differ only in what
+// they pass to the bridge.
+function withCaStdio(raw, cap, absCase) {
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.ok === true) lastLoadedAbs = absCase
+      parsed.stdout = cap.out()
+      parsed.stderr = cap.err()
+      return JSON.stringify(parsed)
+    }
+  } catch (e) {}
+  return raw
 }
 
 // Run one Groovy evaluation through the bridge: capture the script's println output,
@@ -1791,8 +1908,14 @@ class InterpssService extends TypertRemoteService {
         const absCont = contRel !== null ? root + '/wspace/' + contRel : null
         const absMon = monRel !== null ? root + '/wspace/' + monRel : null
         const absResults = root + '/wspace/' + resultDir
-        const raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
-          caConfig.overloadThreshold)
+        // The whole run config goes over, not just the threshold, so the dialog's solver knobs
+        // reach the runner. An older bridge (jar without it) still runs: it takes the threshold
+        // and the solver keeps its own defaults, which is what that jar did anyway.
+        const raw = typeof bridge.runContingencyWithConfig === 'function'
+          ? await bridge.runContingencyWithConfig(format, absCase, absCont, absMon, absResults, stem,
+            JSON.stringify(caConfigPayload(caConfig)))
+          : await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
+            caConfig.overloadThreshold)
         const parsed = JSON.parse(raw)
         if (parsed && parsed.ok) {
           return {
@@ -2199,15 +2322,10 @@ class InterpssService extends TypertRemoteService {
     if (!validated.ok) return { ok: false, error: validated.error }
 
     const cfgRel = caConfigRel(parent)
-    const payload = {
-      contingencyMode: validated.config.contingencyMode,
-      contingencyFile: validated.config.contingencyFile,
-      monitorMode: validated.config.monitorMode,
-      monitoredBranchFile: validated.config.monitoredBranchFile,
-      // The dialog's over loading threshold. It must round-trip, or the next dialog
-      // open, the CLI and `interpss_run_ca` silently fall back to 90.
-      overloadThreshold: validated.config.overloadThreshold,
-    }
+    // The whole validated config, in the file's key order: the two mode/file pairs, the over
+    // loading threshold, and the solver knobs. It must round-trip, or the next dialog open, the
+    // CLI and `interpss_run_ca` silently fall back to the defaults.
+    const payload = caConfigPayload(validated.config)
     try {
       const target = await fs.resolve(caConfigPath(root, parent))
       const written = await writeConfigText(fs, target, JSON.stringify(payload, null, 2) + '\n', caConfigPath(root, parent))
@@ -3264,8 +3382,11 @@ function runGvyTool(ctx) {
 // DC contingency analysis with the dialog bypassed: the inputs come from an explicit
 // contingencyFile/monitorFile, else the case folder's config/ca_run.json, else the case-folder
 // discovery (*contingenc*.json / *monitor*.json), else the Java defaults (N-1 outages on
-// every branch not connected to the reference bus, every branch monitored). The runner
-// solves its own DC load flow, so no ACLF run is needed first.
+// every branch not connected to the reference bus, every branch monitored). The solver knobs
+// arrive in `caConfig` (or the case's ca_run.json) and are copied onto the solver by the
+// runner. The overload check compares post-contingency flow against a branch rating, so a case
+// whose tables carry no ratings (all of LimMvaA/B/C zero) reports no overloads however low the
+// threshold is — that is the case, not the run.
 function runCaTool(ctx) {
   return {
     name: 'interpss_run_ca',
@@ -3277,7 +3398,15 @@ function runCaTool(ctx) {
       'otherwise from the case folder config/ca_run.json, otherwise from the case folder discovery ' +
       '(*contingenc*.json / *monitor*.json), otherwise from the Java defaults (N-1 outages on every branch ' +
       'not connected to the reference bus, every branch monitored). `overloadThreshold` sets the ' +
-      'over loading threshold in percent (default 90, overridable per call or in config/ca_run.json). Writes ' +
+      'over loading threshold in percent (default 90, overridable per call or in config/ca_run.json). ' +
+      '`caConfig` carries the solver knobs — dclfInclLoss, dclfScreening, dcLoadingCutoff, ' +
+      'dcFlowChangeCutoff, solutionMethod (SparseEqnSolve|WoodburyMatrixUpdate), kluEndpointRhsBatchSize, ' +
+      'cacheViolationCombinedShiftFactors, islandingTreatment (SKIP|ANCHORED_COMPENSATE_ONE_BUS|' +
+      'FULL_DCLF_REPLAY), n1IslandingReplayEnabled, multiOutageReplayMode (EXACT_TOPOLOGY|HIGH_IMPEDANCE), ' +
+      'highImpedanceReactancePu, turnOffIslandBus, autoTurnLine2Xfr, ratingProvider ' +
+      '(default|RATING_A|RATING_B) and threads (0 = one per processor) — with the case file\'s values ' +
+      'as defaults. Overload detection compares post-contingency flow against a branch rating: a case ' +
+      'whose branch tables carry none reports no overloads at any threshold. Writes ' +
       '<stem>_DF_contingency.csv under wspace/<case dir>/result/ — the file the NERC TPL-001-5 report and ' +
       'the ACLF card Report button consume. The runner solves its own DC load flow, so the case only has ' +
       'to be loaded, not solved; large cases (PSS/E 2K-bus and up) take minutes.',
@@ -3313,6 +3442,21 @@ function runCaTool(ctx) {
             'Optional over loading threshold in percent (default 90): a monitored branch whose ' +
             'post-contingency loading reaches it is written to the result CSV. Overrides the case ' +
             'folder config/ca_run.json for this run.',
+        },
+        caConfig: {
+          type: 'object',
+          description:
+            'Optional solver overrides, merged over the case config/ca_run.json (and overridden by ' +
+            '`overloadThreshold` when both are given). Keys: dclfInclLoss (bool, default true), ' +
+            'dclfScreening (bool, false), dcLoadingCutoff (0-1000 percent, 100), dcFlowChangeCutoff ' +
+            '(0-1000 percent, 200), solutionMethod ("SparseEqnSolve" | "WoodburyMatrixUpdate"), ' +
+            'kluEndpointRhsBatchSize (int >= 0, 0), cacheViolationCombinedShiftFactors (bool, false), ' +
+            'islandingTreatment ("SKIP" | "ANCHORED_COMPENSATE_ONE_BUS" | "FULL_DCLF_REPLAY"), ' +
+            'n1IslandingReplayEnabled (bool, false), multiOutageReplayMode ("EXACT_TOPOLOGY" | ' +
+            '"HIGH_IMPEDANCE"), highImpedanceReactancePu (number > 0, 10000), turnOffIslandBus (bool, ' +
+            'true), autoTurnLine2Xfr (bool, true), ratingProvider ("default" | "RATING_A" | "RATING_B" — ' +
+            'which branch rating the overload check uses; "default" is the library\'s own, measured as ' +
+            'rating MVA 2), threads (int >= 0, 0 = one per available processor).',
         },
       },
     },
@@ -3421,6 +3565,24 @@ function runCaTool(ctx) {
         explicit.monitoredBranchFile = mon.input
       }
       if (hasThreshold) explicit.overloadThreshold = args.overloadThreshold
+      // `caConfig` carries the solver knobs (loss inclusion, screening cutoffs, solution
+      // method, islanding/replay handling, rating provider, worker count) as an object keyed
+      // like the file. It is merged *before* the scalar arguments, so an explicit
+      // `overloadThreshold` still wins, and a run that omits the object is unchanged.
+      const override = args && args.caConfig !== undefined && args.caConfig !== null ? args.caConfig : null
+      if (override !== null) {
+        if (typeof override !== 'object' || Array.isArray(override)) {
+          return fail('caConfig must be a JSON object of run-configuration keys', 'argument')
+        }
+        for (const key of Object.keys(override)) {
+          if (CA_CONFIG_KEYS.indexOf(key) < 0) {
+            return fail('caConfig: unknown key ' + JSON.stringify(key) + ' (known: ' +
+              CA_CONFIG_KEYS.join(', ') + ')', 'argument')
+          }
+          explicit[key] = override[key]
+        }
+        if (hasThreshold) explicit.overloadThreshold = args.overloadThreshold
+      }
 
       const resolvedConfig = await resolveCaRunConfig(ctx, root, parent, undefined)
       if (resolvedConfig.ok !== true) return fail(resolvedConfig.error, 'argument')
@@ -3434,7 +3596,8 @@ function runCaTool(ctx) {
       const caConfig = configured.config
 
       const bridge = ctx.get('javaBridge')
-      if (bridge === undefined || typeof bridge.runContingency !== 'function') {
+      if (bridge === undefined
+        || (typeof bridge.runContingency !== 'function' && typeof bridge.runContingencyWithConfig !== 'function')) {
         return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
       }
       try {
@@ -3442,8 +3605,13 @@ function runCaTool(ctx) {
         const absResults = root + '/wspace/' + parent + '/result'
         const absCont = caConfig.contingencyFile === null ? null : root + '/wspace/' + caConfig.contingencyFile
         const absMon = caConfig.monitoredBranchFile === null ? null : root + '/wspace/' + caConfig.monitoredBranchFile
-        const raw = await bridge.runContingency(target.format, absCase, absCont, absMon, absResults, stem,
-          caConfig.overloadThreshold)
+        // The whole validated config (threshold included) goes over; a bridge without the
+        // config entry point falls back to the threshold-only call.
+        const raw = typeof bridge.runContingencyWithConfig === 'function'
+          ? await bridge.runContingencyWithConfig(target.format, absCase, absCont, absMon, absResults, stem,
+            JSON.stringify(caConfigPayload(caConfig)))
+          : await bridge.runContingency(target.format, absCase, absCont, absMon, absResults, stem,
+            caConfig.overloadThreshold)
         const parsed = JSON.parse(raw)
         if (!parsed || parsed.ok !== true) {
           return fail(String((parsed && parsed.error) || 'bridge runContingency failed'), source)
@@ -3633,18 +3801,23 @@ export default {
         } finally {
           cap.stop()
         }
-        // Attach the intercepted stdout/stderr (e.g. "Using N threads…") so the
-        // GUI can surface them instead of the dsh terminal.
+        return withCaStdio(raw, cap, absCase)
+      },
+      // The whole `ca_run.json` payload (threshold plus every solver knob) as JSON. A jar with
+      // only the 7-argument `runContingency` is still usable: it runs with its own defaults.
+      async runContingencyWithConfig(format, absCase, absCont, absMon, absResults, stem, caConfigJson) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        const cap = captureStdio()
+        let raw
         try {
-          const parsed = JSON.parse(raw)
-          if (parsed && typeof parsed === 'object') {
-            if (parsed.ok === true) lastLoadedAbs = absCase
-            parsed.stdout = cap.out()
-            parsed.stderr = cap.err()
-            raw = JSON.stringify(parsed)
-          }
-        } catch (e) {}
-        return raw
+          raw = typeof bridge.runContingencyWithConfig === 'function'
+            ? await bridge.runContingencyWithConfig(format, absCase, absCont, absMon, absResults, stem,
+              caConfigJson)
+            : await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem, 90)
+        } finally {
+          cap.stop()
+        }
+        return withCaStdio(raw, cap, absCase)
       },
       // Resolved `java` launcher for the dynamic plugin's CLI shell fallback.
       // Synchronous, does NOT start the JVM; safe to call even when java-bridge

@@ -135,7 +135,9 @@ function build(overrides) {
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText,'
       + ' CASE_FORMATS: CASE_FORMATS, caseFormatOfPath: caseFormatOfPath, caseFormatEntry: caseFormatEntry,'
       + ' casePickerEmptyText: casePickerEmptyText, caseStem: caseStem,'
-      + ' bridgeCaseSelection: bridgeCaseSelection };');
+      + ' bridgeCaseSelection: bridgeCaseSelection,'
+      + ' CA_SOLVER_FIELDS: CA_SOLVER_FIELDS, caSolverFieldValue: caSolverFieldValue,'
+      + ' caSolverError: caSolverError, caSolverPayload: caSolverPayload };');
 
 
   return factory(makeReact(overrides || {}), { call: () => Promise.resolve({}) }, { get: () => undefined },
@@ -2451,6 +2453,109 @@ check('both client copies carry the BPA Dat row and the path->format rule',
       && src.indexOf('function caseFormatOfPath(') >= 0
       && src.indexOf("CASE_FORMATS.map((f) => React.createElement('option'") >= 0;
   }));
+
+// --- 21. the CA dialog's solver knobs (0.7.2) ------------------------------
+console.log('\n21. the CA solver knobs (ContingencyRunner\'s DclfContingencyConfig, 0.7.2)');
+// The runner builds ipss.core.lib's `DclfContingencyConfig` from the run config, and the plugin
+// has to name the same keys with the same defaults in three places: the Java `CaRunConfig`, the
+// Host's DEFAULT_CA_CONFIG and the client's field table. A key renamed on one side and not the
+// others is a knob the dialog writes and the solver never sees.
+const CA_JAVA = join(ROOT, 'src', 'main', 'java', 'org', 'interpss', 'agent', 'util', 'CaRunConfig.java');
+const caJava = rd(CA_JAVA);
+const hostCaDefaults = (path) => {
+  const src = rd(path);
+  const start = src.indexOf('const DEFAULT_CA_CONFIG = {');
+  if (start < 0) return null;
+  const rest = src.slice(start);
+  // The config is flat, so its own closing brace ends the block — matched at any indentation,
+  // because the persistent host keeps it at column 0 and the dynamic halves indent it by four.
+  const end = rest.search(/\n[ \t]*\}/);
+  const body = rest.slice(0, end < 0 ? rest.length : end);
+  const out = {};
+  for (const m of body.matchAll(/^\s+([A-Za-z_]\w*): (.+?),?$/gm)) out[m[1]] = m[2].trim();
+  return out;
+};
+const libDefaults = hostCaDefaults(LIB_HOST);
+const dynDefaults = hostCaDefaults(DYN_HOSTB);
+const clientKeys = api.CA_SOLVER_FIELDS.map((f) => f.key);
+check('the CA config has the five case-input keys plus the fifteen solver knobs',
+  libDefaults !== null && Object.keys(libDefaults).length === 20
+  && clientKeys.length === 15 && Object.keys(clientKeys.reduce((a, k) => (a[k] = 1, a), {})).length === 15,
+  libDefaults === null ? 'no DEFAULT_CA_CONFIG' : Object.keys(libDefaults).length + ' host keys / ' + clientKeys.length + ' client fields');
+check('every client solver field is a host key, and both hosts agree',
+  clientKeys.every((k) => Object.prototype.hasOwnProperty.call(libDefaults, k))
+  && dynDefaults !== null
+  && clientKeys.concat(['contingencyMode', 'contingencyFile', 'monitorMode', 'monitoredBranchFile', 'overloadThreshold'])
+    .every((k) => Object.prototype.hasOwnProperty.call(dynDefaults, k)),
+  JSON.stringify(Object.keys(libDefaults)));
+check('the client field defaults are the host defaults',
+  api.CA_SOLVER_FIELDS.every((f) => String(f.def) === String(libDefaults[f.key]).replace(/^'|'$/g, '')),
+  api.CA_SOLVER_FIELDS.map((f) => f.key + '=' + f.def).join(', '));
+// The Java side is the third copy of those defaults, and the enum lists are the Java enums'
+// constant names: they are what the runner will accept.
+check('the Java CaRunConfig carries the same solver defaults',
+  caJava.indexOf('DEFAULT_DCLF_INCL_LOSS = true') >= 0
+  && caJava.indexOf('DEFAULT_DCLF_SCREENING = false') >= 0
+  && caJava.indexOf('DEFAULT_DC_LOADING_CUTOFF = 100.0') >= 0
+  && caJava.indexOf('DEFAULT_DC_FLOW_CHANGE_CUTOFF = 200.0') >= 0
+  && caJava.indexOf('DEFAULT_HIGH_IMPEDANCE_REACTANCE_PU = 10000.0') >= 0
+  && caJava.indexOf('DEFAULT_RATING_PROVIDER = "default"') >= 0
+  && caJava.indexOf('DEFAULT_THREADS = 0') >= 0
+  && caJava.indexOf('DEFAULT_TURN_OFF_ISLAND_BUS = true') >= 0
+  && caJava.indexOf('DEFAULT_AUTO_TURN_LINE2XFR = true') >= 0);
+check('the enum lists name the Java enum constants in both languages',
+  caJava.indexOf('List.of("SparseEqnSolve", "WoodburyMatrixUpdate")') >= 0
+  && caJava.indexOf('List.of("SKIP", "ANCHORED_COMPENSATE_ONE_BUS", "FULL_DCLF_REPLAY")') >= 0
+  && caJava.indexOf('List.of("EXACT_TOPOLOGY", "HIGH_IMPEDANCE")') >= 0
+  && caJava.indexOf('List.of(DEFAULT_RATING_PROVIDER, "RATING_A", "RATING_B")') >= 0
+  && api.CA_SOLVER_FIELDS.filter((f) => f.kind === 'select').every((f) =>
+    rd(LIB_HOST).indexOf("['" + f.key + "', CA_") >= 0)
+  && rd(LIB_HOST).indexOf("const CA_SOLUTION_METHODS = ['SparseEqnSolve', 'WoodburyMatrixUpdate']") >= 0
+  && rd(LIB_HOST).indexOf("const CA_ISLANDING_TREATMENTS = ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY']") >= 0);
+check('the client\'s select options are the host\'s lists',
+  (function () {
+    const host = rd(LIB_HOST);
+    const byKey = (k) => {
+      const f = api.CA_SOLVER_FIELDS.filter((x) => x.key === k)[0];
+      return f === undefined ? null : f.options.join(',');
+    };
+    return byKey('solutionMethod') === 'SparseEqnSolve,WoodburyMatrixUpdate'
+      && byKey('islandingTreatment') === 'SKIP,ANCHORED_COMPENSATE_ONE_BUS,FULL_DCLF_REPLAY'
+      && byKey('multiOutageReplayMode') === 'EXACT_TOPOLOGY,HIGH_IMPEDANCE'
+      && byKey('ratingProvider') === 'default,RATING_A,RATING_B'
+      && host.indexOf("'SparseEqnSolve', 'WoodburyMatrixUpdate'") >= 0
+      && host.indexOf("'SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY'") >= 0
+      && host.indexOf("'EXACT_TOPOLOGY', 'HIGH_IMPEDANCE'") >= 0
+      && host.indexOf("'default', 'RATING_A', 'RATING_B'") >= 0;
+  })());
+// The form's own behaviour: defaults from an empty config, a string form for the numbers, and a
+// rejection for every kind of unusable value — the Host and the Java runner reject them too.
+const caDefaultForm = {};
+for (const f of api.CA_SOLVER_FIELDS) caDefaultForm[f.key] = api.caSolverFieldValue(f, {});
+check('an empty answer seeds the form with the defaults',
+  caDefaultForm.dclfInclLoss === true && caDefaultForm.dclfScreening === false
+  && caDefaultForm.dcLoadingCutoff === '100' && caDefaultForm.dcFlowChangeCutoff === '200'
+  && caDefaultForm.solutionMethod === 'SparseEqnSolve'
+  && caDefaultForm.islandingTreatment === 'ANCHORED_COMPENSATE_ONE_BUS'
+  && caDefaultForm.multiOutageReplayMode === 'EXACT_TOPOLOGY'
+  && caDefaultForm.ratingProvider === 'default' && caDefaultForm.threads === '0',
+  JSON.stringify(caDefaultForm));
+check('a valid form has no solver error and its payload is all numbers and booleans',
+  api.caSolverError(caDefaultForm) === null
+  && (function () {
+    const p = api.caSolverPayload(caDefaultForm);
+    return p.dcLoadingCutoff === 100 && p.threads === 0 && p.dclfInclLoss === true
+      && p.ratingProvider === 'default' && Object.keys(p).length === 15;
+  })());
+check('an unusable solver value is reported, not defaulted',
+  api.caSolverError({ ...caDefaultForm, dcLoadingCutoff: '-1' }) !== null
+  && api.caSolverError({ ...caDefaultForm, dcLoadingCutoff: 'x' }) !== null
+  && api.caSolverError({ ...caDefaultForm, threads: '-1' }) !== null
+  && api.caSolverError({ ...caDefaultForm, threads: '2.5' }) !== null
+  && api.caSolverError({ ...caDefaultForm, solutionMethod: 'Nope' }) !== null
+  && api.caSolverError({ ...caDefaultForm, ratingProvider: 'RATING_C' }) !== null
+  && api.caSolverError({ ...caDefaultForm, highImpedanceReactancePu: '0' }) !== null,
+  api.caSolverError({ ...caDefaultForm, solutionMethod: 'Nope' }));
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

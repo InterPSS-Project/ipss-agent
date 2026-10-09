@@ -174,9 +174,28 @@ GvyScriptRunner.runOnNet(net, <case dir>/scripts/<name>.gvy)
 ContingencyRunner.run(paths, cli, net, resultsDir, stem)
   1. resolveInputs(): explicit CLI args → case ca_run.json → built-in defaults
   2. Load contingency + monitored-branch JSON (ContingencyFileUtil)
-  3. ParallelDclfContingencyAnalyzer
-  4. DclfContingencyDFrameAdapter → stem_DF_contingency.csv
+  3. dclfConfig(CaRunConfig) → DclfContingencyConfig (ipss.core.lib 1.4.0)
+  4. ParallelDclfContingencyAnalyzer.executeContingencyAnalysis(net, conts, monitored, config, threads)
+  5. DclfContingencyDFrameAdapter → stem_DF_contingency.csv
 ```
+
+The analyzer and its config live in `com.interpss.core.algo.dclf` (the
+`org.interpss.plugin.contingency` copies are thin shims now), and the runner hands the
+analyzer a **complete** config: `CaRunConfig` carries `overloadThreshold` plus the fifteen
+solver knobs — `dclfInclLoss`, `dclfScreening`, `dcLoadingCutoff`, `dcFlowChangeCutoff`,
+`solutionMethod`, `kluEndpointRhsBatchSize`, `cacheViolationCombinedShiftFactors`,
+`islandingTreatment`, `n1IslandingReplayEnabled`, `multiOutageReplayMode`,
+`highImpedanceReactancePu`, `turnOffIslandBus`, `autoTurnLine2Xfr`, `ratingProvider` and
+`threads` (0 = one per available processor). Each defaults to the value the runner used
+before the knobs were selectable, so a `ca_run.json` that names none of them reproduces the
+old behaviour exactly; an unusable value is rejected with the key and its allowed values
+rather than silently defaulted. The tab's CA dialog edits them (its **Advanced solver
+settings** panel), `interpss_run_ca` takes them as `caConfig`, and the in-process bridge
+passes the whole payload to `runContingencyWithConfig(...)`.
+
+**Overload detection is a rating comparison** (`BranchRatingProvider`): the library's default
+provider is rating MVA 2 (`RATING_B`), and `ratingProvider` can pin `RATING_A`/`RATING_B`
+instead. A case whose branch tables carry no ratings reports no overloads at any threshold.
 
 Both JSON companion files are optional: omitting them means N-1 outages for every
 branch and every branch monitored.

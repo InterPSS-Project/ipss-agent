@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.7.1**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.7.2**.
 
 ## Tool surface
 
@@ -180,14 +180,16 @@ Behaviour:
 
 | | |
 | --- | --- |
-| Input | `{ case?: string, contingencyFile?: string, monitorFile?: string, overloadThreshold?: number }` — all optional |
+| Input | `{ case?: string, contingencyFile?: string, monitorFile?: string, overloadThreshold?: number, caConfig?: object }` — all optional |
 | Output | `{ ok, case, source, format, resultDir, contingencyCsv, contingencyFile?, monitoredBranchFile?, threshold?, contingencies?, monitoredBranches?, overloads?, caSummary, error? }` |
 | `presentationMeta` | `{ ok, case, source, resultDir, contingencyCsv }` |
 | Card key | `interpss_run_ca` (0.4.1+; its **Explore result → Contingency** row since 0.4.2) |
 
 A DC contingency analysis driven entirely from chat — **the Contingency Analysis dialog is not
-involved and nothing is prompted for**. It calls the same `javaBridge.runContingency()` the tab's
-dialog uses, so the result file is identical; the tool simply resolves the inputs itself:
+involved and nothing is prompted for**. It calls the same `javaBridge.runContingencyWithConfig()`
+the tab's dialog uses (the config-carrying entry point since 0.7.2; it falls back to
+`runContingency()` against a bridge that only has the 7-argument call), so the result file is
+identical; the tool simply resolves the inputs itself:
 
 1. the `contingencyFile` / `monitorFile` argument;
 2. the case folder's `config/ca_run.json` (what the dialog would have saved);
@@ -207,6 +209,35 @@ way `contingencyFile` alone keeps the case's monitored set. The threshold is no 
 { "contingencyMode": "custom", "contingencyFile": "…", "monitorMode": "all", "monitoredBranchFile": null, "overloadThreshold": 85 }
 ```
 
+`caConfig` (0.7.2+) carries the **solver knobs** — the fields of ipss.core.lib's
+`DclfContingencyConfig`, which `ContingencyRunner` now copies onto the solver, plus the worker
+count. It is a partial object merged over the case's `config/ca_run.json` (then overridden by the
+scalar `overloadThreshold`), keyed exactly like the file, and an unknown key is rejected with the
+list of known ones. Every default is the value the runner used before the keys existed, so omitting
+`caConfig` behaves as it always did:
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `dclfInclLoss` | `true` | DC model with losses (`INC_LOSS`) |
+| `dclfScreening` | `false` | The engine's screening pass |
+| `dcLoadingCutoff` | `100` | `0`-`1000` percent; `0` = no cutoff |
+| `dcFlowChangeCutoff` | `200` | `0`-`1000` percent |
+| `solutionMethod` | `SparseEqnSolve` | `SparseEqnSolve` \| `WoodburyMatrixUpdate` |
+| `kluEndpointRhsBatchSize` | `0` | `>= 0`; `0` keeps the default path |
+| `cacheViolationCombinedShiftFactors` | `false` | |
+| `islandingTreatment` | `ANCHORED_COMPENSATE_ONE_BUS` | `SKIP` \| `ANCHORED_COMPENSATE_ONE_BUS` \| `FULL_DCLF_REPLAY` |
+| `n1IslandingReplayEnabled` | `false` | |
+| `multiOutageReplayMode` | `EXACT_TOPOLOGY` | `EXACT_TOPOLOGY` \| `HIGH_IMPEDANCE` |
+| `highImpedanceReactancePu` | `10000` | must be `> 0` |
+| `turnOffIslandBus` | `true` | |
+| `autoTurnLine2Xfr` | `true` | |
+| `ratingProvider` | `default` | Which rating the overload check uses: the engine's own (rating MVA 2 — measured as `RATING_B`), `RATING_A` or `RATING_B` |
+| `threads` | `0` | `>= 0`; `0` = one worker per available processor |
+
+The Host validates the object (`unsupported solutionMethod … (expected SparseEqnSolve|WoodburyMatrixUpdate)`,
+`dcLoadingCutoff must be a percentage between 0 and 1000`, …) and the Java `CaRunConfig` validates it
+again, so an unusable knob is an error naming the key rather than a run that silently ignores it.
+
 | Argument form | Resolves to |
 | --- | --- |
 | `2k_contingencies_115kVAbove.json` | `wspace/<case dir>/2k_contingencies_115kVAbove.json` |
@@ -225,6 +256,11 @@ Behaviour and caveats:
 
 - The runner solves its **own DC load flow**, so the case only has to be loaded — not solved — and a
   prior `interpss_run_aclf` does not change the result. It is screening, not an AC assessment.
+- **Overload detection compares post-contingency flow against a branch rating** (`LimMvaA`/
+  `LimMvaB`/`LimMvaC`, selected by `ratingProvider`). A case whose branch table carries no ratings
+  reports **0 overloads at any threshold** — on the `ieee39.ieee` fixture the case needs its
+  `scripts/ieee39_limit_setup.gvy` (46 branches @ 600 MVA) before CA finds anything; the same case
+  rates 20 overloads at 90 % once it is rated, and 25 with `ratingProvider: 'RATING_A'`.
 - It **overwrites** `<stem>_DF_contingency.csv`; a NERC report built from the previous file becomes
   stale.
 - Large cases take minutes (Texas 2K is ~3200 N-1 outages at 3220 monitored branches).
@@ -641,6 +677,8 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.6.37 | **A search brings what it selected to the middle of the view.** A match was painted green wherever it happened to be, which on a 118-bus (or Texas 2K) drawing can be off screen: found, counted and coloured, and the user still had to hunt for it. **OK** (or Enter) now centres the window on the hit. The window keeps its **size** — the zoom is the one the user chose, so only the position moves — and it is centred on the **union of the hit boxes**, so `Bus-1 -> Bus-2` frames between its two bars and a name that found several buses frames all of them (a matched node contributes its rectangle, a matched branch its polyline). The clamp the birdseye already uses keeps the window on the paper, so a hit near an edge is centred as far as the paper allows and is always inside the window. Three cases leave the view exactly where it was: a query that found nothing, no scene, and a **fitted** view (`rect === null`) — the whole drawing is on screen there, so a window equal to the page would move nothing and would only cost the picker its `Fit` entry. The recentre rides on the deliberate act and not on an effect keyed on the query: an effect would re-centre on every later render and undo the pan the moment the user looked elsewhere. Client-only (reload the page). Guard §16 pins the centring (Bus-5's bar+label box centres the window on `155,213` while it keeps its `235×200` size; the `1->2` pair on x `173` with its y clamped to the paper's top edge; nothing found, a null scene and Fit all unchanged) and that the call sits in `applySearch` and nowhere else. 316 checks |
 | 0.7.0 | **The version line moves to 0.7.0 — no code change.** The plugin's version, its tarball (`deepseek-ai-dsh-interpss-0.7.0.tgz`) and the Desktop profile pin move together, and every Host and Client file is byte-identical to 0.6.37: the whole 0.6.34 → 0.6.37 body of work (the `R` / `S` toggle and its Source view removed, bus-id branch search, the green highlight, and the search centring) is unchanged. The bump exists so the next release starts a new minor line rather than a fourth patch on 0.6 — and a new `file:` version installs with a plain add, where a re-pack of the same version needs a profile relink that pnpm answers with `ambiguous-install`. Because no code moved, a running tab needs nothing: not a refresh, not a restart. 316 checks |
 | 0.7.1 | **The Simu Case data-file-type choice gains BPA Dat (`.dat` / `.DAT`).** The Java half already parsed BPA (`NetworkLoader` → `BpaFileAdapter` → `BPADirectParser`, wired in 0.7.0's line), but the tab could not reach it: the format select offered `IEEE CDF` / `PSS/E RAW` only, and the Host's `CASE_PATH_RE`, `formatOfCasePath`, case stems and `listCases` scanner each hard-coded `.ieee` / `.raw`, so a `data/bpa/**/*.dat` path was rejected as `Invalid case path` before the bridge saw it. One client table now drives all four places that name a type — the `<option>` list, the picker row's `IEEE` / `PSSE` / `BPA` badge, the empty-picker sentence (the type's own label and extension: `No BPA Dat (.dat) files found under wspace/data.`) and the path placeholder, which follows the selection (`data/bpa/ieee9/IEEE9.dat` for BPA) — and the Host gained the same three: `CASE_FORMATS`, `normalizeCaseFormat` (a declared format wins, else the path decides) and `caseStem`. Every two-extension regex literal became one case-insensitive `CASE_PATH_RE` — so `IEEE90.DAT` is a case too — the scanner lists `.dat` as `bpa` in the allow-list, `checkResult` / `checkResultFiles` / `listDrawioFiles` / `runAclf` / `runCa` / `loadCase` / `runReport` / `runGvy` and `resolveCaseArgument` (`caseInfo`) all accept it, and the stem strips `.dat` exactly as the Java `ProjectPaths.stem` does, so the run still writes `IEEE9_network_info.txt` rather than `IEEE9.dat_network_info.txt` and the tab finds it. Both halves changed (Client + all three Host halves), so this one needs a page refresh **and** an app restart — the latter also retires a bridge JVM that may have loaded `NetworkLoader` before the BPA jar. Verified against the workspace's three BPA cases: `ieee9/IEEE9.dat` (9 buses / 9 branches) and `IEEE30/ieee30.dat` (30 buses / 43 branches) both parse and converge through the same `NetworkLoader` the bridge calls, and `IEEE90/IEEE90.DAT` parses to no network because its **bus names are GBK multi-byte**, which shifts the fixed-column cards (renaming them to ASCII at the same byte width loads the same 9-bus system and converges) — a data issue in that one file, not a picker one. Guard §20 is new (the three-row table and its labels in dropdown order, `.dat`/`.DAT` → `bpa` with the IEEE fallback, the stem for all four extensions, the BPA-loaded-by-a-tool picker row, the rendered `<select>` and its placeholder, and that all three host halves and both client copies carry the third type). 329 checks |
+
+| 0.7.2 | **The CA dialog and `interpss_run_ca` drive the whole DC contingency solver, not just its threshold.** `ContingencyRunner` hands `ParallelDclfContingencyAnalyzer.executeContingencyAnalysis` a complete `DclfContingencyConfig` (ipss.core.lib 1.4.0 moved the analyzer *and* its config into `com.interpss.core.algo.dclf`), so the fifteen knobs that config carries are no longer the runner's private business: `CaRunConfig` gains them with loud validation, `ContingencyRunner.dclfConfig(config)` copies every one onto the solver (including the two whose library defaults it used to inherit), `IpssAgentBridge.runContingencyWithConfig(format, case, cont, monitor, resultsDir, stem, caConfigJson)` takes the payload, and `threads` replaces the hard-wired `availableProcessors()`. The CA dialog grows a **▸ Advanced solver settings** disclosure (loss inclusion, screening and its two cutoffs, solution method, KLU RHS batch size, shift-factor caching, islanding treatment, N-1 islanding replay, multi-outage replay and its reactance, turn-off-island-buses, auto line→transformer, rating provider, threads), `config/ca_run.json` grows from five keys to twenty, and `interpss_run_ca` accepts the same object as `caConfig` (partial, merged per key, an unknown key rejected with the list). Every default is the value the runner used before the panel existed, so an unopened panel and an omitted argument change nothing. **The overload check is a rating comparison**: the library's default provider is `RATING_B` (rating MVA 2 — 690 MVA on the IEEE 39 fixture, where `RATING_A`'s 600 MVA reports five more overloads), and a case whose branch tables carry no ratings reports 0 overloads at any threshold — which is why the docs now say so and that fixture needs its `scripts/ieee39_limit_setup.gvy` first. Java tests: `CaRunConfigTest` (defaults, round-trip, every rejection) and `ContingencyRunnerTest` (the mapping field by field); the whole suite is green. Host + Java changed, so an app restart is needed, not only a page refresh. Guard §21 is new (the 20-key/15-field agreement across Java, all three Host halves and the client, the enum lists, and the client form's defaults/validation/payload). 338 checks |
 
 ## Troubleshooting
 

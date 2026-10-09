@@ -91,8 +91,8 @@ public final class IpssAgentBridge {
     public synchronized String runContingency(String format, String absoluteCasePath,
             String absoluteContPath, String absoluteMonitorPath,
             String absoluteResultsDir, String stem) {
-        return runContingency(format, absoluteCasePath, absoluteContPath, absoluteMonitorPath,
-                absoluteResultsDir, stem, CaRunConfig.DEFAULT_OVERLOAD_THRESHOLD);
+        return runContingencyWith(format, absoluteCasePath, absoluteContPath, absoluteMonitorPath,
+                absoluteResultsDir, stem, CaRunConfig.DEFAULT);
     }
 
     /**
@@ -102,6 +102,36 @@ public final class IpssAgentBridge {
     public synchronized String runContingency(String format, String absoluteCasePath,
             String absoluteContPath, String absoluteMonitorPath,
             String absoluteResultsDir, String stem, double overloadThreshold) {
+        return runContingencyWith(format, absoluteCasePath, absoluteContPath, absoluteMonitorPath,
+                absoluteResultsDir, stem, CaRunConfig.DEFAULT.withOverloadThreshold(overloadThreshold));
+    }
+
+    /**
+     * As above, driven by the whole run configuration as JSON — the CA dialog's
+     * threshold plus every solver knob of `config/ca_run.json` (loss inclusion,
+     * screening cutoffs, solution method, islanding/replay handling, rating
+     * provider, worker count). A blank payload means the defaults, and an
+     * unusable value is rejected with the reason instead of being silently
+     * ignored. Named distinctly from the 7-argument calls so the bridge's
+     * reflection cannot pick the wrong overload.
+     */
+    public synchronized String runContingencyWithConfig(String format, String absoluteCasePath,
+            String absoluteContPath, String absoluteMonitorPath,
+            String absoluteResultsDir, String stem, String caConfigJson) {
+        CaRunConfig config;
+        try {
+            config = CaRunConfig.fromJson(caConfigJson, "the run configuration");
+        } catch (RuntimeException e) {
+            return error(e);
+        }
+        return runContingencyWith(format, absoluteCasePath, absoluteContPath, absoluteMonitorPath,
+                absoluteResultsDir, stem, config);
+    }
+
+    /** The shared body: cached-or-loaded net in, contingency CSV out, JSON reply. */
+    private String runContingencyWith(String format, String absoluteCasePath,
+            String absoluteContPath, String absoluteMonitorPath,
+            String absoluteResultsDir, String stem, CaRunConfig config) {
         try {
             AclfNetwork net = repo.getAclfNetBase();
             if (net == null || loadedInput == null || !loadedInput.equals(absoluteCasePath)) {
@@ -112,7 +142,7 @@ public final class IpssAgentBridge {
             Path resultsDir = Paths.get(absoluteResultsDir);
             Files.createDirectories(resultsDir);
             ContingencyRunner.ContAnalysisSummary summary = ContingencyRunner.runOnNet(net, resultsDir, stem,
-                    optionalPath(absoluteContPath), optionalPath(absoluteMonitorPath), overloadThreshold);
+                    optionalPath(absoluteContPath), optionalPath(absoluteMonitorPath), config);
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("format", format);

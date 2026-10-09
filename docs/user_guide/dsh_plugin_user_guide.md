@@ -268,10 +268,43 @@ For a custom pick:
 
 An out-of-range threshold blocks **OK** with `over loading threshold must be a percentage between 0 and 1000`.
 
+**Advanced solver settings (0.7.2+).** Below the threshold, the dialog has a **▸ Advanced solver
+settings** disclosure with the DC contingency solver's own knobs — they are the fields of the
+engine's `DclfContingencyConfig` (plus the worker count) and are copied onto the solver by the
+runner. Every one defaults to the value the runner used before the panel existed, so leaving the
+panel closed changes nothing.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| Include losses (INC_LOSS) | `true` | Whether the DC model includes losses |
+| Screening pass | `false` | The engine's pre-screening pass (uses the two cutoffs below) |
+| DC loading cutoff (%) | `100` | Screening cutoff; `0` means no cutoff |
+| DC flow change cutoff (%) | `200` | Screening cutoff on the flow change |
+| Solution method | `SparseEqnSolve` | `SparseEqnSolve` or `WoodburyMatrixUpdate` |
+| KLU RHS batch size (0 = off) | `0` | Batch size for the KLU right-hand-side solves |
+| Cache violation shift factors | `false` | Reuse violated-pair shift factors between contingencies |
+| Islanding treatment | `ANCHORED_COMPENSATE_ONE_BUS` | `SKIP`, `ANCHORED_COMPENSATE_ONE_BUS` or `FULL_DCLF_REPLAY` |
+| N-1 islanding replay | `false` | Replay an islanding N-1 case with a full DCLF solve |
+| Multi-outage replay | `EXACT_TOPOLOGY` | `EXACT_TOPOLOGY` or `HIGH_IMPEDANCE` |
+| High impedance X (pu) | `10000` | The reactance a `HIGH_IMPEDANCE` replay applies |
+| Turn off island buses | `true` | Drop buses that island after an outage |
+| Auto turn line into transformer | `true` | Treat a line that cannot island as a transformer |
+| Rating provider | `default` | Which branch rating the overload check uses: the engine's own (rating MVA 2 — measured as `RATING_B`), `RATING_A` (rating MVA 1) or `RATING_B` |
+| Threads (0 = all cores) | `0` | Worker count for the parallel scan |
+
+An unusable value blocks **OK** with the field's own message (for example `Solution method must be
+SparseEqnSolve | WoodburyMatrixUpdate`); **OK** writes all twenty keys to `config/ca_run.json`.
+
+> **Overload detection needs branch ratings.** The check compares each post-contingency flow with a
+> branch rating (`LimMvaA`/`LimMvaB`/`LimMvaC`). A case whose branch table carries none — the
+> `ieee39.ieee` fixture is one, until its `scripts/ieee39_limit_setup.gvy` rates the branches —
+> reports **0 overloads at any threshold**, which is the data, not the run. Rate the branches (a
+> `scripts/*.gvy` run through Chat, or a case file that carries them) before reading the CA result.
+
 
 | Button         | Effect                                                                                                                                         |
 | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OK**         | Saves `wspace/<case-parent>/config/ca_run.json` — the over loading threshold and both section choices (0.4.7+), closes the dialog, and runs CA |
+| **OK**         | Saves `wspace/<case-parent>/config/ca_run.json` — the over loading threshold, both section choices (0.4.7+) and the advanced solver knobs (0.7.2+), closes the dialog, and runs CA |
 | **Cancel** / ✕ | Closes without writing or running                                                                                                              |
 
 

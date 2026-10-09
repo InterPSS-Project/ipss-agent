@@ -61,6 +61,41 @@ applies — the resolved number always comes back as `threshold`. An argument ov
 it names** (plugin 0.4.7+), so passing `overloadThreshold` alone keeps the case's contingency and
 monitored-branch selection.
 
+`caConfig` (plugin 0.7.2+) carries the DC contingency **solver** knobs — the fields of the engine's
+`DclfContingencyConfig` plus the worker count — as a partial object keyed like
+`config/ca_run.json`. It is merged per key over the case config (and `overloadThreshold` still wins
+over `caConfig.overloadThreshold`); the tab's dialog edits the same fifteen knobs in its **Advanced
+solver settings** panel. Every default is the value the runner used before the keys existed, so a
+call that omits `caConfig` behaves exactly as it always did.
+
+| `caConfig` key | Default | Values |
+|---|---|---|
+| `dclfInclLoss` | `true` | bool — DC model with losses |
+| `dclfScreening` | `false` | bool — the engine's screening pass |
+| `dcLoadingCutoff` | `100` | `0`-`1000` percent (`0` = no cutoff) |
+| `dcFlowChangeCutoff` | `200` | `0`-`1000` percent |
+| `solutionMethod` | `SparseEqnSolve` | `SparseEqnSolve` \| `WoodburyMatrixUpdate` |
+| `kluEndpointRhsBatchSize` | `0` | integer `>= 0` |
+| `cacheViolationCombinedShiftFactors` | `false` | bool |
+| `islandingTreatment` | `ANCHORED_COMPENSATE_ONE_BUS` | `SKIP` \| `ANCHORED_COMPENSATE_ONE_BUS` \| `FULL_DCLF_REPLAY` |
+| `n1IslandingReplayEnabled` | `false` | bool |
+| `multiOutageReplayMode` | `EXACT_TOPOLOGY` | `EXACT_TOPOLOGY` \| `HIGH_IMPEDANCE` |
+| `highImpedanceReactancePu` | `10000` | number `> 0` |
+| `turnOffIslandBus` | `true` | bool |
+| `autoTurnLine2Xfr` | `true` | bool |
+| `ratingProvider` | `default` | `default` \| `RATING_A` \| `RATING_B` — which branch rating the overload check uses |
+| `threads` | `0` | integer `>= 0`; `0` = one per available processor |
+
+```
+interpss_run_ca({ caConfig: { ratingProvider: 'RATING_A', threads: 4 } })
+```
+
+**Overload detection compares each post-contingency flow against a branch rating.** A case whose
+branch table carries no ratings (`LimMvaA`/`LimMvaB`/`LimMvaC` all zero) reports **0 overloads at any
+threshold and any `ratingProvider`** — that is the case's data, not the run. The IEEE 39 fixture is
+one: apply its `scripts/ieee39_limit_setup.gvy` first (it rates 46 branches at 600 MVA), after which
+the same N-1 run reports overloads.
+
 | Argument form | Example |
 |---|---|
 | File name in the resolved case's folder | `2k_contingencies_115kVAbove.json` |

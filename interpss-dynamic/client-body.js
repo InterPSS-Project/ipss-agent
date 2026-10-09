@@ -42,6 +42,75 @@ return {
       return String(name).replace(/\.(ieee|raw|dat)$/i, '')
     }
 
+    // The CA dialog's solver fields (0.7.2), in the order the advanced panel lists them. One table
+    // drives the form's defaults, its validation, the payload written to ca_run.json, the run and
+    // the controls themselves; the keys and every default match the Host's DEFAULT_CA_CONFIG and
+    // the Java `CaRunConfig`, so the three cannot disagree about a knob's name or its default.
+    const CA_SOLVER_FIELDS = [
+      { key: 'dclfInclLoss', label: 'Include losses (INC_LOSS)', kind: 'bool', def: true },
+      { key: 'dclfScreening', label: 'Screening pass', kind: 'bool', def: false },
+      { key: 'dcLoadingCutoff', label: 'DC loading cutoff (%)', kind: 'number', min: 0, max: 1000, def: 100 },
+      { key: 'dcFlowChangeCutoff', label: 'DC flow change cutoff (%)', kind: 'number', min: 0, max: 1000, def: 200 },
+      { key: 'solutionMethod', label: 'Solution method', kind: 'select', options: ['SparseEqnSolve', 'WoodburyMatrixUpdate'], def: 'SparseEqnSolve' },
+      { key: 'kluEndpointRhsBatchSize', label: 'KLU RHS batch size (0 = off)', kind: 'number', min: 0, max: 1000000, integer: true, def: 0 },
+      { key: 'cacheViolationCombinedShiftFactors', label: 'Cache violation shift factors', kind: 'bool', def: false },
+      { key: 'islandingTreatment', label: 'Islanding treatment', kind: 'select', options: ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY'], def: 'ANCHORED_COMPENSATE_ONE_BUS' },
+      { key: 'n1IslandingReplayEnabled', label: 'N-1 islanding replay', kind: 'bool', def: false },
+      { key: 'multiOutageReplayMode', label: 'Multi-outage replay', kind: 'select', options: ['EXACT_TOPOLOGY', 'HIGH_IMPEDANCE'], def: 'EXACT_TOPOLOGY' },
+      { key: 'highImpedanceReactancePu', label: 'High impedance X (pu)', kind: 'number', min: 0, exclusiveMin: true, max: 100000000, def: 10000 },
+      { key: 'turnOffIslandBus', label: 'Turn off island buses', kind: 'bool', def: true },
+      { key: 'autoTurnLine2Xfr', label: 'Auto turn line into transformer', kind: 'bool', def: true },
+      { key: 'ratingProvider', label: 'Rating provider', kind: 'select', options: ['default', 'RATING_A', 'RATING_B'], def: 'default' },
+      { key: 'threads', label: 'Threads (0 = all cores)', kind: 'number', min: 0, max: 1024, integer: true, def: 0 },
+    ]
+
+    const caFieldStyle = { padding: '0 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', height: '30px', boxSizing: 'border-box', width: '100%' }
+
+    // The form's value for a solver field, as its control expects it: booleans stay booleans,
+    // everything else is a string so a half-typed number is validated rather than coerced.
+    function caSolverFieldValue(field, config) {
+      const raw = config === null || config === undefined ? undefined : config[field.key]
+      if (field.kind === 'bool') return typeof raw === 'boolean' ? raw : field.def
+      if (raw === undefined || raw === null || raw === '') return String(field.def)
+      return String(raw)
+    }
+
+    // The first unusable solver field, or null. Mirrors the Host's `validateCaConfig` (which
+    // rejects the same values again) and the Java `CaRunConfig` behind it.
+    function caSolverError(form) {
+      for (const field of CA_SOLVER_FIELDS) {
+        const value = form[field.key]
+        if (field.kind === 'bool') continue
+        if (field.kind === 'select') {
+          if (field.options.indexOf(value) < 0) return field.label + ' must be ' + field.options.join(' | ')
+          continue
+        }
+        const n = Number(value)
+        // `exclusiveMin` is for the knobs the runner wants strictly positive (a reactance, for
+        // instance): 0 is a value it rejects, so the dialog must not call it usable.
+        const belowMin = field.exclusiveMin === true ? !(n > field.min) : n < field.min
+        if (value === '' || value === null || value === undefined || !Number.isFinite(n) ||
+            belowMin || n > field.max) {
+          return field.label + (field.exclusiveMin === true
+            ? ' must be a number greater than ' + field.min
+            : ' must be a number between ' + field.min + ' and ' + field.max)
+        }
+        if (field.integer === true && !Number.isInteger(n)) return field.label + ' must be a whole number'
+      }
+      return null
+    }
+
+    // The solver fields as the Host wants them (numbers coerced, booleans real booleans).
+    function caSolverPayload(form) {
+      const out = {}
+      for (const field of CA_SOLVER_FIELDS) {
+        if (field.kind === 'bool') out[field.key] = form[field.key] === true
+        else if (field.kind === 'select') out[field.key] = form[field.key]
+        else out[field.key] = Number(form[field.key])
+      }
+      return out
+    }
+
     let lastSelection = { mode: '0', customFormat: 'ieee', customInput: '' }
     let checkSeq = 0
     let reportSeq = 0
@@ -2383,6 +2452,9 @@ return {
       const [caOpen, setCaOpen] = React.useState(false)
       const [caLoading, setCaLoading] = React.useState(false)
       const [caForm, setCaForm] = React.useState(null)
+      // The advanced solver panel's open state. Kept across dialog opens (a user who wants the
+      // knobs usually wants them again), and it only edits fields already in `caForm`.
+      const [caAdvanced, setCaAdvanced] = React.useState(false)
       const [caFiles, setCaFiles] = React.useState(null)
       const [caFilesLoading, setCaFilesLoading] = React.useState(false)
       const [caPicker, setCaPicker] = React.useState(null)
@@ -2619,7 +2691,9 @@ return {
           if (message.kind === 'hint') return 'select a file for the ' + (kind === 'contingency' ? 'user-defined contingency' : 'monitored branches')
           if (message.kind === 'error') return message.text
         }
-        return null
+        // The solver panel is part of the run: an unparsable cutoff or an unknown enum value is
+        // reported here rather than being silently defaulted by the Host.
+        return caSolverError(caForm)
       }
 
       function loadCaFiles(c) {
@@ -2651,7 +2725,12 @@ return {
           (res) => {
             setCaLoading(false)
             if (res && res.ok && res.config) {
+              // The solver knobs come from the same answer as the file selections; a Host that
+              // does not know a key (an older plugin) leaves the table's default in place.
+              const solver = {}
+              for (const field of CA_SOLVER_FIELDS) solver[field.key] = caSolverFieldValue(field, res.config)
               setCaForm({
+                ...solver,
                 contingencyMode: res.config.contingencyMode === 'custom' ? 'custom' : 'all',
                 contingencyFile: res.config.contingencyFile || null,
                 monitorMode: res.config.monitorMode === 'custom' ? 'custom' : 'all',
@@ -2676,6 +2755,49 @@ return {
         if (caForm === null) return
         setCaDialogError(null)
         setCaForm({ ...caForm, overloadThreshold: value })
+      }
+
+      // One advanced solver field, rendered by its kind: a checkbox, a select of the Java enum's
+      // constant names, or a text input whose value is validated by `caSolverError` on OK.
+      function setCaSolver(key, value) {
+        if (caForm === null) return
+        setCaDialogError(null)
+        setCaForm({ ...caForm, [key]: value })
+      }
+
+      function renderCaSolverField(field) {
+        if (caForm === null) return null
+        const value = caForm[field.key]
+        const label = React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, field.label)
+        if (field.kind === 'bool') {
+          return React.createElement('label', { key: field.key, style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '30px' } },
+            React.createElement('input', {
+              type: 'checkbox',
+              checked: value === true,
+              onChange: (e) => setCaSolver(field.key, e.target.checked),
+            }),
+            label,
+          )
+        }
+        if (field.kind === 'select') {
+          return React.createElement('label', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+            label,
+            React.createElement('select', {
+              value: value,
+              onChange: (e) => setCaSolver(field.key, e.target.value),
+              style: caFieldStyle,
+            }, field.options.map((option) => React.createElement('option', { key: option, value: option }, option))),
+          )
+        }
+        return React.createElement('label', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+          label,
+          React.createElement('input', {
+            type: 'text',
+            value: value,
+            onChange: (e) => setCaSolver(field.key, e.target.value),
+            style: caFieldStyle,
+          }),
+        )
       }
 
       function setCaMode(kind, mode) {
@@ -2732,6 +2854,9 @@ return {
           monitorMode: caForm.monitorMode,
           monitoredBranchFile: caForm.monitorMode === 'custom' ? caForm.monitoredBranchFile : null,
           overloadThreshold: Number(caForm.overloadThreshold),
+          // The advanced panel's solver knobs: written to ca_run.json and handed straight to the
+          // run, so what the dialog shows is what the solver gets.
+          ...caSolverPayload(caForm),
         }
         setCaSaving(true)
         setCaDialogError(null)
@@ -3449,6 +3574,18 @@ return {
               title: 'A monitored branch whose post-contingency loading reaches this percentage is reported',
               style: { width: '92px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', textAlign: 'center' },
             }),
+          ) : null,
+          // The solver knobs, behind a disclosure: the two case-input sections stay the dialog's
+          // main job, and a run that never opens this panel writes the defaults back unchanged.
+          caForm !== null ? React.createElement('div', { style: { marginBottom: '12px' } },
+            React.createElement('button', {
+              onClick: () => setCaAdvanced(!caAdvanced),
+              'aria-expanded': caAdvanced ? 'true' : 'false',
+              style: { ...btn, padding: '4px 10px', fontSize: '12px' },
+            }, (caAdvanced ? '▾ ' : '▸ ') + 'Advanced solver settings'),
+            caAdvanced ? React.createElement('div', {
+              style: { marginTop: '8px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '8px 12px' },
+            }, CA_SOLVER_FIELDS.map((field) => renderCaSolverField(field))) : null,
           ) : null,
           caCase !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginBottom: '10px' } }, 'Case: ' + caCase.displayName) : null,
           caLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :

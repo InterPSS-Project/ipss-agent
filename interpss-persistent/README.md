@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.1**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+GUI (**0.7.2**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.1**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.2**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -36,10 +36,16 @@ parameters and results, no build-time Typert compiler required.
   the contingency and monitored-branch inputs (all N-1 / every branch, or a `.json`
   from the case folder, with the entry count shown after the pick), sets the
   **Over Loading Threshold(%)** the screening reports against (default 90, 0.4.6+; written with the
-  other four keys since 0.4.7),
-  saves them as
+  other four keys since 0.4.7), and — since 0.7.2 — carries a **▸ Advanced solver settings**
+  disclosure for the fifteen DC contingency solver knobs (loss inclusion, screening and its
+  cutoffs, solution method, KLU batch size, shift-factor caching, islanding/replay handling,
+  rating provider, thread count), each defaulting to the value the runner used before the panel
+  existed; the same knobs are the `caConfig` argument of `interpss_run_ca`.
+  It saves them as
   `config/ca_run.json` beside that case's `config/aclf_run.json`, and runs CA — the same file the
-  CLI reads (OK = save + run, Cancel = write nothing).
+  CLI reads (OK = save + run, Cancel = write nothing). The overload check compares
+  post-contingency flow against a branch rating, so a case whose branch tables carry no ratings
+  reports no overloads at any threshold.
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
 - **Diagram tab** (0.6.8; the only preview surface since 0.6.9) — a second conversation view
@@ -95,7 +101,7 @@ iPSS Agent workspace activation check.
 | `interpss_network_info` | Show the InterPSS network information (active buses and branches, total generation and load, load-flow convergence, max mismatch) of a simulation case. |
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
-| `interpss_run_ca` | Run a DC contingency analysis (N-1 screening) on the held case without the CA dialog: inputs come from `contingencyFile`/`monitorFile`, else the case-folder `config/ca_run.json`, else case-folder discovery, else the Java N-1 defaults; `overloadThreshold` (0.4.6+) sets the over loading threshold the run reports against (argument → `ca_run.json` → 90). Writes `<stem>_DF_contingency.csv`, browsable from the card's **Explore result → Contingency** row (0.4.2+), which opens sorted by `LoadingPercent` with clickable headers (0.4.3+). |
+| `interpss_run_ca` | Run a DC contingency analysis (N-1 screening) on the held case without the CA dialog: inputs come from `contingencyFile`/`monitorFile`, else the case-folder `config/ca_run.json`, else case-folder discovery, else the Java N-1 defaults; `overloadThreshold` (0.4.6+) sets the over loading threshold the run reports against (argument → `ca_run.json` → 90) and `caConfig` (0.7.2+) the solver knobs (partial object, merged per key over `ca_run.json`; the defaults are the values every earlier run used). Writes `<stem>_DF_contingency.csv`, browsable from the card's **Explore result → Contingency** row (0.4.2+), which opens sorted by `LoadingPercent` with clickable headers (0.4.3+). |
 | `interpss_run_gvy` | Apply Groovy to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. `script` takes a `.gvy` file from the case folder's `scripts/` directory, the source itself (0.4.9+), or an array of those applied in order (0.4.11+ — stops at the first failure, `steps` reports each one). Whitespace or statement punctuation marks source, a single bare word is a file name. |
 
 The first three tools resolve the target case through one shared helper, in this order:

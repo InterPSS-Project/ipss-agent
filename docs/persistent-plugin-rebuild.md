@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.7.1.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.2.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.1.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.2.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 329 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 338 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -594,6 +594,15 @@ its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
   and the placeholder that follows it — and the source pin that all three host halves and both client
   copies carry the third type. That last check is the one that catches a **Client-only** change,
   which would list the `.dat` file, pick it, and then answer `Invalid case path`.
+- §21 (since 0.7.2) covers the **CA solver knobs**: the plug-in has to name the same keys with the
+  same defaults in three places, so it parses the Host's `DEFAULT_CA_CONFIG` (20 keys: the five
+  case inputs plus the fifteen solver fields), the client's `CA_SOLVER_FIELDS` table (15 keys, whose
+  `def` must equal the Host's values) and the Java `CaRunConfig`'s `DEFAULT_*` constants and enum
+  lists, then runs the client's own form helpers — an empty answer seeds the defaults, a valid form
+  produces a payload of numbers and booleans, and a cutoff out of range, a negative thread count, a
+  fractional count, an unknown enum value or a zero reactance is a message rather than a silent
+  default. A key renamed on one side and not the others is a knob the dialog writes and the solver
+  never sees, which no other check would catch.
 - §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
   draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
   was never going to survive a round trip through the editor.

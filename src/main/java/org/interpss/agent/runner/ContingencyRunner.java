@@ -29,9 +29,13 @@ import org.interpss.plugin.result.dframe.ca.DclfContingencyDFrameAdapter;
 import com.interpss.algo.parallel.BranchCAResultRec;
 import com.interpss.core.aclf.AclfBranch;
 import com.interpss.core.aclf.AclfNetwork;
+import com.interpss.core.algo.dclf.BranchRatingProvider;
 import com.interpss.core.algo.dclf.ContingencyAnalysisAlgorithm;
 import com.interpss.core.algo.dclf.DclfContingencyConfig;
+import com.interpss.core.algo.dclf.DclfIslandingTreatment;
 import com.interpss.core.algo.dclf.DclfMethod;
+import com.interpss.core.algo.dclf.DclfMultiOutageReplayMode;
+import com.interpss.core.algo.dclf.solver.DclfContingencySolutionMethod;
 import com.interpss.core.algo.dclf.solver.ParallelDclfContingencyAnalyzer;
 import com.interpss.core.contingency.ContingencyBranchOutageType;
 import com.interpss.core.contingency.dclf.DclfBranchOutage;
@@ -56,7 +60,7 @@ public final class ContingencyRunner {
             Path resultsDir, String stem) throws Exception {
         ValidatedContingencyInputs inputs = resolveInputs(paths, cli);
         return runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.monitorPath(),
-                inputs.overloadThreshold());
+                inputs.config());
     }
 
     /**
@@ -71,8 +75,7 @@ public final class ContingencyRunner {
      */
     public static ContAnalysisSummary runOnNet(AclfNetwork net, Path resultsDir, String stem,
             Path contPath, Path monitorPath) throws Exception {
-        return runOnNet(net, resultsDir, stem, contPath, monitorPath,
-                CaRunConfig.DEFAULT_OVERLOAD_THRESHOLD);
+        return runOnNet(net, resultsDir, stem, contPath, monitorPath, CaRunConfig.DEFAULT);
     }
 
     /**
@@ -81,6 +84,20 @@ public final class ContingencyRunner {
      */
     public static ContAnalysisSummary runOnNet(AclfNetwork net, Path resultsDir, String stem,
             Path contPath, Path monitorPath, double overloadThreshold) throws Exception {
+        return runOnNet(net, resultsDir, stem, contPath, monitorPath,
+                CaRunConfig.DEFAULT.withOverloadThreshold(overloadThreshold));
+    }
+
+    /**
+     * As above, driven by the whole {@link CaRunConfig}: the threshold plus every
+     * solver knob the config sets is copied onto the
+     * {@code DclfContingencyConfig} the parallel analyzer takes (ipss.core.lib 1.4.0
+     * moved the analyzer and its config into {@code com.interpss.core.algo.dclf}),
+     * so the dialog's choices reach the solver instead of the runner guessing them.
+     */
+    public static ContAnalysisSummary runOnNet(AclfNetwork net, Path resultsDir, String stem,
+            Path contPath, Path monitorPath, CaRunConfig config) throws Exception {
+        CaRunConfig effective = config == null ? CaRunConfig.DEFAULT : config;
         ContingencyAnalysisAlgorithm algo = createContingencyAnalysisAlgorithm(net);
         algo.calculateDclf(DclfMethod.INC_LOSS);
 
@@ -106,11 +123,11 @@ public final class ContingencyRunner {
                     .collect(Collectors.toCollection(HashSet::new));
         }
 
-        DclfContingencyConfig dclfConfig = new DclfContingencyConfig();
-        dclfConfig.setDclfInclLoss(true);
-        dclfConfig.setOverloadThreshold(overloadThreshold);
+        DclfContingencyConfig dclfConfig = dclfConfig(effective);
 
-        int threads = Runtime.getRuntime().availableProcessors();
+        int threads = effective.threadsOrDefault() > 0
+                ? effective.threadsOrDefault()
+                : Runtime.getRuntime().availableProcessors();
         System.out.println("Using " + threads + " threads for contingency analysis");
 
         ConcurrentLinkedQueue<BranchCAResultRec> results =
@@ -129,7 +146,43 @@ public final class ContingencyRunner {
                 dclfContList.size(),
                 monitoredBranchIds.size(),
                 dfCaRec.height());
-                    
+
+    }
+
+    /**
+     * The solver config the parallel analyzer takes, built from the run config.
+     * Every field the config file may set is copied here, including the ones whose
+     * defaults happen to equal {@code DclfContingencyConfig}'s own, so the run is
+     * governed by the file and not by two sets of defaults that could drift.
+     */
+    static DclfContingencyConfig dclfConfig(CaRunConfig config) {
+        CaRunConfig cfg = config == null ? CaRunConfig.DEFAULT : config;
+        DclfContingencyConfig dclfConfig = new DclfContingencyConfig();
+        dclfConfig.setOverloadThreshold(cfg.overloadThresholdOrDefault());
+        dclfConfig.setDclfInclLoss(cfg.dclfInclLossOrDefault());
+        dclfConfig.setDclfScreening(cfg.dclfScreeningOrDefault());
+        dclfConfig.setDcLoadingCutoff(cfg.dcLoadingCutoffOrDefault());
+        dclfConfig.setDcFlowChangeCutoff(cfg.dcFlowChangeCutoffOrDefault());
+        dclfConfig.setSolutionMethod(
+                DclfContingencySolutionMethod.valueOf(cfg.solutionMethodOrDefault()));
+        dclfConfig.setKluEndpointRhsBatchSize(cfg.kluEndpointRhsBatchSizeOrDefault());
+        dclfConfig.setCacheViolationCombinedShiftFactors(cfg.cacheViolationCombinedShiftFactorsOrDefault());
+        dclfConfig.setIslandingTreatment(
+                DclfIslandingTreatment.valueOf(cfg.islandingTreatmentOrDefault()));
+        dclfConfig.setN1IslandingReplayEnabled(cfg.n1IslandingReplayEnabledOrDefault());
+        dclfConfig.setMultiOutageReplayMode(
+                DclfMultiOutageReplayMode.valueOf(cfg.multiOutageReplayModeOrDefault()));
+        dclfConfig.setHighImpedanceReactancePu(cfg.highImpedanceReactancePuOrDefault());
+        dclfConfig.setTurnOffIslandBus(cfg.turnOffIslandBusOrDefault());
+        dclfConfig.setAutoTurnLine2Xfr(cfg.autoTurnLine2XfrOrDefault());
+        // `default` keeps the library's own provider, which is what every run used before the
+        // rating became selectable; A/B pin the branch's rating MVA 1/2 instead.
+        switch (cfg.ratingProviderOrDefault()) {
+            case "RATING_A" -> dclfConfig.setBranchRatingProvider(BranchRatingProvider.RATING_A);
+            case "RATING_B" -> dclfConfig.setBranchRatingProvider(BranchRatingProvider.RATING_B);
+            default -> { }
+        }
+        return dclfConfig;
     }
 
     /**
@@ -172,7 +225,7 @@ public final class ContingencyRunner {
                 throw new IllegalStateException("Monitor file not found: " + monPath);
             }
         }
-        return new ValidatedContingencyInputs(contPath, monPath, CaRunConfig.DEFAULT_OVERLOAD_THRESHOLD);
+        return new ValidatedContingencyInputs(contPath, monPath, CaRunConfig.DEFAULT);
     }
 
     /**
@@ -204,7 +257,7 @@ public final class ContingencyRunner {
         Path monitorPath = explicit.monitorPath() != null ? explicit.monitorPath()
                 : resolveConfigEntry(paths, configFile, config.monitoredBranchInput(),
                         config.monitorIsCustom(), "monitoredBranchFile", "custom monitored branches");
-        return new ValidatedContingencyInputs(contPath, monitorPath, config.overloadThresholdOrDefault());
+        return new ValidatedContingencyInputs(contPath, monitorPath, config);
     }
 
     /**
@@ -241,7 +294,8 @@ public final class ContingencyRunner {
         return resolved;
     }
 
-    public record ValidatedContingencyInputs(Path contPath, Path monitorPath, double overloadThreshold) {
+    /** The resolved contingency/monitor files plus the run config they came from. */
+    public record ValidatedContingencyInputs(Path contPath, Path monitorPath, CaRunConfig config) {
     }
 
     public static record ContAnalysisSummary(double threshold, 
