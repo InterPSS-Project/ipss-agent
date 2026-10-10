@@ -21,13 +21,15 @@ public class IEEE39_OptBasecase_SsaResult_Sparse_Sample {
 				CacheType.SenNotCached, true);
 		dclfAlgo.calculateDclf(DclfMethod.INC_LOSS);
 
-		SsaResultContainer ssaResult = new AclfNetSsaHelper(dclfAlgo).baseCaseScan(50.0);
+		double baseCaseLoadingThreshold = 50.0;
+		SsaResultContainer ssaResult = new AclfNetSsaHelper(dclfAlgo).baseCaseScan(baseCaseLoadingThreshold);
 		//ssaResult.printBaseOverLimitInfo();
 
 		OptAdjResultContainer optAdjResult = new OptAdjResultContainer(ssaResult);
 		
-		// perform basecase loaing limit optimization	
-		new AclfNetLoadFlowOptimizer(true).optimize(dclfAlgo, optAdjResult, 100.0);
+		// perform basecase loaing limit optimization
+		double baseCaseOptAdjLoadingThreshold = 100.0;
+		new AclfNetLoadFlowOptimizer(true).optimize(dclfAlgo, optAdjResult, baseCaseOptAdjLoadingThreshold);
 		optAdjResult.getOptAdjResults().forEach((genName, result) -> {
 			System.out.println("GenAdjustResult: " + genName + ", " + result.toString());
 		});
