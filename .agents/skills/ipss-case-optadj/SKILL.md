@@ -27,6 +27,31 @@ Neither is guessed for you: a case that lacks them fails with the generator/bran
 count. Loading is measured against rating MVA 1 only — `ratingProvider` is a CA knob and does not
 exist here.
 
+## Tool call at a glance
+
+```
+interpss_case_optadj({ case?, optAdjType?, scanLoadingThreshold?, optAdjLoadingThreshold?,
+                       contingencyFile?, optAdjConfig?, reload? })
+```
+
+| Argument | Default | Meaning |
+|---|---|---|
+| `case` | tab selection | The case to run, resolved like every other tool (`data/…`, `wspace/data/…`, an absolute path under `/wspace/data/`, or a preset label) |
+| `optAdjType` | `genAdjBaseCase` | `genAdjBaseCase` relieves pre-contingency (basecase) loading; `genAdjCaN_1` relieves post-contingency loading for single branch outages |
+| `scanLoadingThreshold` | `50` / `90` | Candidate-collection percentage (`0 < t <= 1000`): 50 in the basecase mode, 90 in the N-1 mode, when unset |
+| `optAdjLoadingThreshold` | `100` | The percentage the LP enforces (`0 < t <= 1000`) |
+| `contingencyFile` | all N-1 outages | `genAdjCaN_1` only: the contingency JSON, addressed exactly like the CA tool's argument; the basecase mode **rejects** it |
+| `optAdjConfig` | — | The same keys as one partial object; an unknown key is rejected with the list of known ones. The scalar arguments win per key |
+| `reload` | `false` | Re-parse the case file before running |
+
+Resolution is most-specific-first: `optAdjConfig` → the scalar arguments → the case folder's
+`config/opt_adj_run.json` → the built-in defaults. There is no filename discovery (unlike CA): only
+the N-1 mode reads a contingency file, and it must be named.
+
+The call returns the mode, both resolved thresholds, `contingencies`, `scanned`,
+`overLimitBefore` / `overLimitAfter`, `controlGens`, `gensAdjusted`, the two result file names and
+the runner's raw `OptAdjSummary` — field by field below under [Reading the result](#reading-the-result).
+
 ## Preferred path (DeepSeek Harness)
 
 ### Step 0 — load the selected case
@@ -85,7 +110,7 @@ The N-1 listed default is every branch not connected to the reference bus.
 | CSV | Columns |
 |---|---|
 | `<stem>_DF_optadj_gen.csv` | `genName, genP, adjP, limitMax, limitMin` — one row per reported generator, largest `adjP` first, in **MW** (a `[0, 7] pu` limit shows as `700`) |
-| `<stem>_DF_optadj_branch.csv` | `branchId, outageBranchId, limitMW, baseFlowMW, loadingBeforePct, shiftedFlowMWAfter, loadingAfterPct` — one row per scanned entry, before and after; `outageBranchId` empty in basecase mode |
+| `<stem>_DF_optadj_branch.csv` | `branchId, outageBranchId, limitMW, baseFlowMW, loadingBeforePct, shiftedFlowMWAfter, loadingAfterPct` — one row per scanned entry, before and after; `outageBranchId` empty in basecase mode. The runner writes `shiftedFlowMWAfter` as `0.0` on every row, so read `loadingAfterPct` (or derive `loadingAfterPct × limitMW / 100`) rather than that column |
 
 The settled card shows the summary plus an **Explore results** row with a **Gen adjustments** and a
 **Branch loading** table, paged through the same endpoint the tab uses and opened worst
@@ -95,13 +120,116 @@ Measurements on the IEEE 39 fixture (this workspace): basecase 50 %/100 % → 20
 entries at or above 100 %, peak 103.4 % → 100.0 %, 3 of 10 control generators adjusted; N-1
 90 %/100 % → 45 contingencies, 7 → 4 entries, peak 138.8 % → 125.3 %, 6 of 10 adjusted.
 
+### Listing the branches after the run
+
+When the ask is the **branch loading after the adjustment** — not just the summary — read
+`<stem>_DF_optadj_branch.csv`. The card's **Branch loading** table opens on the same data and sorts
+the same way; list the rows yourself only when the caller wants them in the reply.
+
+Show one row per entry, worst `loadingAfterPct` first:
+
+| Column | Show as | Note |
+|---|---|---|
+| `branchId` | branch | The monitored branch |
+| `outageBranchId` | outage | The contingency that produced the entry; empty in basecase mode |
+| `limitMW` | rating | The rating the scan measured against, i.e. rating MVA 1 |
+| `baseFlowMW` | base MW | Signed by flow direction — compare **magnitudes**, not signs |
+| `loadingBeforePct` | before % | The scan's pre-redispatch loading |
+| `loadingAfterPct` | after % | The post-redispatch loading — the number to filter and sort on |
+| — | after MW | Derive as `loadingAfterPct × limitMW / 100`; **do not** read `shiftedFlowMWAfter`, which the runner writes as `0.0` on every row |
+
+```bash
+cd wspace/<case dir>/result
+python3 - <<'EOF'
+import csv
+rows = list(csv.DictReader(open('<stem>_DF_optadj_branch.csv')))
+f = lambda r, k: float(r[k] or 0)
+T = 100.0                                   # the run's resolved optAdjLoadingThreshold
+rows.sort(key=lambda r: -f(r, 'loadingAfterPct'))
+for r in rows:
+    lim, af = f(r, 'limitMW'), f(r, 'loadingAfterPct')
+    if af >= T:
+        print(f"{r['branchId']:<20}{r['outageBranchId']:<20}{lim:>7.0f}"
+              f"{f(r,'baseFlowMW'):>9.1f}{f(r,'loadingBeforePct'):>8.2f}%{af:>8.2f}%{af*lim/100:>9.1f} MW")
+EOF
+```
+
+Filter at the run's **resolved** `optAdjLoadingThreshold`, not a hard-coded 100: it is 100 by default
+but may have been overridden, and `overLimitBefore`/`overLimitAfter` count entries at or above exactly
+that value. State which threshold the list uses.
+
+Four scope limits worth stating with the list:
+
+- it covers **only the scan's candidates** — entries at or above `scanLoadingThreshold` (50 % basecase,
+  90 % N-1) *before* the redispatch. A branch below that bar is absent from the file entirely, so the
+  list is not the case's full branch set and cannot prove no other branch overloads;
+- the redispatch can **raise** a listed entry (`Bus3→Bus2` 61.69 % → 64.45 % on the IEEE 39 basecase
+  run) — the scan's candidate set, not the pre-redispatch overload set, is what gets re-checked;
+- it is the **DCLF/LODF study state**, not an AC solution, and (per the caveat below) the held model
+  usually still carries the scheduled dispatch — so this CSV is the only place the post-adjustment
+  state exists until the setpoints are re-applied with a script;
+- the `adjP` column of the gen CSV sums to ~zero — the redispatch moves MW between machines, it does
+  not create it (IEEE 39 basecase: `+37.28 − 27.25 − 10.03 = 0`). Entries with identical before and
+  after are the ones the optimizer's constraints left alone.
+
+Worked example (IEEE 39 basecase, 50 %/100 %): 20 rows, 2 at/above 100 % after — worst
+`Bus29->Bus38(1)` 103.41 % → **100.02 %** (800 MVA) and `Bus22->Bus21(1)` 101.08 % → **100.01 %**
+(600 MVA); six rows bit-identical before and after, and one worse.
+
 ### Replying after a run
 
-The card **is** the report — mode, thresholds, before/after counts, gens adjusted and the file
-paths. Reply with at most a one-line confirmation, and add prose only when it matters:
+Reply with **two tables** — the before/after overload card, then the generator adjustments. The tool
+card carries the counts, so the reply does not restate them.
 
-- `overLimitAfter` is still **greater than zero** — say how many remain and name the worst
-  `loadingAfterPct` row; the LP is boxed in by the generators' P limits;
+```
+Basecase redispatch ran (scan 50 %, enforce 100 %) — the two basecase overloads are driven onto the limit:
+
+| Entry | Rating | Before | After |
+|---|---|---|---|
+| BUS-29 → BUS-38 | 800 MVA | −827.2 MW (103.41 %) | **100.02 %** |
+| BUS-22 → BUS-21 | 600 MVA | 606.5 MW (101.08 %) | **100.01 %** |
+
+Adjustments (3 of 10 control generators moved):
+
+| Generator | Scheduled | AdjP | Limit |
+|---|---|---|---|
+| Bus30-G1 | 250.0 MW | **+37.28 MW** | max 700 |
+| Bus38-G1 | 830.0 MW | **−27.25 MW** | max 830 (already at its cap) |
+| Bus35-G1 | 650.0 MW | **−10.03 MW** | max 700 |
+```
+
+That example is the IEEE 39 basecase run verbatim, read off `ieee39_DF_optadj_branch.csv` and
+`ieee39_DF_optadj_gen.csv`.
+
+**Overload table** — one row per entry at or above the resolved `optAdjLoadingThreshold`, worst
+`loadingAfterPct` first, so the row count equals `overLimitAfter`. Build the rows per
+[Listing the branches after the run](#listing-the-branches-after-the-run):
+
+- **Entry** — `branchId`, rendered with `→` instead of `->`; in N-1 mode append the outage that
+  produced the row (`BUS-24 → BUS-23 (outage BUS-22 → BUS-21)`);
+- **Rating** — `limitMW` in MVA, the basis the scan measured against;
+- **Before** — `baseFlowMW` plus `(loadingBeforePct %)`: the MW is signed by flow direction, the
+  percentage is what to compare;
+- **After** — `loadingAfterPct` in **bold**, with the derived MW appended when the ranking needs it.
+
+A row sitting *on* the threshold (`100.02 %`, `100.01 %`) is the LP boundary, not a violation: say so
+rather than calling it an overload. When `overLimitAfter` is 0, say the overloads cleared and carry the
+peak before → after in the lead line; the table then shows the worst few rows instead of an empty body.
+
+**Adjustments table** — every generator row in `<stem>_DF_optadj_gen.csv`, largest `adjP` first, headed
+`Adjustments (<gensAdjusted> of <controlGens> control generators moved):`
+
+- **Generator** — `genName`;
+- **Scheduled** — `genP` in MW — the pre-adjustment schedule, not the post-run value;
+- **AdjP** — `adjP` in MW, in **bold** with an explicit `+` on increases; the column sums to ~0;
+- **Limit** — `max <limitMax>` (add `min <limitMin>` only when it is non-zero and binding), with
+  `(already at its cap)` when `genP == limitMax` — that is what explains a residual overload.
+
+Then add prose only when it matters:
+
+- the LP ran out of room — name the generators pinned at their P limit, which is why entries remain;
+- a follow-up ACLF/CA is planned — say the model still holds the scheduled dispatch (caveat below), so
+  the tables' numbers live in the OptAdj CSVs only;
 - the case was **refused** for a missing limit/rating — name the script step that fixes it;
 - a **next step** is needed — `$ipss-case-aclf` to confirm the redispatched operating point in AC,
   or `$ipss-case-ca` to re-screen it, or the NERC report.
@@ -126,6 +254,15 @@ the NERC report.
   `interpss_run_aclf`, `interpss_run_ca` or report sees the adjusted dispatch, and a second OptAdj
   call continues from it. Use `reload: true` — or reload the case in the tab — to start from the
   case file again.
+- **Measured in this workspace (2026-10-10), that mutation did _not_ reach the held model** in either
+  mode. After a basecase run (3 gens adjusted, `Bus30-G1 +37.28 MW`) and after an N-1 run (6 adjusted,
+  `Bus30-G1 +450.0`, `Bus32-G1 −353.1`, `Bus35-G1 −268.1`), a read-only Groovy probe still reported
+  the scheduled `Bus30=2.5, Bus32=6.5, Bus35=6.5, Bus37=5.4 pu`, and the following `interpss_run_aclf`
+  rewrote `ieee39_DF_branch.csv` byte-identically (same md5) to the pre-run solve. Until that is
+  reconciled, treat the adjusted dispatch as living in the two OptAdj CSVs only: to have ACLF or CA
+  see it, re-apply the `genName`/`adjP` setpoints with an `interpss_run_gvy` script and re-solve. This
+  bullet records the measurement; [docs/interpss-tools.md](../../../docs/interpss-tools.md) and the
+  bullet above still state the documented behaviour.
 - **OptAdj is a DCLF/LODF redispatch, not an AC OPF.** Confirm a stressed operating point with
   `interpss_run_aclf` before acting on it.
 - The post-opt re-check tracks **only the entries the scan found**; it does not discover new
