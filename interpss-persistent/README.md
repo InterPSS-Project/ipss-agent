@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.5**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+GUI (**0.7.7**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.5**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.7**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -69,7 +69,10 @@ parameters and results, no build-time Typert compiler required.
   and **filter** (by area/zone from the case table, or by the |V| band — 0.6.23) dialogs with OK / Cancel, one view only (the **R** / **S** toggle and its raw-XML Source view were removed in 0.6.34), a **birdseye** thumbnail with click-to-move
   (0.6.28), a **gear** dialog for the flag
   thresholds and colours in `config/net_diagram.json` (0.6.26) and
-  bus/branch tooltips, and (0.6.12; at the right end of the top row since 0.6.15) a
+  bus/branch tooltips (a branch quotes its base-case and contingency loadings, and — since 0.7.7 —
+  the post-redispatch `Basecase OptAdj Loading(%)` / `Contingency OptAdj Loading(%)` from the case's
+  two OptAdj branch tables, each line only when its table exists and lists that branch), and
+  (0.6.12; at the right end of the top row since 0.6.15) a
   draw.io button that opens the file in the **local draw.io
   desktop app** to edit it. A bus whose solved `|V|` is outside **0.9–1.1 pu** is painted **red**
   (bar and `Bus-N` text, with the violation spelled out in its tooltip; the band and colour come from the gear dialog's

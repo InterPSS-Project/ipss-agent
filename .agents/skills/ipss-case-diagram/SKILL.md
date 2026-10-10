@@ -99,6 +99,13 @@ failed.
   `result/<stem>_DF_bus.csv` and paints out-of-band buses (`|V|` outside 0.9–1.1 pu) red as it
   renders (0.6.18); the `.drawio` itself stays one grey per bar, and the generator has no colour
   flag on purpose. A bar cell id that does not resolve to a table row simply stays grey.
+- **The branch tooltip quotes the result tables, "when available".** Besides the base-case loading
+  from `result/<stem>_DF_branch.csv` (0.6.30) and the CA table's contingency loading (0.6.31), since
+  **0.7.7** an OptAdj run adds `Basecase OptAdj Loading(%): …` (from `result/<stem>_DF_optadj_branch.csv`)
+  and `Contingency OptAdj Loading(%): …` (from the N-1 pair `result/<stem>_DF_optadj_N1_branch.csv`),
+  both the **post-redispatch** `loadingAfterPct`. Each line needs its file to exist *and* to list that
+  branch — the table holds only the run's scan candidates (50 % basecase / 90 % N-1 by default) — so a
+  missing OptAdj line means "no OptAdj row for this branch", never a broken diagram.
 
 ## Flags
 

@@ -1602,6 +1602,13 @@ class InterpssService extends TypertRemoteService {
           // file simply means "no contingency data". Without this line the Diagram tab never saw
           // the table at all, so its contingency flags and tooltip line could never appear (0.6.31).
           stem + '_DF_contingency.csv',
+          // The two OptAdj branch tables, listed the same way and for the same reason (0.6.31): the
+          // Diagram tab's tooltip adds a line per mode when the table lists the branch, and an absent
+          // file just means "no OptAdj data" (0.7.7 — the readCsv allow-list below had to learn these
+          // two families as well). The `.gvy`/bridge path writes them -- basecase
+          // `_DF_optadj_branch.csv`, N-1 `_DF_optadj_N1_branch.csv` since 0.7.5.
+          stem + '_DF_optadj_branch.csv',
+          stem + '_DF_optadj_N1_branch.csv',
           stem + '_network_info.txt',
         ],
       }
@@ -1769,7 +1776,11 @@ class InterpssService extends TypertRemoteService {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
     const path = input && typeof input.path === 'string' ? input.path : ''
-    if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency)\.csv$/.test(path)) {
+    // The result families the tab may page. This must name EVERY table a client read can ask for:
+    // the OptAdj pair was missing here in 0.7.6, so the Diagram tab's reads came back
+    // `Invalid result path`, the loading map stayed null and both OptAdj tooltip lines were silently
+    // empty (0.7.7). Guard §11 runs this very pattern against the names the client looks up.
+    if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency|optadj_branch|optadj_N1_branch)\.csv$/.test(path)) {
       return { ok: false, error: 'Invalid result path: ' + path }
     }
     const start = (input && typeof input.start === 'number' && input.start > 0) ? Math.floor(input.start) : 0

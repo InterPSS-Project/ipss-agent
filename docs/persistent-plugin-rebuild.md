@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.7.5.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.6.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.5.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.6.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 347 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 352 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -623,7 +623,17 @@ its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
   `ProjectPaths.caseOptAdjRunConfig`).
 - §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
   draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
-  was never going to survive a round trip through the editor.
+  was never going to survive a round trip through the editor. Since 0.7.6 it also covers the branch
+  tooltip's four loading lines — the two OptAdj ones (`Basecase OptAdj Loading(%): …` under
+  `Basecase Loading(%)`, `Contingency OptAdj Loading(%): …` under `Contingency Loading(%)`), each
+  optional on its own and the plain tooltip unchanged without one — plus `drawioOptAdjLoads` (the
+  worst `loadingAfterPct` per `branchId` pair, never `loadingBeforePct`) and both Hosts'
+  `checkResult` file lists. That was not enough: 0.7.6 shipped those lines against a Host
+  `readCsv` whose result-path allow-list named only the five older families, so every OptAdj read
+  came back `Invalid result path` and the client, which treats a rejected read as "no data", left
+  both lines off — silently. Since 0.7.7 the check **extracts the shipped pattern from each of the
+  three Host halves and runs it** over every result family the client looks up (plus two negatives),
+  so a family added on one side of the boundary fails here instead of in the GUI.
 - the case diagram must stay the reference's copy, which is what that check now says.
 
 Since 0.6.2 §7 checks effect ordering **statically**. It parses every `React.useEffect`

@@ -392,6 +392,9 @@ return {
     // nothing and simply gets no contingency line. The base-case loading comes from the branch table
     // the row itself came from, so it shows wherever that table is the source -- and neither line
     // appears for a table without those columns.
+    // `extra.optAdjLoading` / `extra.optAdjN1Loading` are the same idea for the two OptAdj result
+    // tables (basecase and N-1), so each OptAdj line sits under the plain loading it redispatch was
+    // run against. Also Diagram-tab-only, also "when available".
     function branchTooltip(r, extra) {
       if (!r) return 'Branch info'
       const isXfmr = r[12] === 'true'
@@ -406,12 +409,17 @@ return {
       lines.push('')
       lines.push('Power From->To: ' + pqText(r[19], r[20]))
       lines.push('Power To->From: ' + pqText(r[21], r[22]))
+      const extras = extra === undefined || extra === null ? {} : extra
       const basecase = loadingText(r[24])
-      const contingency = extra === undefined || extra === null ? null : loadingText(extra.contingencyLoading)
-      if (basecase !== null || contingency !== null) {
+      const contingency = loadingText(extras.contingencyLoading)
+      const optAdj = loadingText(extras.optAdjLoading)
+      const optAdjN1 = loadingText(extras.optAdjN1Loading)
+      if (basecase !== null || contingency !== null || optAdj !== null || optAdjN1 !== null) {
         lines.push('')
         if (basecase !== null) lines.push('Basecase Loading(%): ' + basecase)
+        if (optAdj !== null) lines.push('Basecase OptAdj Loading(%): ' + optAdj)
         if (contingency !== null) lines.push('Contingency Loading(%): ' + contingency)
+        if (optAdjN1 !== null) lines.push('Contingency OptAdj Loading(%): ' + optAdjN1)
       }
       return lines.join('\n')
     }
@@ -1032,18 +1040,34 @@ return {
       })
     }
 
-    // The contingency flags, from the CA result table `<stem>_DF_contingency.csv`: its `BranchID`
-    // is `Bus1001->Bus1064(1)`, so the pair is the head of that string, and `LoadingPercent` is the
-    // worst loading any contingency left on the branch. Both columns by header name.
-    function drawioContingencyLoads(header, rows) {
+    // Loadings of a table whose `branchId` names the branch (`Bus1001->Bus1064(1)`), keyed by the
+    // bus pair and carrying the worst row. `percentName` and the id column are matched by header
+    // NAME, like every other read here. Shared by the CA table and the two OptAdj tables.
+    function drawioPairLoads(header, rows, percentName) {
       const iId = drawioColIndex(header, 'branchid')
-      const iLoading = drawioColIndex(header, 'loadingpercent')
+      const iLoading = drawioColIndex(header, percentName)
       return drawioMaxByPair(rows, iLoading, (c) => {
         if (iId < 0) return null
         const m = /^(bus\d+)\s*->\s*(bus\d+)/i.exec(String(c[iId] === undefined ? '' : c[iId]).trim())
         if (m === null) return null
         return [m[1].toLowerCase(), m[2].toLowerCase()].sort().join('|')
       })
+    }
+
+    // The contingency flags, from the CA result table `<stem>_DF_contingency.csv`: its `BranchID`
+    // is `Bus1001->Bus1064(1)`, so the pair is the head of that string, and `LoadingPercent` is the
+    // worst loading any contingency left on the branch.
+    function drawioContingencyLoads(header, rows) {
+      return drawioPairLoads(header, rows, 'loadingpercent')
+    }
+
+    // The OptAdj result tables (`<stem>_DF_optadj_branch.csv`, and the `_N1_` pair the N-1 mode
+    // writes since 0.7.5) name the branch the same way, so they key the same way. `loadingAfterPct`
+    // is the loading the redispatch achieved — the number the run exists to produce — and the N-1
+    // table holds one row per (monitored branch, outage), so the max is the worst one. Rows exist
+    // only for the run's scan candidates, which is what makes the tooltip line "when available".
+    function drawioOptAdjLoads(header, rows) {
+      return drawioPairLoads(header, rows, 'loadingafterpct')
     }
 
     // The paint map the renderer takes: cell id -> colour. Bus flags come from the band in the
@@ -3794,6 +3818,12 @@ return {
       const [conFile, setConFile] = React.useState(null)
       const [branchLoads, setBranchLoads] = React.useState(null)
       const [conLoads, setConLoads] = React.useState(null)
+      // The two OptAdj result tables (`_DF_optadj_branch.csv`, `_DF_optadj_N1_branch.csv`), each an
+      // optional tooltip line: the file name the case's result folder declares, and its loading map.
+      const [optAdjFile, setOptAdjFile] = React.useState(null)
+      const [optAdjN1File, setOptAdjN1File] = React.useState(null)
+      const [optAdjLoads, setOptAdjLoads] = React.useState(null)
+      const [optAdjN1Loads, setOptAdjN1Loads] = React.useState(null)
       const canvasRef = React.useRef(null)
       const dragRef = React.useRef(null)
       // Tooltip data keyed to the SELECTED case: the branch
@@ -3882,6 +3912,13 @@ return {
             setBusFile(bus === undefined ? null : bus)
             const con = (res.files || []).find((f) => String(f).indexOf('_DF_contingency.csv') !== -1)
             setConFile(con === undefined ? null : con)
+            // The two OptAdj tables keep their own modes apart in their names (0.7.5), so each is
+            // found by its own full suffix -- neither is a substring of the other, nor of
+            // `_DF_branch.csv`.
+            const opt = (res.files || []).find((f) => String(f).indexOf('_DF_optadj_branch.csv') !== -1)
+            setOptAdjFile(opt === undefined ? null : opt)
+            const optN1 = (res.files || []).find((f) => String(f).indexOf('_DF_optadj_N1_branch.csv') !== -1)
+            setOptAdjN1File(optN1 === undefined ? null : optN1)
           },
           () => {},
         )
@@ -4016,6 +4053,54 @@ return {
         return () => { alive = false }
       }, [conFile, resultDir])
 
+      // The OptAdj loadings, one effect per mode: the same paged read as the contingency table, with
+      // the map keyed by bus pair and carrying the worst post-redispatch loading. An absent file (or
+      // a failed read) simply leaves the map null, which is what keeps the tooltip line optional.
+      React.useEffect(() => {
+        if (optAdjFile === null || resultDir === null) { setOptAdjLoads(null); return undefined }
+        let alive = true
+        const all = []
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + optAdjFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!alive) return
+              if (res === null || res === undefined || res.ok !== true) { setOptAdjLoads(null); return }
+              const rows = res.rows || []
+              for (const line of rows) all.push(line)
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setOptAdjLoads(drawioOptAdjLoads(res.header, all))
+            },
+            () => { if (alive) setOptAdjLoads(null) },
+          )
+        }
+        page(0, 0)
+        return () => { alive = false }
+      }, [optAdjFile, resultDir])
+
+      // The N-1 pair: one row per (monitored branch, outage), so its max is the worst outage.
+      React.useEffect(() => {
+        if (optAdjN1File === null || resultDir === null) { setOptAdjN1Loads(null); return undefined }
+        let alive = true
+        const all = []
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + optAdjN1File, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!alive) return
+              if (res === null || res === undefined || res.ok !== true) { setOptAdjN1Loads(null); return }
+              const rows = res.rows || []
+              for (const line of rows) all.push(line)
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setOptAdjN1Loads(drawioOptAdjLoads(res.header, all))
+            },
+            () => { if (alive) setOptAdjN1Loads(null) },
+          )
+        }
+        page(0, 0)
+        return () => { alive = false }
+      }, [optAdjN1File, resultDir])
+
       // The preview's read: fetch the .drawio, decode it
       // (plain or compressed) and resolve element -> branch once, not on every repaint.
       // `diagramLoadSeq` drops a diagram the user has already switched away from.
@@ -4140,9 +4225,13 @@ return {
         data.hovered = { kind: 'branch', key: key }
         const rows = data.branch === null || data.branch === undefined ? undefined : data.branch.get(key)
         const contingency = conLoads === null || conLoads === undefined ? null : conLoads[key]
+        const optAdj = optAdjLoads === null || optAdjLoads === undefined ? null : optAdjLoads[key]
+        const optAdjN1 = optAdjN1Loads === null || optAdjN1Loads === undefined ? null : optAdjN1Loads[key]
         showTip(rows === undefined || rows.length === 0
           ? drawioFallbackTip(drawioPairLabel(key), data.branch !== null)
-          : rows.map((r) => branchTooltip(r, { contingencyLoading: contingency })).join('\n\n'), event)
+          : rows.map((r) => branchTooltip(r, {
+            contingencyLoading: contingency, optAdjLoading: optAdj, optAdjN1Loading: optAdjN1,
+          })).join('\n\n'), event)
       }
 
       // --- Pan / zoom ---------------------------------------------------------

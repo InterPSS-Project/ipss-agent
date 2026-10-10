@@ -196,11 +196,16 @@ for the old case is dropped, and reloads everything for the new path. A case wit
 | Bus results | `result/<stem>_DF_bus.csv` via paged `readCsv` | Out-of-band `|V|` flags (`VoltMag` by **header name**); area/zone/name for Search/Filter (`busMeta`, loaded on demand) |
 | Branch results | `result/<stem>_DF_branch.csv` via paged `readCsv` | Branch tooltips; base-case `Loading%` flow flags; canonical `BusN` spellings for id matching |
 | Contingency results | `result/<stem>_DF_contingency.csv` via paged `readCsv` (when present) | Contingency loading line on branch tooltips; contingency flow flags / filter |
+| OptAdj results (basecase) | `result/<stem>_DF_optadj_branch.csv` via paged `readCsv` (when present, **0.7.7**) | `Basecase OptAdj Loading(%): …` tooltip line — `loadingAfterPct`, worst per bus pair |
+| OptAdj results (N-1) | `result/<stem>_DF_optadj_N1_branch.csv` via paged `readCsv` (when present, **0.7.7**) | `Contingency OptAdj Loading(%): …` tooltip line — `loadingAfterPct`, worst outage per bus pair |
 | Live bus detail | `busConnections` on hover (cached with neighbours) | Full bus tooltip — same wording as the InterPSS connection diagram |
 | Flag config | `config/net_diagram.json` via `getNetDiagramOptions` / gear → `saveNetDiagramOptions` | Bus voltage band/colour, base-case and contingency flow %/colours, birdseye on/off |
 
 Without ACLF CSVs the drawing still opens; tooltips say `no result data — run ACLF`, and no red /
-flow colours appear. Without a CA table, contingency lines and contingency filters stay off.
+flow colours appear. Without a CA table, contingency lines and contingency filters stay off. Without
+an OptAdj table the two OptAdj lines stay off: a table exists only after an OptAdj run, and it lists
+that run's scan candidates (50 % basecase / 90 % N-1 by default), so a branch below the scan
+threshold has no OptAdj line.
 
 ### Load → paint pipeline
 
@@ -214,11 +219,13 @@ selectedCaseInput ──► listDrawioFiles(case)
         │                 ├─ 1 file  → open it
         │                 └─ N files → picker (remembers diagramChoice)
         │
-        ├─► checkResult(case) ──► resultDir, *_DF_bus / *_DF_branch / *_DF_contingency
+        ├─► checkResult(case) ──► resultDir, *_DF_bus / *_DF_branch / *_DF_contingency /
+        │                          *_DF_optadj_branch / *_DF_optadj_N1_branch
         │         │
         │         ├─► readCsv(branch) ──► pair index + Loading% map
         │         ├─► readCsv(bus)    ──► busAlerts (|V| band) + busMeta (on dialog open)
-        │         └─► readCsv(contingency) ──► contingency LoadingPercent map
+        │         ├─► readCsv(contingency) ──► contingency LoadingPercent map
+        │         └─► readCsv(optadj) / readCsv(optadj N-1) ──► loadingAfterPct map per mode
         │
         └─► readDrawio(path) ──► diagramXmlFrom ──► parseDrawioScene
                                       │

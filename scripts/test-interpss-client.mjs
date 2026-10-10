@@ -116,6 +116,7 @@ function build(overrides) {
       + ' DRAWIO_NET_DEFAULTS: DRAWIO_NET_DEFAULTS, DRAWIO_NET_FIELDS: DRAWIO_NET_FIELDS,'
       + ' drawioNetConfig: drawioNetConfig, drawioNetConfigErrors: drawioNetConfigErrors,'
       + ' drawioBranchLoads: drawioBranchLoads, drawioContingencyLoads: drawioContingencyLoads,'
+      + ' drawioOptAdjLoads: drawioOptAdjLoads, drawioPairLoads: drawioPairLoads,'
       + ' drawioBandText: drawioBandText,'
       + ' drawioBirdseyePaths: drawioBirdseyePaths, drawioBirdseyeRect: drawioBirdseyeRect,'
       + ' DrawioBirdseye: DrawioBirdseye,'
@@ -804,9 +805,71 @@ if (scene) {
       const tip = api.branchTooltip(bare);
       return tip.indexOf('Loading') < 0 && tip.indexOf('Power From->To') > 0;
     })());
-  check('the connection diagram passes no contingency, so its tooltip is unchanged',
+  check('the diagram passes all three loadings; the connection diagram still passes none',
     slice.indexOf("showTip(branchTooltip(branches[0]), e)") >= 0
-    && slice.indexOf('branchTooltip(r, { contingencyLoading: contingency })') >= 0);
+    && slice.indexOf('contingencyLoading: contingency, optAdjLoading: optAdj, optAdjN1Loading: optAdjN1,') >= 0);
+  // 0.7.6: the two OptAdj loadings. Each sits under the plain loading of its own mode, each comes
+  // from the two OptAdj result tables the case folder declares, and each is optional on its own --
+  // a case with no OptAdj run (or a branch the scan never tracked) simply has no such line.
+  const optAdjTip = api.branchTooltip(loadedRow, { contingencyLoading: 70, optAdjLoading: 41.25, optAdjN1Loading: 88 });
+  check('the branch tooltip shows both OptAdj loadings, each under its own mode',
+    optAdjTip.indexOf('Basecase Loading(%): 58.9%') > 0
+    && optAdjTip.indexOf('Basecase Loading(%): 58.9%') < optAdjTip.indexOf('Basecase OptAdj Loading(%): 41.3%')
+    && optAdjTip.indexOf('Basecase OptAdj Loading(%): 41.3%') < optAdjTip.indexOf('Contingency Loading(%): 70%')
+    && optAdjTip.indexOf('Contingency Loading(%): 70%') < optAdjTip.indexOf('Contingency OptAdj Loading(%): 88%'),
+    optAdjTip.split('\n').slice(-4).join(' | '));
+  check('an OptAdj line is optional, and the plain tooltip is unchanged without one',
+    api.branchTooltip(loadedRow, { optAdjLoading: 30 }).indexOf('Basecase OptAdj Loading(%): 30%') > 0
+    && api.branchTooltip(loadedRow, { optAdjLoading: 30 }).indexOf('Contingency') < 0
+    && api.branchTooltip(loadedRow).indexOf('OptAdj') < 0
+    && api.branchTooltip(xfRow2, { optAdjN1Loading: 'n/a' }).indexOf('OptAdj') < 0);
+  // The OptAdj table's own columns: `loadingAfterPct` is the number (never `loadingBeforePct`, which
+  // is the scan's pre-redispatch loading), the pair is the `branchId` head, and the worst row wins --
+  // the N-1 table holds one row per outage.
+  const OPT_HEADER = 'branchId,outageBranchId,limitMW,baseFlowMW,loadingBeforePct,shiftedFlowMWAfter,loadingAfterPct';
+  const OPT_ROWS = [
+    'Bus1->Bus2(1),Bus3->Bus4(1),600,1,99.0,0.0,41.5',
+    'Bus1->Bus2(1),Bus5->Bus6(1),600,1,98.0,0.0,88.25',
+    'Bus7->Bus8(1),,800,1,55.0,0.0,12.0',
+    'not-a-branch,,600,1,90.0,0.0,99.0',
+  ];
+  const optFlags = api.drawioOptAdjLoads(OPT_HEADER, OPT_ROWS);
+  check('OptAdj loadings come from loadingAfterPct, keyed by the branchId pair, worst row first',
+    optFlags['bus1|bus2'] === 88.25 && optFlags['bus7|bus8'] === 12
+    && Object.keys(optFlags).length === 2 && optFlags['bus3|bus4'] === undefined,
+    JSON.stringify(optFlags));
+  // Both Hosts must list both tables in `checkResult`, exactly like the CA table: that list is the
+  // only way the tab discovers them, so a missing entry means the lines can never appear.
+  check('both hosts list both OptAdj branch results in checkResult',
+    ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) => {
+      const s = readFileSync(join(ROOT, p), 'utf8');
+      return s.indexOf("stem + '_DF_optadj_branch.csv'") >= 0
+        && s.indexOf("stem + '_DF_optadj_N1_branch.csv'") >= 0;
+    }),
+    'checkResult files');
+  // Listing a file in `checkResult` is only half the discovery: `readCsv` gates every result path
+  // with its own family allow-list, and a family the client looks up but that pattern does not name
+  // comes back `Invalid result path` -- which the client treats as "no data", so the table is simply
+  // never there. 0.7.6 shipped these tooltip lines against a list that lacked both OptAdj families,
+  // and nothing failed loudly. The shipped pattern is extracted from each half and RUN here, so a
+  // new family cannot be added on one side only.
+  const HOST_HALVES = ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js',
+    'interpss-dynamic/index.js'];
+  const readCsvPattern = (path) => {
+    const m = /!?(\/\^[^\n]*?\$\/)\.test\(path\)/.exec(rd(join(ROOT, path)));
+    if (m === null) return null;
+    try { return new Function('return ' + m[1])(); } catch (e) { return null; }
+  };
+  const RESULT_TABLES = ['bus', 'branch', 'gen', 'load', 'contingency', 'optadj_branch', 'optadj_N1_branch'];
+  check('every result family the tab reads passes the Host\'s readCsv allow-list',
+    HOST_HALVES.every((p) => {
+      const rx = readCsvPattern(p);
+      return rx !== null
+        && RESULT_TABLES.every((f) => rx.test('data/ieee/ieee39/result/ieee39_DF_' + f + '.csv'))
+        && !rx.test('data/ieee/ieee39/result/ieee39_DF_secret.csv')
+        && !rx.test('data/ieee/ieee39/result/../../etc/passwd_DF_branch.csv');
+    }),
+    HOST_HALVES.map((p) => (readCsvPattern(p) === null ? 'no pattern' : String(readCsvPattern(p)))).join(' || '));
 }
 
 // --- 12. the Diagram tab (a second conversation view, order 2) --------------
