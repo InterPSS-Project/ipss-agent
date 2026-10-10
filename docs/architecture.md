@@ -114,6 +114,7 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 | `AclfRunner` | `runner` | Newton–Raphson AC load flow → CSV + network info |
 | `GvyScriptRunner` | `runner` | Evaluate a Groovy `.gvy` script against a live `AclfNetwork` (`aclfnet` binding) → mutation digest |
 | `ContingencyRunner` | `runner` | DC N-1 contingency → contingency CSV |
+| `CaRunConfig`, `OptAdjRunConfig` | `runner/config` | Per-case run configuration records: CA (`config/ca_run.json`, 20 keys) and the OptAdj thresholds (record only — no runner/bridge wiring yet) |
 | `ReportRunner` | `report` | Orchestrate Markdown report generation |
 | `IpssAgentBridge` | `bridge` | In-process JSON facade for DSH `java-bridge` |
 | `SimuModelRepository` | `model` | Cache one base-case `AclfNetwork` in memory |
@@ -123,6 +124,7 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 ```
 IpssCmd / IpssAgentBridge
     → runner (AclfRunner, ContingencyRunner)
+    → runner/config (CaRunConfig, OptAdjRunConfig)
     → report (ReportRunner, *Generator, *Analyzer)
     → input (NetworkLoader, *Adapter)
     → util (ProjectPaths, IpssNetworkInfo)
@@ -193,9 +195,11 @@ rather than silently defaulted. The tab's CA dialog edits them (its **Advanced s
 settings** panel), `interpss_run_ca` takes them as `caConfig`, and the in-process bridge
 passes the whole payload to `runContingencyWithConfig(...)`.
 
-**Overload detection is a rating comparison** (`BranchRatingProvider`): the library's default
-provider is rating MVA 2 (`RATING_B`), and `ratingProvider` can pin `RATING_A`/`RATING_B`
-instead. A case whose branch tables carry no ratings reports no overloads at any threshold.
+**Overload detection is a rating comparison** (`BranchRatingProvider`): `RATING_A` is the
+branch's rating MVA 1 (`getRatingMvaA()`), and `RATING_B` — the library's own default, which
+`ratingProvider: 'default'` leaves in place — is rating MVA 2 (`getRatingMvaB()`), falling back
+per branch type to rating MVA 1 × 1.15 for a line and × 1.35 for a transformer when MVA 2 is
+zero. A case whose branch tables carry no ratings reports no overloads at any threshold.
 
 Both JSON companion files are optional: omitting them means N-1 outages for every
 branch and every branch monitored.

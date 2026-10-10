@@ -18,7 +18,7 @@
 //
 // Node has no DOMParser, so this file supplies a minimal one covering exactly what the
 // renderer uses. It has no dependencies and does not need a browser.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -2460,8 +2460,30 @@ console.log('\n21. the CA solver knobs (ContingencyRunner\'s DclfContingencyConf
 // has to name the same keys with the same defaults in three places: the Java `CaRunConfig`, the
 // Host's DEFAULT_CA_CONFIG and the client's field table. A key renamed on one side and not the
 // others is a knob the dialog writes and the solver never sees.
-const CA_JAVA = join(ROOT, 'src', 'main', 'java', 'org', 'interpss', 'agent', 'util', 'CaRunConfig.java');
-const caJava = rd(CA_JAVA);
+// 0.7.3: the record moved from `org.interpss.agent.util` to `org.interpss.agent.runner.config`, so
+// it is found by name rather than by a hard-coded path — a package move is then reported by the
+// first check below, instead of crashing this file with ENOENT before it can say why.
+const JAVA_SRC = join(ROOT, 'src', 'main', 'java');
+const findJava = (name) => {
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === name) found.push(full);
+    }
+  };
+  walk(JAVA_SRC);
+  return found;
+};
+const CA_JAVA_FOUND = findJava('CaRunConfig.java');
+const caJavaPath = CA_JAVA_FOUND.length === 1 ? CA_JAVA_FOUND[0] : null;
+const caJava = caJavaPath === null ? '' : rd(caJavaPath);
+check('the Java run config is the runner-config record the plugin mirrors',
+  caJavaPath === join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'config', 'CaRunConfig.java')
+  && caJava.indexOf('package org.interpss.agent.runner.config;') >= 0,
+  CA_JAVA_FOUND.length + ' CaRunConfig.java under src/main/java: '
+  + (caJavaPath === null ? 'none or ambiguous' : caJavaPath.slice(ROOT.length + 1)));
 const hostCaDefaults = (path) => {
   const src = rd(path);
   const start = src.indexOf('const DEFAULT_CA_CONFIG = {');

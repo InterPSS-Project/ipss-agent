@@ -462,7 +462,8 @@ return {
       turnOffIslandBus: true,
       autoTurnLine2Xfr: true,
       // Which branch rating the overload check compares against: the library's own provider
-      // (rating MVA 2 — measured as `RATING_B` on ipss.core.lib 1.4.0), or either rating pinned.
+      // (`RATING_B` on ipss.core.lib 1.4.0 — rating MVA 2, or rating MVA 1 × 1.15 for a line /
+      // × 1.35 for a transformer when MVA 2 is zero), or either rating pinned.
       ratingProvider: 'default',
       // 0 = one worker per available processor, the runner's historical choice.
       threads: 0,

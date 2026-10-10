@@ -685,7 +685,8 @@ const DEFAULT_CA_CONFIG = {
   turnOffIslandBus: true,
   autoTurnLine2Xfr: true,
   // Which branch rating the overload check compares against: the library's own provider
-  // (rating MVA 2 — measured as `RATING_B` on ipss.core.lib 1.4.0), or either rating pinned.
+  // (`RATING_B` on ipss.core.lib 1.4.0 — rating MVA 2, or rating MVA 1 × 1.15 for a line /
+  // × 1.35 for a transformer when MVA 2 is zero), or either rating pinned.
   ratingProvider: 'default',
   // 0 = one worker per available processor, the runner's historical choice.
   threads: 0,
@@ -3455,8 +3456,9 @@ function runCaTool(ctx) {
             'n1IslandingReplayEnabled (bool, false), multiOutageReplayMode ("EXACT_TOPOLOGY" | ' +
             '"HIGH_IMPEDANCE"), highImpedanceReactancePu (number > 0, 10000), turnOffIslandBus (bool, ' +
             'true), autoTurnLine2Xfr (bool, true), ratingProvider ("default" | "RATING_A" | "RATING_B" — ' +
-            'which branch rating the overload check uses; "default" is the library\'s own, measured as ' +
-            'rating MVA 2), threads (int >= 0, 0 = one per available processor).',
+            'which branch rating the overload check uses; "default" is the library\'s own ("RATING_B": ' +
+            'rating MVA 2, or rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when MVA 2 is ' +
+            'zero; "RATING_A" pins rating MVA 1)), threads (int >= 0, 0 = one per available processor).',
         },
       },
     },

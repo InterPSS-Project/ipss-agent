@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.2**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+GUI (**0.7.3**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.2**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.3**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -44,8 +44,10 @@ parameters and results, no build-time Typert compiler required.
   It saves them as
   `config/ca_run.json` beside that case's `config/aclf_run.json`, and runs CA — the same file the
   CLI reads (OK = save + run, Cancel = write nothing). The overload check compares
-  post-contingency flow against a branch rating, so a case whose branch tables carry no ratings
-  reports no overloads at any threshold.
+  post-contingency flow against a branch rating — `RATING_A` is rating MVA 1, and the default
+  `RATING_B` is rating MVA 2 (rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when
+  MVA 2 is zero) — so a case whose branch tables carry no ratings reports no overloads at any
+  threshold.
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
 - **Diagram tab** (0.6.8; the only preview surface since 0.6.9) — a second conversation view

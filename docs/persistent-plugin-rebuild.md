@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.7.2.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.3.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.2.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.3.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 338 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 339 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -602,7 +602,11 @@ its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
   produces a payload of numbers and booleans, and a cutoff out of range, a negative thread count, a
   fractional count, an unknown enum value or a zero reactance is a message rather than a silent
   default. A key renamed on one side and not the others is a knob the dialog writes and the solver
-  never sees, which no other check would catch.
+  never sees, which no other check would catch. Its first check (since 0.7.3) **finds the Java
+  record by name** under `src/main/java` and pins the result to
+  `org/interpss/agent/runner/config/CaRunConfig.java` plus that file's `package` line: the old
+  hard-coded `org/interpss/agent/util/CaRunConfig.java` path made the 0.7.3 backend's package move
+  throw `ENOENT` and abort the whole guard, and a move should now fail one named check instead.
 - §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
   draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
   was never going to survive a round trip through the editor.

@@ -83,7 +83,7 @@ call that omits `caConfig` behaves exactly as it always did.
 | `highImpedanceReactancePu` | `10000` | number `> 0` |
 | `turnOffIslandBus` | `true` | bool |
 | `autoTurnLine2Xfr` | `true` | bool |
-| `ratingProvider` | `default` | `default` \| `RATING_A` \| `RATING_B` — which branch rating the overload check uses |
+| `ratingProvider` | `default` | `default` \| `RATING_A` \| `RATING_B` — which branch rating the overload check uses (`RATING_A` = rating MVA 1; `RATING_B` = rating MVA 2, falling back to rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when MVA 2 is zero) |
 | `threads` | `0` | integer `>= 0`; `0` = one per available processor |
 
 ```
@@ -93,8 +93,10 @@ interpss_run_ca({ caConfig: { ratingProvider: 'RATING_A', threads: 4 } })
 **Overload detection compares each post-contingency flow against a branch rating.** A case whose
 branch table carries no ratings (`LimMvaA`/`LimMvaB`/`LimMvaC` all zero) reports **0 overloads at any
 threshold and any `ratingProvider`** — that is the case's data, not the run. The IEEE 39 fixture is
-one: apply its `scripts/ieee39_limit_setup.gvy` first (it rates 46 branches at 600 MVA), after which
-the same N-1 run reports overloads.
+one: apply its `scripts/ieee39_limit_setup.gvy` first (it rates 34 lines at 600 MVA and 12
+transformers at 800 MVA), after which the same N-1 run reports overloads — 20 at 90 % under the
+default provider (which checks 690 MW against a 600 MVA line and 1080 MW against an 800 MVA
+transformer), 25 with `ratingProvider: 'RATING_A'` (600 / 800 MW) and 7 at `overloadThreshold: 100`.
 
 | Argument form | Example |
 |---|---|

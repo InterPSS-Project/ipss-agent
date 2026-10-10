@@ -289,7 +289,7 @@ panel closed changes nothing.
 | High impedance X (pu) | `10000` | The reactance a `HIGH_IMPEDANCE` replay applies |
 | Turn off island buses | `true` | Drop buses that island after an outage |
 | Auto turn line into transformer | `true` | Treat a line that cannot island as a transformer |
-| Rating provider | `default` | Which branch rating the overload check uses: the engine's own (rating MVA 2 — measured as `RATING_B`), `RATING_A` (rating MVA 1) or `RATING_B` |
+| Rating provider | `default` | Which branch rating the overload check uses: `default` keeps the engine's own (`RATING_B`: rating MVA 2, falling back to rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when MVA 2 is zero), `RATING_A` (rating MVA 1) or `RATING_B` |
 | Threads (0 = all cores) | `0` | Worker count for the parallel scan |
 
 An unusable value blocks **OK** with the field's own message (for example `Solution method must be
@@ -297,9 +297,13 @@ SparseEqnSolve | WoodburyMatrixUpdate`); **OK** writes all twenty keys to `confi
 
 > **Overload detection needs branch ratings.** The check compares each post-contingency flow with a
 > branch rating (`LimMvaA`/`LimMvaB`/`LimMvaC`). A case whose branch table carries none — the
-> `ieee39.ieee` fixture is one, until its `scripts/ieee39_limit_setup.gvy` rates the branches —
-> reports **0 overloads at any threshold**, which is the data, not the run. Rate the branches (a
-> `scripts/*.gvy` run through Chat, or a case file that carries them) before reading the CA result.
+> `ieee39.ieee` fixture is one, until its `scripts/ieee39_limit_setup.gvy` rates the branches
+> (34 lines at 600 MVA, 12 transformers at 800 MVA) — reports **0 overloads at any threshold**,
+> which is the data, not the run. Rate the branches (a `scripts/*.gvy` run through Chat, or a case
+> file that carries them) before reading the CA result. The **Rating provider** row then decides
+> which number the flow is compared with: `RATING_A` is rating MVA 1 (600 / 800 MW here), while the
+> default leaves the engine's `RATING_B` in place — rating MVA 2, and rating MVA 1 × 1.15 (line) /
+> × 1.35 (transformer) when that is zero, i.e. 690 / 1080 MW here, which reports fewer overloads.
 
 
 | Button         | Effect                                                                                                                                         |
