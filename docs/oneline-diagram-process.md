@@ -192,7 +192,7 @@ for the old case is dropped, and reloads everything for the new path. A case wit
 | Layer | Path / RPC | Role in the SVG |
 |-------|------------|-----------------|
 | Drawing | `<case>/diagram/*.drawio` via `listDrawioFiles` → `readDrawio` | Geometry: bus bars, labels, branches, transformer groups. Parsed once (`parseDrawioScene` → `drawioBranchPairs`); painted as inline SVG by `DrawioDiagram` |
-| Result dir | `checkResult` → `resultDir` + file list | Locates the ACLF/CA CSVs that annotate the open scene |
+| Result dir | `checkResult` → `resultDir` + file list | Locates the ACLF / CA / OptAdj CSVs that annotate the open scene |
 | Bus results | `result/<stem>_DF_bus.csv` via paged `readCsv` | Out-of-band `|V|` flags (`VoltMag` by **header name**); area/zone/name for Search/Filter (`busMeta`, loaded on demand) |
 | Branch results | `result/<stem>_DF_branch.csv` via paged `readCsv` | Branch tooltips; base-case `Loading%` flow flags; canonical `BusN` spellings for id matching |
 | Contingency results | `result/<stem>_DF_contingency.csv` via paged `readCsv` (when present) | Contingency loading line on branch tooltips; contingency flow flags / filter |
@@ -271,7 +271,7 @@ are written back to the `.drawio`.
 | `listDrawioFiles` | List `<case>/diagram/*.drawio` (empty list if none — not an error) |
 | `readDrawio` | Fetch one workspace-relative `.drawio` (≤ 4 MiB) |
 | `checkResult` | Discover `resultDir` and which `*_DF_*.csv` files exist |
-| `readCsv` | Page bus / branch / contingency tables (columns by header name) |
+| `readCsv` | Page bus / branch / contingency / OptAdj branch tables (columns by header name; OptAdj families allowed since **0.7.7**) |
 | `busConnections` | Lazy bus tooltip payload on hover |
 | `getNetDiagramOptions` / `saveNetDiagramOptions` | Read/write flag config |
 | `openDrawio` | Launch the desktop editor for the open file (`config/ipss_plugin_env.json`) |

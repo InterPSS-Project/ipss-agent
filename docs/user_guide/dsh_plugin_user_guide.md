@@ -63,8 +63,9 @@ You can then run the power system simulation workflow or chat following the proc
 
 The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
 one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
-folder). Plugin **0.7.1** (Diagram line through 0.6.37; case file types IEEE CDF / PSS/E RAW /
-BPA Dat) is the recommended install.
+folder). Plugin **0.7.7** is the recommended install (Diagram line through 0.6.37; BPA Dat
+0.7.1+; CA solver knobs 0.7.2+; OptAdj chat tool 0.7.4+; OptAdj Diagram tooltip loadings
+0.7.7+).
 
 On the tab you can:
 
@@ -75,9 +76,10 @@ On the tab you can:
 - Open the file in the local **draw.io** desktop app (0.6.12+; path from `config/ipss_plugin_env.json`, 0.6.16+)
 
 There is no Rendered / Source toggle on this tab (removed in 0.6.34) — the drawing is always the
-rendered scene. Hover buses/branches for tooltips (including base-case and contingency loadings
-when result CSVs exist). If the case has no diagram yet, generate one with `$ipss-case-diagram`
-after ACLF.
+rendered scene. Hover buses/branches for tooltips (base-case and contingency loadings when those
+CSVs exist; after an OptAdj run, **Basecase / Contingency OptAdj Loading(%)** from the
+`*_DF_optadj*_branch.csv` tables — 0.7.7+). If the case has no diagram yet, generate one with
+`$ipss-case-diagram` after ACLF.
 
 Full how-to (generate, edit, troubleshoot): [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
 
@@ -399,8 +401,9 @@ chosen by `optAdjType`:
 
 The card reports the mode, both thresholds, the before → after overload counts, how many control
 generators moved, and an **Explore results** row with the *Gen adjustments* (`adjP` per generator, in
-MW) and *Branch loading* (before/after `loadingBeforePct` / `loadingAfterPct`) tables. The method,
-the prerequisites and the measured anchors are in [gen_opt_adjustment.md](../gen_opt_adjustment.md).
+MW) and *Branch loading* (before/after `loadingBeforePct` / `loadingAfterPct`) tables. Basecase
+writes `*_DF_optadj_gen.csv` / `*_DF_optadj_branch.csv`; N-1 writes the `_N1_` pair (0.7.5+). The
+method, prerequisites and anchors are in [gen_opt_adjustment.md](../gen_opt_adjustment.md).
 
 Two things to know before you rely on it:
 
@@ -412,7 +415,10 @@ Two things to know before you rely on it:
   or report sees the redispatched case; ask for the case to be reloaded if you want the file's own
   dispatch back.
 
-For the Diagram tab, generation, and draw.io editing, see [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
+After a run, the **Diagram** tab’s branch hover adds **Basecase OptAdj Loading(%)** /
+**Contingency OptAdj Loading(%)** from those branch tables (post-redispatch `loadingAfterPct`,
+0.7.7+). For Diagram generation and draw.io editing, see
+[oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
 
 ### Case selection
 
@@ -514,7 +520,7 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | “InterPSS is not available in this workspace…” | Workspace `README.md` first H1 must be exactly `iPSS Agent`.                                                             |
 | **ACLF** / **CA** greyed out                   | Click **Load** successfully first.                                                                                       |
-| Case picker empty                              | No matching `.ieee` or `.raw`/`.RAW` under `wspace/data` for the selected format.                                        |
+| Case picker empty                              | No matching `.ieee`, `.raw`/`.RAW`, or `.dat`/`.DAT` (BPA, 0.7.1+) under `wspace/data` for the selected format.          |
 | CA dialog custom pick errors                   | Pick a case-folder `.json` with a `contingencies` or `monitored_branches` array; check the green count / red error line. |
 | Tab picker shows a different case than Chat    | Update the plugin to 0.3.19+ (picker mirrors the bridge), or pass `case` explicitly in Chat.                             |
 | **Report** greyed out                          | No converged result CSVs yet — run ACLF (and CA for NERC).                                                               |
@@ -528,7 +534,10 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 ### Related
 
 - Diagram tab / one-line generation — [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md)
+- OptAdj method and IEEE39 anchors — [gen_opt_adjustment.md](../gen_opt_adjustment.md)
+- Load-Q / OptAdj user workflows — [loadflow-adjustment-user-guide.md](loadflow-adjustment-user-guide.md)
 - InterPSS DSH Chat tools (developer reference) — [interpss-tools.md](../interpss-tools.md)
+- Release **0.7.7** (OptAdj Diagram tooltips) — [Release-V0.7.7.md](../release_note/Release-V0.7.7.md)
 - Batch Chat / `/ipss-sim` — [batch_chat_user_guide.md](batch_chat_user_guide.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)
 - Install or update the plugin — [InstallDSHPlugin.md](../../InstallDSHPlugin.md)

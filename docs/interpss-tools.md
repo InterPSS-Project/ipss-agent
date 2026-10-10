@@ -313,7 +313,9 @@ entries), `overLimitBefore`/`overLimitAfter` (entries at or above the OptAdj thr
 `controlGens`, `gensAdjusted`, the two file names and the runner's `OptAdjSummary` text. The card
 renders that summary plus an **Explore results** row with a *Gen adjustments* and a *Branch loading*
 table, paged through the same `interpss/readCsv` endpoint the tab uses and opened worst
-`loadingAfterPct` first.
+`loadingAfterPct` first. Since **0.7.7** the Diagram tab also pages those OptAdj **branch** tables
+and adds `Basecase OptAdj Loading(%)` / `Contingency OptAdj Loading(%)` under the plain ACLF/CA
+lines on branch hover (`loadingAfterPct`, worst per bus pair).
 
 Behaviour and caveats:
 

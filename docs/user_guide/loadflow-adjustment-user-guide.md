@@ -491,7 +491,7 @@ above 100% when gen limits bind — that is normal for the LP.
 | `overLimitBefore` / `overLimitAfter` | Entries at or above the OptAdj threshold, before and after                                                     |
 | `controlGens` / `gensAdjusted`       | Generators considered / moved by a material `adjP`                                                             |
 | `<stem>_DF_optadj_gen.csv`           | `genName, genP, adjP, limitMax, limitMin` — MW; largest `adjP` first (N-1: `<stem>_DF_optadj_N1_gen.csv`)    |
-| `<stem>_DF_optadj_branch.csv`        | `branchId, outageBranchId, limitMW, …, loadingBeforePct, loadingAfterPct` — `outageBranchId` empty in basecase (N-1: `<stem>_DF_optadj_N1_branch.csv`) |
+| `<stem>_DF_optadj_branch.csv`        | `branchId, outageBranchId, limitMW, …, loadingBeforePct, loadingAfterPct` — `outageBranchId` empty in basecase (N-1: `<stem>_DF_optadj_N1_branch.csv`). The Diagram tab (0.7.7+) quotes `loadingAfterPct` on branch hover |
 
 
 Suggested follow-on: `$ipss-case-aclf` or `$ipss-case-ca` on the redispatched held model (or
@@ -540,6 +540,7 @@ Suggested follow-on: `$ipss-case-aclf` or `$ipss-case-ca` on the redispatched he
 
 - [load-q-adjustment.md](../load-q-adjustment.md) — load-Q method, conventions, IEEE14 walkthroughs
 - [gen_opt_adjustment.md](../gen_opt_adjustment.md) — OptAdj method, samples, SSA/null paths, anchors
+- [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md) — Diagram tab OptAdj loading tooltips (0.7.7+)
 - [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Chat tools, OptAdj overview
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
 - [IpssCmd.md](../../IpssCmd.md) — CLI `optadj` subcommand

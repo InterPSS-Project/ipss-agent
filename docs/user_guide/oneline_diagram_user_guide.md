@@ -29,7 +29,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 
 ## Prerequisites
 
-- DeepSeek Harness with the InterPSS plugin installed — recommend **0.7.0+** (Diagram tab since **0.6.8**; draw.io button **0.6.12+**, configurable launcher **0.6.16+**; search / filter / gear / birdseye / loadings through **0.6.37**, packaged as the **0.7.0** line) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
+- DeepSeek Harness with the InterPSS plugin installed — recommend **0.7.7+** (Diagram tab since **0.6.8**; draw.io button **0.6.12+**, configurable launcher **0.6.16+**; search / filter / gear / birdseye / ACLF–CA loadings through **0.6.37** / **0.7.0**; OptAdj branch-tooltip loadings **0.7.7+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 - An **iPSS Agent** workspace (same activation gate as the InterPSS tab)
 - A selected / loaded simulation case under `wspace/data/**`
 - For **generation**: converged ACLF outputs `<case>/result/<stem>_DF_bus.csv` and `_DF_branch.csv` (run ACLF first if missing)
@@ -70,7 +70,7 @@ Toolbar (plugin **0.6.11+**, zoom picker **0.6.21+**, Fit in the picker **0.6.22
 | **a red bar + red `Bus-N`** (**0.6.18+**) | That bus's solved voltage magnitude is outside the band in `config/net_diagram.json` (default **0.9–1.1 pu**, checked strictly: the endpoints themselves are in band). Hover it for the out-of-band warning. Needs the case's ACLF result tables; a case with no results, or every bus in band, simply shows no red. **The `.drawio` file is not modified** — the colour is chosen when the tab renders the SVG, so the file, the desktop draw.io app and the generator's PNG preview stay exactly as generated |
 | **draw.io** button (upper-right, **0.6.15+**) | Opens the current file in the local draw.io desktop app, using the launcher configured in `config/ipss_plugin_env.json` (**0.6.16+**; `open -a draw.io` on macOS by default). Status text appears to the left of the button (`Launched draw.io…` or the Host error). Restart `dsh web` after a Host change so the button works. |
 
-(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS-tab Diagram modal; **0.6.12** / **0.6.15** / **0.6.16** draw.io button and launcher config; **0.6.18+** voltage / flow flags; **0.6.21–0.6.32** zoom picker, search/filter, gear, birdseye, branch loadings; **0.6.34** removed the `R` / `S` Source view; **0.6.35–0.6.37** bus-id branch search, green highlight, centre-on-OK; **0.7.0** packages that Diagram line — no further UI change.)
+(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS-tab Diagram modal; **0.6.12** / **0.6.15** / **0.6.16** draw.io button and launcher config; **0.6.18+** voltage / flow flags; **0.6.21–0.6.32** zoom picker, search/filter, gear, birdseye, branch loadings; **0.6.34** removed the `R` / `S` Source view; **0.6.35–0.6.37** bus-id branch search, green highlight, centre-on-OK; **0.7.0** packages that Diagram line; **0.7.6** / **0.7.7** add OptAdj post-redispatch loadings on branch tooltips — see [Release-V0.7.7.md](../release_note/Release-V0.7.7.md).)
 
 ### Configure the draw.io launcher (0.6.16+)
 
@@ -216,6 +216,7 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 | Diagram tab says there is no diagram | No `.drawio` under `<case>/diagram/` — run `$ipss-case-diagram` (after ACLF) |
 | Preview shows nothing / wrong case | File must sit in the **selected** case’s `diagram/` folder; only `.drawio` is listed (PNG is ignored) |
 | Tooltips say `no result data — run ACLF` | Run ACLF so bus/branch result CSVs exist for the case |
+| Branch tooltip has base/CA loading but no OptAdj line | Needs `result/<stem>_DF_optadj_branch.csv` and/or `_DF_optadj_N1_branch.csv` from an OptAdj run (**0.7.7+**); the file lists only scan candidates, so a lightly loaded branch has no line. On **0.7.6** alone the lines never appeared — upgrade past the `readCsv` allow-list fix |
 | Search finds nothing, or the filter hides everything | Search understands a bus number, `Bus-N`, part of a name, or a branch between two buses — `A->B`, or `Bus-A -> Bus-B` (**0.6.35+** / **0.7.0**; a dash or slash works too); a filter that matches no bus hides the whole drawing — pick **All areas** and **All zones** in the filter dialog (or click the status text) to bring it back. Both read the selected case's `result/<stem>_DF_bus.csv`, so run ACLF first |
 | Search highlights green but the view does not jump | At **Fit** the whole page is already on screen, so **OK** leaves the view alone (**0.6.37+**). Zoom in first, then search again — or pan with the birdseye if it is enabled |
 | No red buses, or the wrong ones | The colouring needs `<case>/result/<stem>_DF_bus.csv` for the **selected** case and a `VoltMag` column in it — run ACLF, and re-select the case. It reads the table by column **name**, so a hand-edited table with renamed columns colours nothing rather than guessing. Nothing red is normal when every bus is inside 0.9–1.1 pu |
@@ -238,7 +239,9 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 - [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Diagram tab entry point, Chat tools
 - [oneline-diagram-process.md](../oneline-diagram-process.md) — layout pipeline, template contract, draw.io MCP
 - [Release-V0.7.0.md](../release_note/Release-V0.7.0.md) — Diagram search / highlight / centre-on-OK line
+- [Release-V0.7.7.md](../release_note/Release-V0.7.7.md) — OptAdj Diagram tooltips, OptAdj tool, BPA Dat, CA knobs
+- [gen_opt_adjustment.md](../gen_opt_adjustment.md) — OptAdj method; branch CSVs the Diagram tab quotes
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
-- Skills: `$ipss-case-diagram` (generate), `$ipss-case-aclf` (result CSVs), `$ipss-case-load`
+- Skills: `$ipss-case-diagram` (generate), `$ipss-case-aclf` (result CSVs), `$ipss-case-optadj`, `$ipss-case-load`
 - Template: `wspace/template/oneline-diagram.drawio`
 - Generator: `wspace/script/gen_oneline_diagram.py`

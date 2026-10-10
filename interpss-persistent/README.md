@@ -78,7 +78,8 @@ parameters and results, no build-time Typert compiler required.
   (bar and `Bus-N` text, with the violation spelled out in its tooltip; the band and colour come from the gear dialog's
   `config/net_diagram.json` since 0.6.26, which also paints branch flow flags) — at render time only,
   since 0.6.18: the `.drawio` file, the desktop app and the generator's PNG preview stay exactly as
-  authored. It reuses `listDrawioFiles`, `readDrawio`, `readCsv` (the bus table), `checkResult` and
+  authored. It reuses `listDrawioFiles`, `readDrawio`, `readCsv` (bus / branch / contingency / OptAdj
+  branch tables — OptAdj families since 0.7.7), `checkResult` and
   `busConnections`, and the launcher is the one new endpoint (`openDrawio`, over the sandbox-aware
   `subprocess` service — no `node:child_process`, since the dynamic half has no imports). Which
   desktop executable that endpoint runs is configuration, not code (0.6.16): the project's

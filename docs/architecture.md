@@ -289,8 +289,14 @@ Analyzers (`VoltageAnalyzer`, `BranchLoadingAnalyzer`, `GeneratorQAnalyzer`, `Co
 | `<stem>_DF_gen.csv` | ACLF |
 | `<stem>_DF_load.csv` | ACLF |
 | `<stem>_DF_contingency.csv` | CA |
+| `<stem>_DF_optadj_gen.csv` / `<stem>_DF_optadj_branch.csv` | OptAdj basecase (`genAdjBaseCase`) |
+| `<stem>_DF_optadj_N1_gen.csv` / `<stem>_DF_optadj_N1_branch.csv` | OptAdj N-1 (`genAdjCaN_1`, 0.7.5+) |
 | `AC_Loadflow_Report.md` | `report aclf` |
 | `NERC_TPL_001_5_Report.md` | `report nerc` |
+
+The Diagram tab (plugin **0.7.7+**) reads the two OptAdj **branch** tables for post-redispatch
+tooltip loadings (`loadingAfterPct`); Host `readCsv` must allow those families or the lines stay
+empty — see [oneline-diagram-process.md](oneline-diagram-process.md).
 
 Legacy layout `wspace/result/<subdir>/` is still supported by `ReportCaseResolver` for older workflows.
 

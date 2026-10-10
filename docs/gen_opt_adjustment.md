@@ -337,6 +337,11 @@ named without `SsaResult` in the class name (e.g. `IEEE39_OptBasecase_Sparse_Sam
   mode writes its own result pair — `_DF_optadj_gen.csv` / `_DF_optadj_branch.csv` for the basecase,
   `_DF_optadj_N1_gen.csv` / `_DF_optadj_N1_branch.csv` for `genAdjCaN_1` — so the two runs can share
   one `result/` folder.
+- Since **0.7.7** the Diagram tab’s branch tooltip quotes those branch tables: **Basecase OptAdj
+  Loading(%)** from `_DF_optadj_branch.csv` and **Contingency OptAdj Loading(%)** from
+  `_DF_optadj_N1_branch.csv`, each the worst post-redispatch `loadingAfterPct` for that bus pair.
+  Absent files leave the plain ACLF/CA lines unchanged. (0.7.6 added the client wiring; 0.7.7
+  opened Host `readCsv` to the OptAdj families so the lines can actually load.)
 - Related but different: voltage control via load Q is documented in
   [load-q-adjustment.md](load-q-adjustment.md), not here.
 
@@ -351,6 +356,8 @@ named without `SsaResult` in the class name (e.g. `IEEE39_OptBasecase_Sparse_Sam
 - Runner / bridge / CLI: `src/main/java/org/interpss/agent/runner/OptAdjRunner.java`,
   `IpssAgentBridge.runOptAdjWithConfig`, `IpssCmd optadj`
 - Tool: `interpss_case_optadj` — [interpss-tools.md](interpss-tools.md) and the `$ipss-case-optadj` skill
+- Diagram tooltips: [oneline_diagram_user_guide.md](user_guide/oneline_diagram_user_guide.md),
+  [oneline-diagram-process.md](oneline-diagram-process.md)
 - Case limits script: `wspace/data/ieee/ieee39/scripts/ieee39_limit_setup.gvy`
 - Core implementation: `ipss-core` → `com.interpss.optadj.*`,
   `com.interpss.optadj.algo.lf.BaseAclfNetLoadFlowOptimizer`
