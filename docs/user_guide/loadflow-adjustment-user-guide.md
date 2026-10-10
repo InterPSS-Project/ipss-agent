@@ -1,13 +1,15 @@
 # Loadflow Adjustment User Guide
 
-Loadflow adjustment, such as raise (or lower) bus voltages by changing reactive load (**load Q**), using a `dV/dQ`
-sensitivity to size the step and AC load flow to confirm it.
+Two practical adjustment workflows for InterPSS DSH Chat:
 
-This guide is the practical how-to for InterPSS DSH Chat. For the engineering detail
-behind the method (B″ vs AC sensitivity, Jacobian convention, Newton loop), see
-[load-q-adjustment.md](../load-q-adjustment.md). The whole sequence below is packaged as the
-`$ipss-case-aclf-adjust` skill, so "adjust load Q to bring Bus N into [0.90, 0.91] pu" can be
-handed to the agent as one request.
+1. **Load-Q (voltage)** — raise or lower bus voltages by changing reactive load, using a
+  `dV/dQ` sensitivity approach to size the step and AC load flow to confirm it  (`$ipss-case-aclf-adjust`).
+2. **Gen OptAdj (thermal)** — relieve basecase or N-1 branch overloads by redispatching
+  generator active power via a DC-sensitivity scan and Linear Programming  (`$ipss-case-optadj` / `interpss_case_optadj`).
+
+Engineering detail: [load-q-adjustment.md](../load-q-adjustment.md) (voltage) and
+[gen_opt_adjustment.md](../gen_opt_adjustment.md) (generator redispatch). Plugin overview:
+[dsh_plugin_user_guide.md](dsh_plugin_user_guide.md).
 
 ---
 
@@ -16,17 +18,24 @@ handed to the agent as one request.
 ## When to use this
 
 
-| Situation                                                                  | Approach                                           |
-| -------------------------------------------------------------------------- | -------------------------------------------------- |
-| One bus is outside a voltage band; other targets are weakly coupled        | Adjust **one** load Q (scalar `dV/dQ`)             |
-| Two or more buses must land in the same band and move each other’s voltage | Adjust the loads **together** (N×N `dV/dQ` matrix) |
+| Situation                                                                  | Approach                                                             |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| One bus is outside a voltage band; other targets are weakly coupled        | Adjust **one** load Q (scalar `dV/dQ`)                               |
+| Two or more buses must land in the same band and move each other’s voltage | Adjust the loads **together usibg a** N×N `dV/dQ` sensitivity matrix |
+| Pre-contingency branch loading is above rating                             | LP-based Gen optimization adjustmemt **basecase** (`genAdjBaseCase`) |
+| Post-contingency (N-1 branch outage) loading is above rating               | LP-based Gen optimization adjustmemt **CA N-1** (`genAdjCaN_1`)      |
 
 
-Typical goal: bring a depressed bus into a band such as **[0.90, 0.91]** pu by reducing
-load Q (active power left unchanged). The shipped IEEE14 fixtures use that band; older
-`*0p89to0p90*` scripts were replaced by the `*0p90to0p91*` siblings.
+Typical voltage goal: bring a depressed bus into a band such as **[0.90, 0.91]** pu by reducing bus load Q (active power left unchanged). The shipped IEEE14 fixtures use that band.
+
+Typical thermal goal: redispatch gen P on IEEE 39 (or your own rated case) so monitored branch
+loadings stay under **100%** of rating.
 
 ---
+
+
+
+# Part 1 — Bus Load-Q adjustment (voltage)
 
 
 
@@ -110,11 +119,11 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 ### Scripts
 
 
-| Script                              | What it does                                                             |
-| ----------------------------------- | ------------------------------------------------------------------------ |
-| `ieee14_dvdq_Bus14.gvy`             | Read-only. Prints `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
-| `ieee14_dvdq_Bus14_0p90to0p91.gvy`  | Read-only. Same sensitivity sized for the **[0.90, 0.91]** window        |
-| `ieee14_adjBus14Q_0p90to0p91.gvy`   | Sets Bus14 load to 14.9 MW + j44.1 MVAr                                  |
+| Script                             | What it does                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------ |
+| `ieee14_dvdq_Bus14.gvy`            | Read-only. Prints `dV(Bus14)/dQ(Bus14)` and the B″-implied load-Q window |
+| `ieee14_dvdq_Bus14_0p90to0p91.gvy` | Read-only. Same sensitivity sized for the **[0.90, 0.91]** window        |
+| `ieee14_adjBus14Q_0p90to0p91.gvy`  | Sets Bus14 load to 14.9 MW + j44.1 MVAr                                  |
 
 
 
@@ -187,11 +196,11 @@ self terms, so each Q move strongly affects the other voltage.
 ### Scripts
 
 
-| Script                                | What it does                                                                          |
-| ------------------------------------- | ------------------------------------------------------------------------------------- |
-| `ieee14_qv_adjust.gvy`                | Older adjuster for the previous band; kept for reference                              |
-| `ieee14_qv_adjust_0p90to0p91.gvy`     | Starts from a solvable anchor and walks both Q values into **[0.90, 0.91]** (Newton)  |
-| `ieee14_adjBus1314Q_0p90to0p91.gvy`   | Sets Bus13 to 13.5 MW + j47.33 MVAr and Bus14 to 14.9 MW + j17.51 MVAr (one shot)     |
+| Script                              | What it does                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------------ |
+| `ieee14_qv_adjust.gvy`              | Older adjuster for the previous band; kept for reference                             |
+| `ieee14_qv_adjust_0p90to0p91.gvy`   | Starts from a solvable anchor and walks both Q values into **[0.90, 0.91]** (Newton) |
+| `ieee14_adjBus1314Q_0p90to0p91.gvy` | Sets Bus13 to 13.5 MW + j47.33 MVAr and Bus14 to 14.9 MW + j17.51 MVAr (one shot)    |
 
 
 As in Example A, the adjuster **derives** the two Q values and the setter **applies** them; once the
@@ -248,7 +257,7 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 
 
 
-## Checklist for your own case
+## Checklist for load-Q on your own case
 
 1. Identify buses outside the voltage band and whether they are strongly coupled.
 2. Decide **single-bus** vs **multi-bus** adjustment (table at the top).
@@ -266,6 +275,244 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 
 
 
+# Part 2 — Gen Optimize Adjustment (OptAdj)
+
+Relieve **branch thermal overloads** by redispatching generator active power (P). An SSA
+(DC-sensitivity) scan collects branches — or post-contingency pairs — above a *scan* threshold; a Linear Programing approach moves control generators so monitored loadings stay under an *OptAdj* (enforce) threshold; the same monitored set is re-checked.
+
+Packaged as `$ipss-case-optadj` / `interpss_case_optadj`. Method, Java samples, and
+regression anchors: [gen_opt_adjustment.md](../gen_opt_adjustment.md).
+
+
+|                               | **Basecase OptAdj**                          | **N-1 contingency OptAdj**                            |
+| ----------------------------- | -------------------------------------------- | ----------------------------------------------------- |
+| When                          | Pre-contingency loading above rating         | Post-contingency (branch outage) loading above rating |
+| `optAdjType`                  | `genAdjBaseCase` (default)                   | `genAdjCaN_1`                                         |
+| Typical scan / opt thresholds | 50% scan → 100% opt                          | 90% scan → 100% opt                                   |
+| Contingency input             | None (rejects a contingency file)            | All N-1, or a listed `contingencyFile`                |
+| IEEE39 sample                 | `IEEE39_OptBasecase_SsaResult_Sparse_Sample` | `IEEE39_OptN1Scan_SsaResult_Sparse_Sample`            |
+
+
+---
+
+
+
+## Prerequisites (OptAdj)
+
+The tool **refuses** a case that is missing either of these — it does not guess limits or ratings:
+
+
+| Requirement                                  | Why                                                 | How to satisfy                                                                      |
+| -------------------------------------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| A **P gen limit** on every active generator  | Optimizer constraint builder needs `getPGenLimit()` | Run a `scripts/*.gvy` that sets `gen.pGenLimit` (IEEE 39: `ieee39_limit_setup.gvy`) |
+| **Rating MVA 1** (`LimMvaA`) on every branch | Scan uses `abs(flow / ratingMvaA) * 100`            | Same script sets `ratingMva1` (lines 600 MVA, transformers 800 MVA on IEEE 39)      |
+
+
+Also:
+
+- InterPSS DSH Plugin with Chat tools — see [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md)
+- A loaded case under `wspace/data/**` (IEEE CDF, PSS/E RAW or BPA Dat)
+- Prefer **Creater** mode so the agent can call `interpss_case_load`, `interpss_run_gvy`, and
+`interpss_case_optadj`
+
+CLI alternative (no Chat): `IpssCmd optadj` — see [IpssCmd.md](../../IpssCmd.md).
+
+---
+
+
+
+## Core ideas (short)
+
+1. **Scan threshold vs OptAdj threshold.** The scan uses a *lower* percent (50% basecase / 90%
+  N-1) so near-limit branches enter the sparse sensitivity set. The LP enforces a *higher*
+   limit (typically **100%** of rating).
+2. **Sparse SSA path.** The runner wraps the scan in `OptAdjResultContainer` and uses the sparse
+  optimizer — control gens and monitored branches come from the over-limit set, not the full
+   network.
+3. **Mutates the held model.** Generator P on the bridge-held network is overwritten. Later ACLF,
+  CA, or a second OptAdj continues from the redispatched state. Use `reload: true` (or reload the
+   case) to restore the file’s dispatch.
+4. **DCLF, not AC OPF.** Confirm stressed solutions with ACLF when it matters.
+5. **Config.** Thresholds and mode live in `OptAdjRunConfig` / optional
+  `config/opt_adj_run.json` beside `ca_run.json`. Tool scalars override the file.
+
+---
+
+
+
+## Workflow overview
+
+```text
+1. Load case
+2. Apply gen P limits + branch ratingMva1  (if the case file does not already have them)
+3. interpss_case_optadj  (basecase or genAdjCaN_1)
+4. Read gen / branch OptAdj CSVs  (or the card’s Explore results tables)
+5. Optional: ACLF or CA to confirm the redispatched operating point
+```
+
+Natural-language prompts the agent can map to tools:
+
+
+| You say                                          | Typical tools / skills                             |
+| ------------------------------------------------ | -------------------------------------------------- |
+| Load the IEEE39 case                             | `$ipss-case-load` / `interpss_case_load`           |
+| Apply IEEE39 gen limits and branch ratings       | `$ipss-case-script` / `interpss_run_gvy`           |
+| Relieve basecase overloads by redispatching gens | `$ipss-case-optadj` / `interpss_case_optadj`       |
+| Relieve N-1 overloads by redispatching gens      | `$ipss-case-optadj` with `optAdjType: genAdjCaN_1` |
+| Confirm with AC load flow                        | `$ipss-case-aclf` / `interpss_run_aclf`            |
+
+
+---
+
+
+
+## Case setup (IEEE39)
+
+Shared fixture for both OptAdj modes. Java: `IEEE39_Sample_Data.createTestCaseNetwork()`.
+Groovy: `wspace/data/ieee/ieee39/scripts/ieee39_limit_setup.gvy`.
+
+
+| Setting                  | Value                                 |
+| ------------------------ | ------------------------------------- |
+| Case file                | `wspace/data/ieee/ieee39/ieee39.ieee` |
+| Zero-P contribute gens   | Cleared                               |
+| `Bus39-G1` P limit       | `[0, 10.0]` pu                        |
+| `Bus38-G1` P limit       | `[0, 8.3]` pu                         |
+| Other gens P limit       | `[0, 7.0]` pu                         |
+| Line `ratingMva1`        | 600 MVA                               |
+| Transformer `ratingMva1` | 800 MVA                               |
+
+
+Without these, the IEEE-39 demos do not show meaningful overloads (and the Chat tool refuses).
+
+---
+
+
+
+## Example C — Basecase OptAdj: IEEE39
+
+**Goal:** Reduce pre-contingency branch loadings that exceed rating by redistributing gen P.
+
+
+|               |                                                                         |
+| ------------- | ----------------------------------------------------------------------- |
+| Case          | `wspace/data/ieee/ieee39/ieee39.ieee`                                   |
+| Config        | `optAdjType: genAdjBaseCase`, scan **50%**, enforce **100%**            |
+| Limits script | `ieee39_limit_setup.gvy`                                                |
+| Result files  | `result/ieee39_DF_optadj_gen.csv`, `result/ieee39_DF_optadj_branch.csv` |
+
+
+
+
+### Steps in Chat
+
+```text
+Load wspace/data/ieee/ieee39/ieee39.ieee
+Reload and run ieee39_limit_setup.gvy
+Relieve basecase overloads by redispatching generation
+Show the gen adjustments and before/after branch loadings
+```
+
+Equivalent tool sequence:
+
+```text
+interpss_case_load({ case: 'wspace/data/ieee/ieee39/ieee39.ieee' })
+interpss_run_gvy({ script: 'ieee39_limit_setup.gvy', reload: true })
+interpss_case_optadj({ optAdjType: 'genAdjBaseCase' })
+```
+
+Defaults when thresholds are omitted: scan **50%**, OptAdj **100%**.
+
+### What to expect
+
+- Card summary: mode, both thresholds, `scanned`, `overLimitBefore` → `overLimitAfter`,
+`controlGens` / `gensAdjusted`.
+- **Explore results:** Gen adjustments (`adjP` in MW) and Branch loading
+(`loadingBeforePct` / `loadingAfterPct`).
+- On the IEEE 39 fixture with the limit script applied, expect several generators with material
+`adjP` and peak monitored loading reduced toward (or under) 100%. Exact counts depend on the
+library build; see [gen_opt_adjustment.md](../gen_opt_adjustment.md) for regression anchors.
+
+---
+
+
+
+## Example D — N-1 OptAdj: IEEE39
+
+**Goal:** Reduce post-contingency loadings for single branch outages by redistributing gen P.
+
+
+|               |                                                               |
+| ------------- | ------------------------------------------------------------- |
+| Case          | `wspace/data/ieee/ieee39/ieee39.ieee`                         |
+| Config        | `optAdjType: genAdjCaN_1`, scan **90%**, enforce **100%**     |
+| Contingencies | All N-1 (branches not on the reference bus), or a listed JSON |
+
+
+
+
+### Steps in Chat
+
+```text
+Load wspace/data/ieee/ieee39/ieee39.ieee
+Reload and run ieee39_limit_setup.gvy
+Relieve N-1 overloads by redispatching generation
+```
+
+Equivalent tool sequence:
+
+```text
+interpss_case_load({ case: 'wspace/data/ieee/ieee39/ieee39.ieee' })
+interpss_run_gvy({ script: 'ieee39_limit_setup.gvy', reload: true })
+interpss_case_optadj({ optAdjType: 'genAdjCaN_1' })
+# or a listed contingency set:
+# interpss_case_optadj({ optAdjType: 'genAdjCaN_1', contingencyFile: 'sub_115kV.json' })
+```
+
+Defaults when thresholds are omitted: scan **90%**, OptAdj **100%**.
+`contingencyFile` is rejected in basecase mode.
+
+### What to expect
+
+- `contingencies` ≈ 45 on IEEE 39 (non-ref branches); `outageBranchId` filled in the branch CSV.
+- Peak contingency loading on the SSA-tracked pairs drops after redispatch; some pairs may remain
+above 100% when gen limits bind — that is normal for the LP.
+- Prefer the card’s tables over pasting CSV rows into Chat.
+
+---
+
+
+
+## Reading OptAdj results
+
+
+| Field / file                         | Meaning                                                                                                        |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `overLimitBefore` / `overLimitAfter` | Entries at or above the OptAdj threshold, before and after                                                     |
+| `controlGens` / `gensAdjusted`       | Generators considered / moved by a material `adjP`                                                             |
+| `<stem>_DF_optadj_gen.csv`           | `genName, genP, adjP, limitMax, limitMin` — MW; largest `adjP` first                                           |
+| `<stem>_DF_optadj_branch.csv`        | `branchId, outageBranchId, limitMW, …, loadingBeforePct, loadingAfterPct` — `outageBranchId` empty in basecase |
+
+
+Suggested follow-on: `$ipss-case-aclf` or `$ipss-case-ca` on the redispatched held model (or
+`reload: true` first if you need the file’s original dispatch).
+
+---
+
+
+
+## Checklist for OptAdj on your own case
+
+1. Confirm every active generator has a **P gen limit** and every branch has **ratingMva1**.
+2. Decide **basecase** vs **N-1** (`genAdjBaseCase` / `genAdjCaN_1`).
+3. Optionally persist defaults in `config/opt_adj_run.json`; override per call with tool args.
+4. Run OptAdj → read gen / branch CSVs (or the card) → optional ACLF/CA confirm.
+5. Remember the held model is mutated; reload before comparing to the stored case file.
+
+---
+
+
+
 ## Common pitfalls
 
 
@@ -278,6 +525,11 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 | Aggregate `bus.loadQ` change has no effect       | Contribute gen/load model                                             | Edit `getContributeLoad(loadId).loadCP`                                          |
 | Next load restores old Q                         | Edit never written to disk                                            | Update the case file or re-run the adjuster script                               |
 | Result CSVs look “old” after another ACLF        | Each ACLF overwrites `result/`                                        | Re-read CSVs / regenerate reports after the final solve                          |
+| OptAdj refuses: generators have no P gen limit   | Missing `pGenLimit`                                                   | Run the case’s limit-setup script (IEEE39: `ieee39_limit_setup.gvy`)             |
+| OptAdj refuses: branches have no rating MVA 1    | Missing `ratingMva1` / `LimMvaA`                                      | Same — rate branches before the scan                                             |
+| `a basecase OptAdj run has no contingencies`     | `contingencyFile` passed with `genAdjBaseCase`                        | Drop the file, or switch to `genAdjCaN_1`                                        |
+| ACLF/CA still show pre-OptAdj dispatch           | Expected the file, but held model was not mutated / or was reloaded   | OptAdj mutates the held net; do not reload if you want the redispatched state    |
+| Some N-1 pairs still above 100% after OptAdj     | Gen P limits / LP feasibility                                         | Normal when limits bind; check `adjP` and tighten ratings or widen gen limits    |
 
 
 ---
@@ -286,10 +538,15 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 
 ## Related
 
-- [load-q-adjustment.md](../load-q-adjustment.md) — method, conventions, and full IEEE14 walkthroughs
-- [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Chat tools, what-if scripts
+- [load-q-adjustment.md](../load-q-adjustment.md) — load-Q method, conventions, IEEE14 walkthroughs
+- [gen_opt_adjustment.md](../gen_opt_adjustment.md) — OptAdj method, samples, SSA/null paths, anchors
+- [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Chat tools, OptAdj overview
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
-- Skills: `$ipss-case-aclf-adjust` (this workflow, packaged), `$ipss-case-load`, `$ipss-case-aclf`, `$ipss-case-script`, `$ipss-case-summary`
-- Example A scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ/scripts/`
-- Example B scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/`
+- [IpssCmd.md](../../IpssCmd.md) — CLI `optadj` subcommand
+- Skills: `$ipss-case-aclf-adjust` (load-Q), `$ipss-case-optadj` (gen redispatch), `$ipss-case-load`,
+`$ipss-case-aclf`, `$ipss-case-ca`, `$ipss-case-script`, `$ipss-case-summary`
+- Load-Q Example A scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ/scripts/`
+- Load-Q Example B scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/`
+- OptAdj IEEE39 limits: `wspace/data/ieee/ieee39/scripts/ieee39_limit_setup.gvy`
+- OptAdj samples: `src/main/java/org/interpss/sample/optadj/`
 
