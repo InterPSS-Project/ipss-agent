@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.3**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+GUI (**0.7.4**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.3**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.4**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -48,6 +48,12 @@ parameters and results, no build-time Typert compiler required.
   `RATING_B` is rating MVA 2 (rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when
   MVA 2 is zero) — so a case whose branch tables carry no ratings reports no overloads at any
   threshold.
+- **Generator redispatch (OptAdj)** — `interpss_case_optadj` (0.7.4) relieves basecase or N-1
+  branch overloads by redispatching control generators (SSA scan → linear program → re-scan),
+  writing `<stem>_DF_optadj_gen.csv` and `<stem>_DF_optadj_branch.csv`; its card pages both from an
+  **Explore results** row. It **mutates the held model's generator P** (`reload: true` starts from
+  the case file again) and needs a P gen limit per generator plus a rating MVA 1 per branch — see
+  [docs/gen_opt_adjustment.md](../docs/gen_opt_adjustment.md).
 - **NERC TPL-001-5 Report** button (enabled once a converged result's CSV files are present) with a rendered/source viewer.
 - "Show log info" toggle for the raw run output (hidden for auto-loaded results).
 - **Diagram tab** (0.6.8; the only preview surface since 0.6.9) — a second conversation view
@@ -104,6 +110,7 @@ iPSS Agent workspace activation check.
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
 | `interpss_run_ca` | Run a DC contingency analysis (N-1 screening) on the held case without the CA dialog: inputs come from `contingencyFile`/`monitorFile`, else the case-folder `config/ca_run.json`, else case-folder discovery, else the Java N-1 defaults; `overloadThreshold` (0.4.6+) sets the over loading threshold the run reports against (argument → `ca_run.json` → 90) and `caConfig` (0.7.2+) the solver knobs (partial object, merged per key over `ca_run.json`; the defaults are the values every earlier run used). Writes `<stem>_DF_contingency.csv`, browsable from the card's **Explore result → Contingency** row (0.4.2+), which opens sorted by `LoadingPercent` with clickable headers (0.4.3+). |
+| `interpss_case_optadj` | Redispatch generation to relieve thermal overloads (OptAdj) on the held case: `optAdjType` selects `genAdjBaseCase` (pre-contingency, scan default 50 %) or `genAdjCaN_1` (post-contingency for single branch outages, scan default 90 %); `scanLoadingThreshold`/`optAdjLoadingThreshold` override the thresholds, `contingencyFile` names the N-1 input (N-1 only), `optAdjConfig` carries the same keys as an object and `reload` re-parses the case first. **Mutates the held model's generator P**; refuses a case whose generators carry no P limit or whose branches carry no rating MVA 1. Writes `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv`, both browsable from the card's **Explore results** row. |
 | `interpss_run_gvy` | Apply Groovy to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. `script` takes a `.gvy` file from the case folder's `scripts/` directory, the source itself (0.4.9+), or an array of those applied in order (0.4.11+ — stops at the first failure, `steps` reports each one). Whitespace or statement punctuation marks source, a single bare word is a file name. |
 
 The first three tools resolve the target case through one shared helper, in this order:

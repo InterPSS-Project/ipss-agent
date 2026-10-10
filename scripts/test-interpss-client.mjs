@@ -2579,5 +2579,86 @@ check('an unusable solver value is reported, not defaulted',
   && api.caSolverError({ ...caDefaultForm, highImpedanceReactancePu: '0' }) !== null,
   api.caSolverError({ ...caDefaultForm, solutionMethod: 'Nope' }));
 
+// --- 22. the generator-redispatch tool (OptAdj, 0.7.4) ---------------------
+console.log('\n22. the generator-redispatch tool (OptAdj, `interpss_case_optadj`)');
+// OptAdj spans four layers that must agree on three things: the config file's keys and defaults
+// (Java `OptAdjRunConfig` ↔ all three Host halves), the mode tokens, and the two result CSV names
+// (Java runner ↔ Host presentationMeta ↔ the client's explorer kinds). Each is a silent failure if
+// it drifts — a knob the tool writes and the runner ignores, or a card that pages a file that does
+// not exist — so each is pinned here.
+const OPTADJ_JAVA_FOUND = findJava('OptAdjRunConfig.java');
+const optAdjJavaPath = OPTADJ_JAVA_FOUND.length === 1 ? OPTADJ_JAVA_FOUND[0] : null;
+const optAdjJava = optAdjJavaPath === null ? '' : rd(optAdjJavaPath);
+check('the Java OptAdj record is the runner-config record the plugin mirrors',
+  optAdjJavaPath === join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'config', 'OptAdjRunConfig.java')
+  && optAdjJava.indexOf('package org.interpss.agent.runner.config;') >= 0,
+  OPTADJ_JAVA_FOUND.length + ' OptAdjRunConfig.java under src/main/java: '
+  + (optAdjJavaPath === null ? 'none or ambiguous' : optAdjJavaPath.slice(ROOT.length + 1)));
+
+// The Host's six-key config block, parsed out of each half (see `hostCaDefaults` for the rules).
+const hostOptAdjDefaults = (path) => {
+  const src = rd(path);
+  const start = src.indexOf('const DEFAULT_OPTADJ_CONFIG = {');
+  if (start < 0) return null;
+  const rest = src.slice(start);
+  const end = rest.search(/\n[ \t]*\}/);
+  const body = rest.slice(0, end < 0 ? rest.length : end);
+  const out = {};
+  for (const m of body.matchAll(/^\s+([A-Za-z_]\w*): (.+?),?$/gm)) out[m[1]] = m[2].trim();
+  return out;
+};
+const optAdjLibDefaults = hostOptAdjDefaults(LIB_HOST);
+const optAdjDynDefaults = hostOptAdjDefaults(DYN_HOSTB);
+check('the six OptAdj keys are the same in all three host halves',
+  optAdjLibDefaults !== null && Object.keys(optAdjLibDefaults).length === 6
+  && optAdjDynDefaults !== null
+  && Object.keys(optAdjLibDefaults).every((k) => Object.prototype.hasOwnProperty.call(optAdjDynDefaults, k)),
+  optAdjLibDefaults === null ? 'no DEFAULT_OPTADJ_CONFIG' : Object.keys(optAdjLibDefaults).join(', '));
+check('the Java OptAdj defaults and mode tokens are the Host\'s',
+  optAdjJava.indexOf('GEN_ADJ_BASE_CASE = "genAdjBaseCase"') >= 0
+  && optAdjJava.indexOf('GEN_ADJ_CA_N1 = "genAdjCaN_1"') >= 0
+  && optAdjJava.indexOf('List.of(GEN_ADJ_BASE_CASE, GEN_ADJ_CA_N1)') >= 0
+  && optAdjJava.indexOf('DEFAULT_SCAN_BASE_CASE = 50.0') >= 0
+  && optAdjJava.indexOf('DEFAULT_SCAN_CA_N1 = 90.0') >= 0
+  && optAdjJava.indexOf('DEFAULT_OPT_ADJ_THRESHOLD = 100.0') >= 0
+  && optAdjJava.indexOf('DEFAULT_THREADS = 0') >= 0
+  && optAdjLibDefaults.optAdjType === "'genAdjBaseCase'"
+  && String(optAdjLibDefaults.optAdjLoadingThreshold) === '100'
+  && String(optAdjLibDefaults.threads) === '0'
+  && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
+    const s = rd(p);
+    return s.indexOf("const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCaN_1']") >= 0
+      && s.indexOf('const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, genAdjCaN_1: 90 }') >= 0;
+  }));
+// The tool, its RPC and its card: a registered tool without the RPC (or without the card) is a
+// row that fails the moment it is called, or one that renders nothing.
+check('the tool, its RPC and its card are all registered',
+  rd(LIB_HOST).indexOf('name: \'interpss_case_optadj\'') >= 0
+  && rd(LIB_HOST).indexOf('caseOptAdjTool(ctx)') >= 0
+  && rd(LIB_HOST).indexOf("'runOptAdj'") >= 0
+  && rd(LIB_CLIENT).indexOf("key: 'interpss_case_optadj'") >= 0);
+// The two result files are named in three places; the client's explorer resolves a kind by the
+// `_DF_<kind>.csv` suffix, so a renamed column file would leave an empty card with no error.
+check('the two result CSVs are named the same in Java, Host and client',
+  rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('"_DF_optadj_gen.csv"') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('"_DF_optadj_branch.csv"') >= 0
+  && rd(LIB_HOST).indexOf('optadjGenCsv: String(value.genFile') >= 0
+  && rd(LIB_HOST).indexOf('optadjBranchCsv: String(value.branchFile') >= 0
+  && rd(LIB_CLIENT).indexOf("kind: 'optadj_gen'") >= 0
+  && rd(LIB_CLIENT).indexOf("kind: 'optadj_branch'") >= 0
+  && rd(LIB_CLIENT).indexOf('meta.optadjGenCsv') >= 0
+  && rd(LIB_CLIENT).indexOf('meta.optadjBranchCsv') >= 0);
+check('the OptAdj runner, bridge entry point and config path exist',
+  rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('public static OptAdjSummary runOnNet(') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('public static ValidatedOptAdjInputs resolveInputs(') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'bridge', 'IpssAgentBridge.java'))
+    .indexOf('public synchronized String runOptAdjWithConfig(') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'util', 'ProjectPaths.java'))
+    .indexOf('caseOptAdjRunConfig(') >= 0);
+
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

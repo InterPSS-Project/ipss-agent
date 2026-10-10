@@ -324,9 +324,16 @@ named without `SsaResult` in the class name (e.g. `IEEE39_OptBasecase_Sparse_Sam
 - Post-opt N-1 verification that reuses `getCaOverLimitInfo()` only tracks pairs found in
   the pre-opt scan — it does not discover new overloads on other branches.
 - Generator P limits in the fixture are intentional; without them the LP can move unlimited
-  MW and the sample numbers will not match the regression tests.
-- `OptAdjRunConfig` currently holds thresholds only; a dedicated OptAdj runner / persisted
-  `opt_adj_run.json` is not wired yet (unlike `CaRunConfig` / `ca_run.json`).
+  MW and the sample numbers will not match the regression tests. The agent runner therefore
+  **refuses** a case whose active generators carry no P gen limit (the optimizer's constraint
+  builder dereferences `getPGenLimit()` without a null check) and one whose branches carry no
+  `ratingMva1` (the scan divides the flow by it).
+- OptAdj is wired end to end since plugin 0.7.4: `OptAdjRunner` (`org.interpss.agent.runner`)
+  runs both examples for the CLI (`IpssCmd optadj`), the bridge
+  (`IpssAgentBridge.runOptAdjWithConfig`) and the chat tool `interpss_case_optadj`, with
+  `config/opt_adj_run.json` persisted per case beside `ca_run.json`. `OptAdjRunConfig` now also
+  carries `contingencyMode`/`contingencyFile` (the `custom` N-1 input) and `threads` (`0` = one SSA
+  worker per processor); the three-argument constructor calls above still compile.
 - Related but different: voltage control via load Q is documented in
   [load-q-adjustment.md](load-q-adjustment.md), not here.
 
@@ -338,6 +345,9 @@ named without `SsaResult` in the class name (e.g. `IEEE39_OptBasecase_Sparse_Sam
 
 - Samples: `src/main/java/org/interpss/sample/optadj/`
 - Config: `src/main/java/org/interpss/agent/runner/config/OptAdjRunConfig.java`
+- Runner / bridge / CLI: `src/main/java/org/interpss/agent/runner/OptAdjRunner.java`,
+  `IpssAgentBridge.runOptAdjWithConfig`, `IpssCmd optadj`
+- Tool: `interpss_case_optadj` — [interpss-tools.md](interpss-tools.md) and the `$ipss-case-optadj` skill
 - Case limits script: `wspace/data/ieee/ieee39/scripts/ieee39_limit_setup.gvy`
 - Core implementation: `ipss-core` → `com.interpss.optadj.*`,
   `com.interpss.optadj.algo.lf.BaseAclfNetLoadFlowOptimizer`

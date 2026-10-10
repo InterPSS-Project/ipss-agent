@@ -12,7 +12,9 @@ import org.interpss.agent.report.ReportType;
 import org.interpss.agent.runner.AclfRunner;
 import org.interpss.agent.runner.ContingencyRunner;
 import org.interpss.agent.runner.GvyScriptRunner;
+import org.interpss.agent.runner.OptAdjRunner;
 import org.interpss.agent.runner.config.CaRunConfig;
+import org.interpss.agent.runner.config.OptAdjRunConfig;
 import org.interpss.agent.util.IpssNetworkInfo;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.result.AclfResultAdapter;
@@ -126,6 +128,56 @@ public final class IpssAgentBridge {
         }
         return runContingencyWith(format, absoluteCasePath, absoluteContPath, absoluteMonitorPath,
                 absoluteResultsDir, stem, config);
+    }
+
+    /**
+     * Generator redispatch (OptAdj) for thermal limits, driven by the whole
+     * {@code config/opt_adj_run.json} payload as JSON: the mode (basecase or N-1), the SSA scan and
+     * LP thresholds, the optional {@code custom} contingency file and the worker count. A blank
+     * payload means the defaults, and an unusable value is rejected with the reason instead of
+     * being silently ignored.
+     * <p>
+     * {@code reload} re-parses the case first, because the run overwrites the held model's
+     * generator P ({@code AclfNetSsaHelper} + the optimizer redispatch the cached network).
+     * Writes {@code stem_DF_optadj_gen.csv} and {@code stem_DF_optadj_branch.csv} under
+     * {@code absoluteResultsDir}.
+     */
+    public synchronized String runOptAdjWithConfig(String format, String absoluteCasePath,
+            String absoluteContPath, String absoluteResultsDir, String stem, boolean reload,
+            String optAdjConfigJson) {
+        OptAdjRunConfig config;
+        try {
+            config = OptAdjRunConfig.fromJson(optAdjConfigJson, "the run configuration");
+        } catch (RuntimeException e) {
+            return error(e);
+        }
+        try {
+            AclfNetwork net = targetNet(format, absoluteCasePath, reload);
+            Path resultsDir = Paths.get(absoluteResultsDir);
+            Files.createDirectories(resultsDir);
+            OptAdjRunner.OptAdjSummary summary = OptAdjRunner.runOnNet(net, resultsDir, stem,
+                    optionalPath(absoluteContPath), config);
+            JsonObject o = new JsonObject();
+            o.addProperty("ok", true);
+            o.addProperty("format", format);
+            o.addProperty("input", absoluteCasePath);
+            o.addProperty("optAdjType", summary.optAdjType());
+            o.addProperty("scanLoadingThreshold", summary.scanThreshold());
+            o.addProperty("optAdjLoadingThreshold", summary.optAdjThreshold());
+            o.addProperty("contingencies", summary.contingencies());
+            o.addProperty("scanned", summary.scanned());
+            o.addProperty("overLimitBefore", summary.overLimitBefore());
+            o.addProperty("overLimitAfter", summary.overLimitAfter());
+            o.addProperty("controlGens", summary.controlGens());
+            o.addProperty("gensAdjusted", summary.gensAdjusted());
+            o.addProperty("gensWithoutPLimit", summary.gensWithoutPLimit());
+            o.addProperty("genFile", summary.genCsv());
+            o.addProperty("branchFile", summary.branchCsv());
+            o.addProperty("optAdjSummary", summary.toString());
+            return GSON.toJson(o);
+        } catch (Exception e) {
+            return error(e);
+        }
     }
 
     /** The shared body: cached-or-loaded net in, contingency CSV out, JSON reply. */
@@ -243,7 +295,7 @@ public final class IpssAgentBridge {
             String absoluteScriptPath, boolean reload) {
         try {
             Path script = requireScriptInCaseScriptsDir(absoluteCasePath, absoluteScriptPath);
-            AclfNetwork net = gvyTargetNet(format, absoluteCasePath, reload);
+            AclfNetwork net = targetNet(format, absoluteCasePath, reload);
             return gvyJson(absoluteCasePath, GvyScriptRunner.runOnNet(net, script));
         } catch (GvyScriptRunner.ScriptError e) {
             return gvyError(e);
@@ -265,7 +317,7 @@ public final class IpssAgentBridge {
             return gvyFail("the script source is empty");
         }
         try {
-            AclfNetwork net = gvyTargetNet(format, absoluteCasePath, reload);
+            AclfNetwork net = targetNet(format, absoluteCasePath, reload);
             return gvyJson(absoluteCasePath, GvyScriptRunner.runSourceOnNet(net, source, inlineLabel(source)));
         } catch (GvyScriptRunner.ScriptError e) {
             return gvyError(e);
@@ -274,8 +326,11 @@ public final class IpssAgentBridge {
         }
     }
 
-    /** The network one Groovy evaluation runs against: the held case, or a fresh parse. */
-    private AclfNetwork gvyTargetNet(String format, String absoluteCasePath, boolean reload) throws Exception {
+    /**
+     * The network a mutating call runs against — a Groovy evaluation or an OptAdj redispatch:
+     * the held case, or a fresh parse when the caller asks for one or the path changed.
+     */
+    private AclfNetwork targetNet(String format, String absoluteCasePath, boolean reload) throws Exception {
         AclfNetwork net = repo.getAclfNetBase();
         if (reload || net == null || loadedInput == null || !loadedInput.equals(absoluteCasePath)) {
             net = NetworkLoader.loadNetwork(format, absoluteCasePath);

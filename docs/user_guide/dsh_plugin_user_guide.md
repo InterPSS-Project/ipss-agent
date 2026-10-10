@@ -379,10 +379,38 @@ For the full tool contract (inputs, cards, version history), see [interpss-tools
 | Adjust load Q to a voltage band   | `Adjust Bus14 load Q to bring it into [0.90, 0.91] pu`           | `$ipss-case-aclf-adjust` / `interpss_run_gvy` + `interpss_run_aclf` |
 | Case summary / top-N              | `Summarize the current case` / `Find the lowest voltage buses`   | `$ipss-case-summary` / `interpss_case_summary` |
 | What-if scenario script           | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve`             | `$ipss-case-script` / `interpss_run_gvy`       |
+| DC contingency screening          | `Run a contingency analysis on the current case`                 | `$ipss-case-ca` / `interpss_run_ca`            |
+| Relieve overloads by redispatch   | `Relieve the N-1 overloads on the selected case by redispatching generation` | `$ipss-case-optadj` / `interpss_case_optadj`   |
 | One-line diagram for the case     | `Draw the one-line diagram for the current case`                 | `$ipss-case-diagram` (script)                  |
 
 
-Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`, `$ipss-case-diagram`. Plain natural language works the same when the agent picks those tools.
+Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`, `$ipss-case-ca`, `$ipss-case-optadj`, `$ipss-case-diagram`. Plain natural language works the same when the agent picks those tools.
+
+### Relieve overloads by redispatching generation (OptAdj)
+
+Ask for the overloads to be relieved and the agent calls `interpss_case_optadj`: a DC-sensitivity
+scan collects the branches above a scan percentage, a linear program moves the control generators so
+the monitored loadings stay under an enforce percentage, and the same set is re-checked. Two modes,
+chosen by `optAdjType`:
+
+- **`genAdjBaseCase`** (default) — pre-contingency loading, scan default 50 %;
+- **`genAdjCaN_1`** — post-contingency loading for single branch outages, scan default 90 %; pass a
+  `contingencyFile` to use a listed contingency set instead of all N-1 outages.
+
+The card reports the mode, both thresholds, the before → after overload counts, how many control
+generators moved, and an **Explore results** row with the *Gen adjustments* (`adjP` per generator, in
+MW) and *Branch loading* (before/after `loadingBeforePct` / `loadingAfterPct`) tables. The method,
+the prerequisites and the measured anchors are in [gen_opt_adjustment.md](../gen_opt_adjustment.md).
+
+Two things to know before you rely on it:
+
+- **The case needs P gen limits and branch ratings.** The run refuses a case whose generators carry
+  no `pGenLimit` or whose branches carry no rating MVA 1 (`LimMvaA`) instead of guessing — the IEEE 39
+  fixture needs its `scripts/ieee39_limit_setup.gvy` applied first (ask Chat to run it, or use the
+  script skill).
+- **The run changes the loaded model's generator dispatch** (like a scenario script). A later ACLF, CA
+  or report sees the redispatched case; ask for the case to be reloaded if you want the file's own
+  dispatch back.
 
 For the Diagram tab, generation, and draw.io editing, see [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
 

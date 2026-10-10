@@ -248,7 +248,7 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
         return threads == null ? DEFAULT_THREADS : threads;
     }
 
-    private static String mode(String value, String source, String key) {
+    static String mode(String value, String source, String key) {
         if (value == null || value.isBlank()) {
             return ALL;
         }
@@ -261,13 +261,22 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
     }
 
     /** Reject a threshold the runner could not honour rather than silently defaulting. */
-    private static Double threshold(Double value, String source) {
+    static Double threshold(Double value, String source) {
+        return loadingPercentage(value, source, "overloadThreshold");
+    }
+
+    /**
+     * A loading-limit percentage: {@code 0 < t <= 1000}. Shared with
+     * {@link OptAdjRunConfig}'s scan and OptAdj thresholds so the two run configs
+     * cannot drift into accepting different values.
+     */
+    static Double loadingPercentage(Double value, String source, String key) {
         if (value == null) {
             return null;
         }
         if (!Double.isFinite(value) || value <= 0.0 || value > 1000.0) {
             throw new IllegalStateException(source
-                    + ": overloadThreshold must be a loading percentage between 0 and 1000, got " + value);
+                    + ": " + key + " must be a loading percentage between 0 and 1000, got " + value);
         }
         return value;
     }
@@ -294,7 +303,7 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
         return value;
     }
 
-    private static Integer count(Integer value, String source, String key) {
+    static Integer count(Integer value, String source, String key) {
         if (value == null) {
             return null;
         }
@@ -304,7 +313,7 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
         return value;
     }
 
-    private static String choice(String value, List<String> allowed, String source, String key) {
+    static String choice(String value, List<String> allowed, String source, String key) {
         if (value == null || value.isBlank()) {
             return null;
         }
@@ -318,7 +327,7 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
                 + "' (expected " + String.join("|", allowed) + ")");
     }
 
-    private static String blankToNull(String value) {
+    static String blankToNull(String value) {
         return (value == null || value.isBlank()) ? null : value.trim();
     }
 }

@@ -107,7 +107,7 @@ public final class ContingencyRunner {
                     ContingencyFileUtil.importContingenciesFromJson(contPath.toFile());
             dclfContList = new DclfContingencyHelper(algo).createDclfContList(contingencRecs);
         } else {
-            dclfContList = createN1BranchOutageList(algo);
+            dclfContList = n1BranchOutageList(algo);
         }
 
         Set<String> monitoredBranchIds;
@@ -187,9 +187,10 @@ public final class ContingencyRunner {
 
     /**
      * N-1 OPEN outages for every branch not connected to the reference bus
-     * (IEEE39 OptN1Scan pattern).
+     * (IEEE39 OptN1Scan pattern). Shared with {@link OptAdjRunner}, whose N-1 SSA
+     * scan starts from the same outage list the contingency analysis uses.
      */
-    private static List<DclfBranchOutage> createN1BranchOutageList(
+    public static List<DclfBranchOutage> n1BranchOutageList(
             ContingencyAnalysisAlgorithm algo) {
         List<DclfBranchOutage> contList = new ArrayList<>();
         algo.getAclfNet().getBranchList().stream()
@@ -261,10 +262,11 @@ public final class ContingencyRunner {
     }
 
     /**
-     * One {@code ca_run.json} entry: {@code null} when its mode is {@code all},
-     * otherwise an existing path under {@code wspace/}.
+     * One run-config file entry ({@code ca_run.json} / {@code opt_adj_run.json}):
+     * {@code null} when its mode is {@code all}, otherwise an existing path under
+     * {@code wspace/}. Shared with {@link OptAdjRunner}.
      */
-    private static Path resolveConfigEntry(ProjectPaths paths, Path configFile, String value,
+    static Path resolveConfigEntry(ProjectPaths paths, Path configFile, String value,
             boolean custom, String key, String label) {
         if (!custom) {
             return null;
@@ -280,7 +282,7 @@ public final class ContingencyRunner {
     }
 
     /** Reject absolute and escaping values so a config file cannot point outside {@code wspace/}. */
-    private static Path wspaceRelative(ProjectPaths paths, Path configFile, String key, String value) {
+    static Path wspaceRelative(ProjectPaths paths, Path configFile, String key, String value) {
         String normalized = value.replace('\\', '/');
         if (normalized.startsWith("/") || normalized.contains("..")) {
             throw new IllegalStateException(

@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.7.3**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.7.4**.
 
 ## Tool surface
 
@@ -17,14 +17,15 @@ Reference implementation: `interpss-persistent/lib/index.js` (Host) and
 | `interpss_run_aclf` | Run an AC load flow (ACLF) and report convergence | Writes `<stem>_DF_{bus,branch,gen,load}.csv` and `<stem>_network_info.txt` under `wspace/<case dir>/result/` |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals, or a top-N ranking by scope | None — reads the in-memory model |
 | `interpss_run_ca` | DC contingency analysis (N-1 screening) with the CA dialog bypassed, and report the overload summary | Writes `<stem>_DF_contingency.csv` under `wspace/<case dir>/result/` |
+| `interpss_case_optadj` | Generator redispatch (OptAdj) for basecase or N-1 overloads: SSA scan → linear-program redispatch → re-check, and report before/after counts | **Mutates the held model's generator P** (like `interpss_run_gvy`); writes `<stem>_DF_optadj_gen.csv` and `<stem>_DF_optadj_branch.csv` under `wspace/<case dir>/result/` |
 | `interpss_run_gvy` | Apply Groovy to the bridge-held case — a `.gvy` file from the case folder's `scripts/` directory, the source itself (0.4.9+), or an array of those applied in order (0.4.11+) | Mutates the held model in place (no rollback); `reload: true` re-parses the case once, before the first script |
 
-All six are registered once at the end of `apply()` and are **global to the host process**;
+All seven are registered once at the end of `apply()` and are **global to the host process**;
 every call is gated on the iPSS Agent workspace check, so a non-`iPSS Agent` workspace gets an
 explicit failure message rather than a missing tool.
 
 `interpss_case_load` is the explicit first step: its description, the other tools'
-descriptions, and every `ipss-case-*` skill (`info`, `aclf`, `summary`, `script`, `ca`) say to call
+descriptions, and every `ipss-case-*` skill (`info`, `aclf`, `summary`, `script`, `ca`, `optadj`) say to call
 it before the others when the selected case has not been loaded yet. Nothing enforces the order — each tool
 still loads on demand, so skipping the step is safe, just less explicit.
 
@@ -278,6 +279,65 @@ column header is clickable to sort by it (a second click flips the direction) �
 whole file before slicing a page, so the order holds across paging. It reuses the ACLF card's panel with one scope and no
 **Report** button — generating the NERC TPL-001-5 report stays a separate step, since that report
 needs the ACLF CSVs too.
+
+## `interpss_case_optadj`
+
+Generator redispatch for thermal limits (OptAdj): a DC-sensitivity (SSA) scan collects the branches
+(or post-contingency pairs) above a **scan** threshold, a linear program moves the control
+generators' active power so the monitored loadings stay under an **OptAdj** threshold, and the same
+monitored set is re-evaluated after the adjustment. The method, its prerequisites and the core
+regression anchors live in [gen_opt_adjustment.md](gen_opt_adjustment.md); this section is the
+tool's contract.
+
+| Argument | Default | Meaning |
+| --- | --- | --- |
+| `case` | tab selection | The case to run, resolved like every other tool (`data/…`, `wspace/data/…`, an absolute path under `/wspace/data/`, or a preset label) |
+| `optAdjType` | `genAdjBaseCase` | `genAdjBaseCase` relieves pre-contingency (basecase) loading; `genAdjCaN_1` relieves post-contingency loading for single branch outages |
+| `scanLoadingThreshold` | `50` / `90` | Candidate-collection percentage (`0 < t <= 1000`): 50 in the basecase mode, 90 in the N-1 mode, when unset — the two samples' values |
+| `optAdjLoadingThreshold` | `100` | The percentage the optimizer enforces (`0 < t <= 1000`) |
+| `contingencyFile` | all N-1 outages | `genAdjCaN_1` only: the contingency JSON, addressable exactly like the CA tool's `contingencyFile`. The basecase mode **rejects** it |
+| `optAdjConfig` | — | The same keys as one object (partial; an unknown key is rejected with the list of known ones). The scalar arguments above win per key |
+| `reload` | `false` | Re-parse the case file before running |
+
+The run configuration resolves most-specific-first: `optAdjConfig` → the scalar arguments → the case
+folder's `config/opt_adj_run.json` → the built-in defaults. There is no filename discovery (unlike
+CA): only the N-1 mode reads a contingency file, and it must be named.
+
+| Result file | Columns |
+| --- | --- |
+| `<stem>_DF_optadj_gen.csv` | `genName,genP,adjP,limitMax,limitMin` — one row per generator the optimizer reported on, largest `adjP` first, in **MW** (the optimizer's own unit: a `[0, 7] pu` limit appears as `limitMax = 700`) |
+| `<stem>_DF_optadj_branch.csv` | `branchId,outageBranchId,limitMW,baseFlowMW,loadingBeforePct,shiftedFlowMWAfter,loadingAfterPct` — one row per scanned entry, before **and** after; `outageBranchId` is empty in basecase mode |
+
+The result value carries the mode, both resolved thresholds, `contingencies`, `scanned` (candidate
+entries), `overLimitBefore`/`overLimitAfter` (entries at or above the OptAdj threshold),
+`controlGens`, `gensAdjusted`, the two file names and the runner's `OptAdjSummary` text. The card
+renders that summary plus an **Explore results** row with a *Gen adjustments* and a *Branch loading*
+table, paged through the same `interpss/readCsv` endpoint the tab uses and opened worst
+`loadingAfterPct` first.
+
+Behaviour and caveats:
+
+- **The run mutates the held model's generator P** (the DCLF model is redispatched), so a later
+  `interpss_run_aclf`, `interpss_run_ca` or report sees the adjusted dispatch and a second
+  `interpss_case_optadj` continues from it. Pass `reload: true` — or reload the case in the tab — to
+  start from the case file again.
+- **Two preconditions, both refused with the reason** rather than silently ignored: every active
+  generator needs a **P gen limit** (the optimizer dereferences it without a null check) and every
+  branch needs a **rating MVA 1** (the scan divides the flow by it, so an unrated branch would read
+  as infinite loading). The IEEE 39 fixture carries neither, so apply its
+  `scripts/ieee39_limit_setup.gvy` first through `interpss_run_gvy` (34 lines @ 600 MVA,
+  12 transformers @ 800 MVA, plus the sample's P limits).
+- The scan always measures loading against **rating MVA 1** (`getRatingMvaA`). `ratingProvider` is a
+  CA knob and does not exist here — the file's ratings, not the provider, decide the loading.
+- An empty scan (nothing above the scan threshold) writes both CSVs header-only, reports
+  `gensAdjusted: 0` and does not call the optimizer.
+- The post-opt re-check tracks **only the entries the scan found**; it does not discover new
+  overloads elsewhere. OptAdj is a DCLF/LODF redispatch, not an AC OPF — confirm a stressed
+  operating point with ACLF.
+- Measured on that fixture in this workspace (0.7.4): basecase at 50 %/100 % → 20 candidates and
+  2 → 2 entries at or above 100 %, peak loading **103.4 % → 100.0 %**, 3 of 10 control generators
+  adjusted; N-1 at 90 %/100 % → 45 contingencies, 20 candidates, **7 → 4** entries, peak
+  **138.8 % → 125.3 %**, 6 of 10 generators adjusted.
 
 ## `interpss_case_summary`
 
@@ -574,6 +634,7 @@ tab's picker.
 | `ipss-case-summary` | Summarize the current case — totals or a top-N ranking (wraps `interpss_case_summary`) |
 | `ipss-case-script` | Apply a scenario edit to the current case — `.gvy` scripts and/or inline Groovy, one call or a sequence (wraps `interpss_run_gvy`) |
 | `ipss-case-ca` | DC contingency analysis for the current case, dialog-free (wraps `interpss_run_ca`) |
+| `ipss-case-optadj` | Redispatch generation to relieve basecase or N-1 overloads on the current case (wraps `interpss_case_optadj`) |
 | `ipss-case-diagram` | Draw the current case's one-line diagram — `.drawio` plus a PNG preview under the case's `diagram/` folder, in the template's style, from its ACLF result tables (`wspace/script/gen_oneline_diagram.py`) |
 | `ipss-sim` | Full simulation and reporting workflow through the Java CLI (`IpssCmd`) |
 | `nerc-report-html`, `nerc-report-slides` | Follow-on artifacts from a NERC report |
@@ -684,12 +745,13 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.7.2 | **The CA dialog and `interpss_run_ca` drive the whole DC contingency solver, not just its threshold.** `ContingencyRunner` hands `ParallelDclfContingencyAnalyzer.executeContingencyAnalysis` a complete `DclfContingencyConfig` (ipss.core.lib 1.4.0 moved the analyzer *and* its config into `com.interpss.core.algo.dclf`), so the fifteen knobs that config carries are no longer the runner's private business: `CaRunConfig` gains them with loud validation, `ContingencyRunner.dclfConfig(config)` copies every one onto the solver (including the two whose library defaults it used to inherit), `IpssAgentBridge.runContingencyWithConfig(format, case, cont, monitor, resultsDir, stem, caConfigJson)` takes the payload, and `threads` replaces the hard-wired `availableProcessors()`. The CA dialog grows a **▸ Advanced solver settings** disclosure (loss inclusion, screening and its two cutoffs, solution method, KLU RHS batch size, shift-factor caching, islanding treatment, N-1 islanding replay, multi-outage replay and its reactance, turn-off-island-buses, auto line→transformer, rating provider, threads), `config/ca_run.json` grows from five keys to twenty, and `interpss_run_ca` accepts the same object as `caConfig` (partial, merged per key, an unknown key rejected with the list). Every default is the value the runner used before the panel existed, so an unopened panel and an omitted argument change nothing. **The overload check is a rating comparison**: the library's default provider is `RATING_B` (rating MVA 2 — 690 MVA on the IEEE 39 fixture, where `RATING_A`'s 600 MVA reports five more overloads), and a case whose branch tables carry no ratings reports 0 overloads at any threshold — which is why the docs now say so and that fixture needs its `scripts/ieee39_limit_setup.gvy` first. Java tests: `CaRunConfigTest` (defaults, round-trip, every rejection) and `ContingencyRunnerTest` (the mapping field by field); the whole suite is green. Host + Java changed, so an app restart is needed, not only a page refresh. Guard §21 is new (the 20-key/15-field agreement across Java, all three Host halves and the client, the enum lists, and the client form's defaults/validation/payload). 338 checks |
 
 | 0.7.3 | **The plug-in's CA mirror is re-aligned with the refactored Java run configuration — no Host and no Client behaviour changes.** The backend moved `CaRunConfig` out of `org.interpss.agent.util` into a new `org.interpss.agent.runner.config` package (beside the new `OptAdjRunConfig`), so guard §21 no longer hard-codes the old path: it locates `CaRunConfig.java` under `src/main/java`, and a new first check pins the exact `runner/config` file and its `package` line — a future move is a named failure now, instead of an `ENOENT` that killed the whole guard before it could report anything (which is exactly what this refactor did to 0.7.2's guard). The rating caveats were re-measured too, against the current `ieee39_limit_setup.gvy` (34 lines @ 600 MVA, 12 transformers @ 800 MVA — it no longer rates all 46 branches at 600) and against the library's own accessors: `RATING_A` is `getRatingMvaA()` = rating MVA 1, while `RATING_B` — the engine's default, which `ratingProvider: 'default'` leaves in place — is `getRatingMvaB()` = rating MVA 2, falling back per branch type to rating MVA 1 × 1.15 (line) / × 1.35 (transformer) when MVA 2 is zero. This fixture leaves MVA 2 at zero, so the default check compares against 690 MW for a 600 MVA line and 1080 MW for an 800 MVA transformer. The counts are unchanged (20 overloads at 90 % by default, 25 under `RATING_A`, 7 at `overloadThreshold: 100`). OptAdj is deliberately **not** wired into the plug-in: `OptAdjRunConfig` (mode, scan and OptAdj thresholds) has no runner, no bridge method and no `opt_adj_run.json` yet — `docs/gen_opt_adjustment.md` says so. The Host's own `ratingProvider` text (the `DEFAULT_CA_CONFIG` comment in all three Host halves and the `caConfig` schema description of `interpss_run_ca`) was corrected to the measured rule, so a running app should be restarted for that description to come from the new bundle; the CA code path is untouched. 339 checks |
+| 0.7.4 | **The plug-in gains the generator-redispatch tool — `interpss_case_optadj`.** The OptAdj workflow that [gen_opt_adjustment.md](gen_opt_adjustment.md) documents (SSA scan → linear-program redispatch → re-scan) is now reachable from chat. A new Java `OptAdjRunner` (`run`, `runOnNet`, `resolveInputs`) drives `AclfNetSsaHelper.baseCaseScan` / `contingencyScan` plus `AclfNetLoadFlowOptimizer` / `AclfNetContigencyOptimizer` and writes `<stem>_DF_optadj_gen.csv` (`genName, genP, adjP, limitMax, limitMin`, in MW — the optimizer's own unit) and `<stem>_DF_optadj_branch.csv` (`branchId, outageBranchId, limitMW, baseFlowMW, loadingBeforePct, shiftedFlowMWAfter, loadingAfterPct`, one row per scanned entry, before and after). `IpssAgentBridge.runOptAdjWithConfig(format, case, cont, resultsDir, stem, reload, json)` takes the payload — with a `reload` flag, because the run **redispatches the held model's generator P** — and `OptAdjRunConfig` grows from the doc's three fields to six: `contingencyMode`/`contingencyFile` (a `custom` N-1 input, the same JSON CA reads) and `threads` (`0` = one SSA worker per processor), with its validators shared with `CaRunConfig` so the two run configs cannot drift. `ProjectPaths.caseOptAdjRunConfig` gives it `config/opt_adj_run.json`, `ContingencyRunner`'s N-1 outage-list builder and its config-path resolution become package-visible for reuse, and `IpssCmd optadj` runs it from the CLI. The Host adds the tool (`case`, `optAdjType`, `scanLoadingThreshold`, `optAdjLoadingThreshold`, `contingencyFile`, `optAdjConfig`, `reload`), the `runOptAdj` RPC, the `runOptAdjWithConfig` provider method and a six-key `DEFAULT_OPTADJ_CONFIG` mirrored into all three Host halves; the persistent client adds a card whose **Explore results** row pages both CSVs (kinds `optadj_gen` / `optadj_branch`, opened worst `loadingAfterPct` first). Two preconditions are refused with the reason instead of being silently ignored: every active generator needs a **P gen limit** (the optimizer dereferences it without a null check) and every branch a **rating MVA 1** (the scan divides the flow by it, so an unrated branch reads as infinite loading) — the IEEE 39 fixture needs its `scripts/ieee39_limit_setup.gvy` first. An empty scan skips the optimizer and writes header-only CSVs. Measured on that fixture: basecase 50 %/100 % → 20 candidates, 2 → 2 entries at or above 100 %, peak **103.4 % → 100.0 %**, 3 of 10 control generators adjusted; N-1 90 %/100 % → 45 contingencies, 20 candidates, **7 → 4**, peak **138.8 % → 125.3 %**, 6 of 10 adjusted. Host + Java + Client changed, so the app needs a restart **and** the page a refresh. Guard §22 is new (the record's location/package, the six keys and the mode table in all three Host halves vs the Java defaults, the tool/RPC/card registration, the two CSV names across Java/Host/client, and the runner/bridge/config entry points). 345 checks |
 
 ## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
-| Tool missing from the registry | Check `$TMPDIR/dsh-interpss-diagnostic.log` for `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary, interpss_run_gvy, interpss_run_ca` and `tools=true`; a row that applied without the `tools` service logs the `NOT registered` line instead |
+| Tool missing from the registry | Check `$TMPDIR/dsh-interpss-diagnostic.log` for `chat tools registered: interpss_case_load, interpss_network_info, interpss_run_aclf, interpss_case_summary, interpss_run_gvy, interpss_run_ca, interpss_case_optadj` and `tools=true`; a row that applied without the `tools` service logs the `NOT registered` line instead |
 | Summary absent from a card | The card needs 0.3.4+ (network info) or 0.3.2+ (ACLF). Older cards fall back to the generic row, collapsed by default |
 | `alreadyLoaded: true` when a reload was wanted | The tool reuses the held model by design; the tab's **Load** button is the way to force a re-parse |
 | The picker shows a different case than the tools use | Fixed in 0.3.19: the picker mirrors the bridge through `getBridgeCase`. On an older plugin, reload the page after a tool load — or pass `case` explicitly |

@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.7.3.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.4.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.3.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.4.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 339 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 345 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -607,6 +607,19 @@ its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
   `org/interpss/agent/runner/config/CaRunConfig.java` plus that file's `package` line: the old
   hard-coded `org/interpss/agent/util/CaRunConfig.java` path made the 0.7.3 backend's package move
   throw `ENOENT` and abort the whole guard, and a move should now fail one named check instead.
+- §22 (since 0.7.4) covers the **generator-redispatch tool** (`interpss_case_optadj`), which spans
+  four layers that must agree on three things: the Java `OptAdjRunConfig`'s location and package
+  (found by name, like §21), its mode tokens and default thresholds against the Host's
+  `DEFAULT_OPTADJ_CONFIG` / `OPTADJ_TYPES` / `OPTADJ_SCAN_DEFAULTS` in **all three** Host halves
+  (basecase 50 %, N-1 90 %, enforce 100 %, `threads` 0), the tool + RPC + card registration
+  (`caseOptAdjTool` in `chatToolDefs`, `runOptAdj` in `METHODS`, the `tool.call.toolview` key in the
+  persistent client), and the two result file names across Java (`OptAdjRunner`'s
+  `_DF_optadj_gen.csv` / `_DF_optadj_branch.csv`), the Host's `presentationMeta`
+  (`optadjGenCsv` / `optadjBranchCsv`) and the client's explorer kinds (`optadj_gen` /
+  `optadj_branch` — the kind is matched by the `_DF_<kind>.csv` suffix, so a renamed file would leave
+  an empty card with no error at all). It closes with the runner/bridge/config entry points
+  (`OptAdjRunner.runOnNet`/`resolveInputs`, `IpssAgentBridge.runOptAdjWithConfig`,
+  `ProjectPaths.caseOptAdjRunConfig`).
 - §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
   draw.io re-serialises a file it opens (viewport offsets, attribute order), so byte equality
   was never going to survive a round trip through the editor.

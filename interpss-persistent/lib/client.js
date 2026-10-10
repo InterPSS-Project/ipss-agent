@@ -4939,6 +4939,55 @@ module.exports = {
       })
     }
 
+    // The OptAdj card reuses the same explorer for its two result files: the per-generator
+    // adjustments and the per-branch before/after loadings. Both kinds are matched by the
+    // `_DF_<kind>.csv` suffix, so the file names are the client-side contract with
+    // `OptAdjRunner` (guard §22 pins the three places).
+    function optAdjCardMeta(block) {
+      if (block === null || block === undefined) return null
+      if (!('kind' in block)) return null
+      if (block.isError === true) return null
+      const meta = block.meta
+      if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return null
+      if (meta.ok !== true) return null
+      if (typeof meta.resultDir !== 'string' || meta.resultDir === '') return null
+      const gen = typeof meta.optadjGenCsv === 'string' ? meta.optadjGenCsv : ''
+      const branch = typeof meta.optadjBranchCsv === 'string' ? meta.optadjBranchCsv : ''
+      if (gen === '' || branch === '') return null
+      return {
+        case: typeof meta.case === 'string' ? meta.case : '',
+        resultDir: meta.resultDir,
+        files: [gen, branch],
+      }
+    }
+
+    const OPTADJ_EXPLORER_KINDS = [
+      { kind: 'optadj_gen', label: 'Gen adjustments' },
+      { kind: 'optadj_branch', label: 'Branch loading' },
+    ]
+
+    function OptAdjResultCard(props) {
+      const block = props === null || props === undefined ? null : props.block
+      const settled = block !== null && block !== undefined && ('kind' in block)
+      return React.createElement(AclfResultPanel, {
+        settled: settled,
+        isError: settled && block.isError === true,
+        meta: optAdjCardMeta(block),
+        args: aclfCallArgs(block),
+        text: toolResultText(block),
+        kinds: OPTADJ_EXPLORER_KINDS,
+        rowLabel: 'Explore results',
+        label: 'InterPSS generator redispatch',
+        showReport: false,
+        // The post-opt loading is the number the run is judged by; worst first.
+        defaultSort: 'loadingAfterPct',
+        defaultSortDesc: true,
+        sessionId: props === null || props === undefined ? undefined : props.sessionId,
+        callRemote: props === null || props === undefined ? undefined : props.callRemote,
+        openFile: props === null || props === undefined ? undefined : props.openFile,
+      })
+    }
+
     // --- Simple text tool-card views ------------------------------------------
     // Owns the cards for the InterPSS tools whose whole result is a short text
     // block (`interpss_case_load`, `interpss_network_info`). The shipped generic
@@ -5317,6 +5366,15 @@ module.exports = {
     slots.inject('tool.call.toolview', () => slots.register(
       { name: 'tool.call.toolview', key: 'interpss_run_ca' },
       (props) => React.createElement(CaResultCard, {
+        block: props && props.block,
+        sessionId: props && props.sessionId,
+        callRemote: callRemote,
+        openFile: props && props.openFile,
+      }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_case_optadj' },
+      (props) => React.createElement(OptAdjResultCard, {
         block: props && props.block,
         sessionId: props && props.sessionId,
         callRemote: callRemote,

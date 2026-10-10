@@ -26,6 +26,9 @@ public final class AgentTestSupport {
     public static final String TEXAS2K_MONITOR =
             "data/psse/Texas2K/2k_monitored_branches.json";
     public static final String DEFAULT_ACLF_CONFIG = "config/aclf_run.json";
+    /** IEEE 39 fixture of the OptAdj samples (ratings and gen limits applied by the test). */
+    public static final String IEEE39_CASE = "wspace/data/ieee/ieee39/ieee39.ieee";
+    public static final String IEEE39_INPUT = "data/ieee/ieee39/ieee39.ieee";
 
     private AgentTestSupport() {
     }
@@ -90,6 +93,15 @@ public final class AgentTestSupport {
         copyProjectFileToWspace(paths, TEXAS2K_CASE, TEXAS2K_INPUT);
         copyProjectFileToWspace(paths, "wspace/" + TEXAS2K_CONT, TEXAS2K_CONT);
         copyProjectFileToWspace(paths, "wspace/" + TEXAS2K_MONITOR, TEXAS2K_MONITOR);
+    }
+
+    /**
+     * Copy the IEEE 39 OptAdj fixture from the project {@code wspace/} into the ephemeral test
+     * project layout (the case is not on the test classpath). The caller applies the branch
+     * ratings and generator P limits: the OptAdj runner refuses a case that carries neither.
+     */
+    public static void setupIeee39Case(ProjectPaths paths) throws IOException {
+        copyProjectFileToWspace(paths, IEEE39_CASE, IEEE39_INPUT);
     }
 
     public static Path copyProjectFileToWspace(ProjectPaths paths, String projectRelative,

@@ -114,7 +114,8 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 | `AclfRunner` | `runner` | Newton–Raphson AC load flow → CSV + network info |
 | `GvyScriptRunner` | `runner` | Evaluate a Groovy `.gvy` script against a live `AclfNetwork` (`aclfnet` binding) → mutation digest |
 | `ContingencyRunner` | `runner` | DC N-1 contingency → contingency CSV |
-| `CaRunConfig`, `OptAdjRunConfig` | `runner/config` | Per-case run configuration records: CA (`config/ca_run.json`, 20 keys) and the OptAdj thresholds (record only — no runner/bridge wiring yet) |
+| `OptAdjRunner` | `runner` | Generator redispatch for thermal limits (SSA scan → LP → re-scan) → gen + branch CSVs |
+| `CaRunConfig`, `OptAdjRunConfig` | `runner/config` | Per-case run configuration records: CA (`config/ca_run.json`, 20 keys) and OptAdj (`config/opt_adj_run.json`, 6 keys: mode, both thresholds, contingency input, worker count) |
 | `ReportRunner` | `report` | Orchestrate Markdown report generation |
 | `IpssAgentBridge` | `bridge` | In-process JSON facade for DSH `java-bridge` |
 | `SimuModelRepository` | `model` | Cache one base-case `AclfNetwork` in memory |
@@ -216,7 +217,36 @@ InterPSS tab's CA dialog writes the same `ca_run.json`, so the GUI and the CLI
 agree. The agent skill auto-discovers the files in directory mode by filename
 patterns (`*contingency*`, `*monitor*`).
 
-### Step 4 — Report generation
+### Step 4 — Generator redispatch (OptAdj, optional)
+
+```
+IpssCmd optadj <format> <input> [<cont_file>]
+  1. resolveInputs(): explicit CLI cont file → case config/opt_adj_run.json → defaults
+  2. createContingencyAnalysisAlgorithm(net, SenNotCached, true) + calculateDclf(INC_LOSS)
+  3. AclfNetSsaHelper(threads).baseCaseScan(scan %) | contingencyScan(contList, scan %)
+  4. AclfNetLoadFlowOptimizer(true) | AclfNetContigencyOptimizer(true).optimize(algo, result, optAdj %)
+  5. calculateDclf + re-scan the SAME monitored set
+  6. two DataFrames → stem_DF_optadj_gen.csv, stem_DF_optadj_branch.csv
+```
+
+`OptAdjRunner` serves the CLI, the bridge (`IpssAgentBridge.runOptAdjWithConfig`) and the chat tool
+`interpss_case_optadj`, and it **mutates the network it is given**: the optimizer overwrites the
+DCLF model's generator P (the bridge's `reload` argument re-parses the case first, exactly like the
+Groovy adapter's). Loading is measured against each branch's `ratingMva1`, so `ratingProvider` — a
+CA knob — does not apply here. Two preconditions are refused before the LP rather than surfacing as
+a null dereference or an infinite loading: every active generator needs a P gen limit and every
+branch a rating MVA 1. An empty scan (nothing above the scan threshold) skips the optimizer and
+still writes both CSVs. Method, prerequisites and anchors:
+[gen_opt_adjustment.md](gen_opt_adjustment.md).
+
+**OptAdj config resolution** (`OptAdjRunner.resolveInputs`, printed as `Using opt_adj_run.json: …`):
+an explicit CLI contingency file pins the `custom` mode to it; else the case-specific
+`wspace/<input_parent>/config/opt_adj_run.json`; else the built-in defaults (basecase mode, 50 %
+scan, 100 % enforcement, all N-1 outages, one SSA worker per processor). Only `genAdjCaN_1` reads a
+contingency file — a basecase run rejects one. The chat tool layers its scalar arguments and its
+`optAdjConfig` object over the same file, so GUI-less and scripted runs agree.
+
+### Step 5 — Report generation
 
 Reports are **CSV-driven** — generators analyze exported DataFrame CSVs; they do not re-run load flow.
 
@@ -274,6 +304,8 @@ Legacy layout `wspace/result/<subdir>/` is still supported by `ReportCaseResolve
 | `loadCase(format, absCasePath)` | Load network into `SimuModelRepository` |
 | `runAclf(format, absCasePath, absConfigPath, absResultsDir, stem)` | Reuse cached net when path matches; call `AclfRunner.runOnNet()` |
 | `runGvy(format, absCasePath, absScriptPath, reload)` | `.gvy` under `<case dir>/scripts/` only; reuse the cached net unless `reload`; evaluate via `GvyScriptRunner` (mutates in place) |
+| `runContingencyWithConfig(format, absCasePath, absContPath, absMonitorPath, absResultsDir, stem, caConfigJson)` | Whole `ca_run.json` payload → `ContingencyRunner.runOnNet` |
+| `runOptAdjWithConfig(format, absCasePath, absContPath, absResultsDir, stem, reload, optAdjConfigJson)` | Whole `opt_adj_run.json` payload → `OptAdjRunner.runOnNet`; **mutates the cached net's generator P**, so `reload` re-parses first |
 | `summarize(scope, sortRule, numRec)` | In-memory result summary via `AclfResultAdapter` |
 | `getNetworkInfo()` | Text network summary |
 | `runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)` | Delegate to `ReportRunner` |
@@ -448,7 +480,7 @@ JUnit 5 + AssertJ; fixtures under `src/test/resources/`.
 | Test area | Key classes |
 |-----------|-------------|
 | End-to-end CLI | `IpssCmdTest`, `ReportCliTest` |
-| Runners | `AclfRunnerTest`, `ContingencyRunnerTest` |
+| Runners | `AclfRunnerTest`, `ContingencyRunnerTest`, `OptAdjRunnerTest`, `OptAdjRunConfigTest` |
 | Bridge | `IpssAgentBridgeTest`, `SimuModelRepositoryTest` |
 | Input adapters | `IeeeFileAdapterTest`, `PsseFileAdapterTest`, `BpaFileAdapterTest`, `NetworkLoaderTest` |
 | Report analyzers | `AnalyzerTest` |

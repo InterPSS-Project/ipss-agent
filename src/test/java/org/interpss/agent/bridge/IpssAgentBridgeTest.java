@@ -285,6 +285,77 @@ class IpssAgentBridgeTest {
         assertThat(resultsDir.resolve(stem + "_DF_contingency.csv")).exists();
     }
 
+    /** An unknown mode is named, and the case is never touched. */
+    @Test
+    void runOptAdjWithConfig_rejectsAnUnknownMode() {
+        String json = bridge.runOptAdjWithConfig("ieee", casePath, null, resultsDir.toString(), stem,
+                false, "{\"optAdjType\":\"genAdjN2\"}");
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isFalse();
+        assertThat(o.get("error").getAsString())
+                .contains("unsupported optAdjType 'genAdjN2'")
+                .contains("genAdjBaseCase|genAdjCaN_1");
+    }
+
+    /**
+     * The precondition the runner refuses on: the LP needs a P gen limit per control gen and the
+     * scan needs rating MVA 1 per branch, and the IEEE 14 fixture has neither.
+     */
+    @Test
+    void runOptAdjWithConfig_refusesACaseWithoutLimitsOrRatings() {
+        String json = bridge.runOptAdjWithConfig("ieee", casePath, null, resultsDir.toString(), stem,
+                true, "{}");
+        JsonObject o = JsonParser.parseString(json).getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).isFalse();
+        assertThat(o.get("error").getAsString())
+                .containsAnyOf("have no P gen limit", "no rating MVA 1");
+    }
+
+    /** The success path through the bridge, on the IEEE 39 fixture with its limits applied. */
+    @Test
+    void runOptAdjWithConfig_redispatchWritesBothCsvs() throws Exception {
+        Path caseDir = Files.createDirectories(tempDir.resolve("ieee39"));
+        Path ieee39 = caseDir.resolve("ieee39.ieee");
+        Files.copy(Path.of(AgentTestSupport.IEEE39_CASE).toAbsolutePath(), ieee39);
+        Path scripts = Files.createDirectories(caseDir.resolve("scripts"));
+        Files.writeString(scripts.resolve("limits.gvy"), """
+                import org.interpss.numeric.datatype.LimitType
+
+                aclfnet.busList.each { bus ->
+                    if (bus.genP == 0.0) { bus.contributeGenList.clear() }
+                }
+                aclfnet.createAclfGenUIDLookupTable(true).values().each { gen ->
+                    if (gen.name == "Bus39-G1") { gen.pGenLimit = new LimitType(10.0, 0.0) }
+                    else if (gen.name == "Bus38-G1") { gen.pGenLimit = new LimitType(8.3, 0.0) }
+                    else { gen.pGenLimit = new LimitType(7.0, 0.0) }
+                }
+                aclfnet.branchList.each { b -> b.ratingMva1 = b.isLine() ? 600.0 : 800.0 }
+                return 'ieee39 fixture applied'
+                """);
+        String absCase = ieee39.toString();
+        JsonObject applied = JsonParser.parseString(
+                bridge.runGvy("ieee", absCase, scripts.resolve("limits.gvy").toString(), true))
+                .getAsJsonObject();
+        assertThat(applied.get("ok").getAsBoolean()).as(applied.toString()).isTrue();
+
+        JsonObject o = JsonParser.parseString(bridge.runOptAdjWithConfig("ieee", absCase, null,
+                resultsDir.toString(), "ieee39", false, "{\"optAdjType\":\"genAdjBaseCase\"}"))
+                .getAsJsonObject();
+
+        assertThat(o.get("ok").getAsBoolean()).as(o.toString()).isTrue();
+        assertThat(o.get("optAdjType").getAsString()).isEqualTo("genAdjBaseCase");
+        assertThat(o.get("scanLoadingThreshold").getAsDouble()).isEqualTo(50.0);
+        assertThat(o.get("optAdjLoadingThreshold").getAsDouble()).isEqualTo(100.0);
+        assertThat(o.get("overLimitBefore").getAsInt()).isPositive();
+        assertThat(o.get("genFile").getAsString()).isEqualTo("ieee39_DF_optadj_gen.csv");
+        assertThat(o.get("branchFile").getAsString()).isEqualTo("ieee39_DF_optadj_branch.csv");
+        assertThat(resultsDir.resolve("ieee39_DF_optadj_gen.csv")).exists().content().isNotEmpty();
+        assertThat(resultsDir.resolve("ieee39_DF_optadj_branch.csv")).exists().content().isNotEmpty();
+        assertThat(o.get("optAdjSummary").getAsString()).contains("OptAdjSummary:");
+    }
+
     @Test
     void getNetworkInfo_returnsEmptyBeforeLoad() {
         assertThat(bridge.getNetworkInfo()).isEmpty();
