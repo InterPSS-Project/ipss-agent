@@ -765,6 +765,16 @@ function optAdjConfigPayload(config) {
   return out
 }
 
+// The two CSVs an OptAdj run writes. The runner decides the names and reports them in the bridge
+// reply (`genFile`/`branchFile`); this mirrors `OptAdjRunner`'s rule for the two paths that have no
+// reply to read — the CLI fallback, and a JAR that predates those reply keys. The N-1 mode carries
+// the `N1` infix so its pair cannot overwrite a basecase pair in the same result folder.
+// Guard §22 pins this rule against the Java runner and the client's file lookup.
+function optAdjResultNames(stem, optAdjType) {
+  const suffix = optAdjType === 'genAdjCaN_1' ? '_DF_optadj_N1' : '_DF_optadj'
+  return { genFile: stem + suffix + '_gen.csv', branchFile: stem + suffix + '_branch.csv' }
+}
+
 // The dialog reports how many entries a candidate file holds, which means
 // parsing every .json in the case folder; skip absurd ones.
 // config/net_diagram.json: the Diagram tab's flag thresholds and colours, edited from the tab's
@@ -2148,12 +2158,14 @@ class InterpssService extends TypertRemoteService {
           JSON.stringify(optAdjConfigPayload(config)))
         const parsed = JSON.parse(raw)
         if (parsed && parsed.ok) {
+          const type = parsed.optAdjType || config.optAdjType
+          const names = optAdjResultNames(stem, type)
           return {
             ok: true,
             resultDir: resultDir,
-            genFile: parsed.genFile || (stem + '_DF_optadj_gen.csv'),
-            branchFile: parsed.branchFile || (stem + '_DF_optadj_branch.csv'),
-            optAdjType: parsed.optAdjType || config.optAdjType,
+            genFile: parsed.genFile || names.genFile,
+            branchFile: parsed.branchFile || names.branchFile,
+            optAdjType: type,
             scanLoadingThreshold: parsed.scanLoadingThreshold,
             optAdjLoadingThreshold: parsed.optAdjLoadingThreshold,
             contingencies: parsed.contingencies,
@@ -2198,11 +2210,12 @@ class InterpssService extends TypertRemoteService {
     }
 
     const summary = /OptAdjSummary:[\s\S]*?Branch Loadings=\S+/.exec(res.stdout.text || '')
+    const names = optAdjResultNames(stem, config.optAdjType)
     return {
       ok: true,
       resultDir: resultDir,
-      genFile: stem + '_DF_optadj_gen.csv',
-      branchFile: stem + '_DF_optadj_branch.csv',
+      genFile: names.genFile,
+      branchFile: names.branchFile,
       optAdjType: config.optAdjType,
       optAdjSummary: summary ? summary[0].trim() : null,
       stdout: res.stdout.text,
@@ -3917,7 +3930,9 @@ function caseOptAdjTool(ctx) {
       'scripts/ieee39_limit_setup.gvy first). Writes <stem>_DF_optadj_gen.csv (genName, genP, adjP, ' +
       'limitMax, limitMin) and <stem>_DF_optadj_branch.csv (branchId, outageBranchId, limitMW, ' +
       'baseFlowMW, loadingBeforePct, shiftedFlowMWAfter, loadingAfterPct) under ' +
-      'wspace/<case dir>/result/.',
+      'wspace/<case dir>/result/ — or, for `optAdjType` "genAdjCaN_1", the same pair under the N1 ' +
+      'infix (<stem>_DF_optadj_N1_gen.csv / <stem>_DF_optadj_N1_branch.csv), so the two modes keep ' +
+      'separate result files. The reply\'s `genFile` / `branchFile` name what was written.',
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -4132,15 +4147,17 @@ function caseOptAdjTool(ctx) {
           return fail(String((parsed && parsed.error) || 'bridge runOptAdj failed'), source)
         }
         adoptLoadedCase(sessionId, target)
+        const type = typeof parsed.optAdjType === 'string' ? parsed.optAdjType : config.optAdjType
+        const names = optAdjResultNames(stem, type)
         const value = {
           ok: true,
           case: target.input,
           source: source,
           format: target.format,
           resultDir: parent + '/result',
-          optAdjType: typeof parsed.optAdjType === 'string' ? parsed.optAdjType : config.optAdjType,
-          genFile: typeof parsed.genFile === 'string' ? parsed.genFile : stem + '_DF_optadj_gen.csv',
-          branchFile: typeof parsed.branchFile === 'string' ? parsed.branchFile : stem + '_DF_optadj_branch.csv',
+          optAdjType: type,
+          genFile: typeof parsed.genFile === 'string' ? parsed.genFile : names.genFile,
+          branchFile: typeof parsed.branchFile === 'string' ? parsed.branchFile : names.branchFile,
           optAdjSummary: typeof parsed.optAdjSummary === 'string' ? parsed.optAdjSummary : '',
         }
         if (config.contingencyFile !== null) value.contingencyFile = config.contingencyFile

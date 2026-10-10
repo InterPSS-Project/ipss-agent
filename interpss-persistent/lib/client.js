@@ -4848,8 +4848,20 @@ module.exports = {
       }
     }
 
+    // The explorer resolves a kind to one of the files the tool reported, by suffix. OptAdj writes
+    // two pairs — basecase `_DF_optadj_gen.csv` / `_DF_optadj_branch.csv`, N-1
+    // `_DF_optadj_N1_gen.csv` / `_DF_optadj_N1_branch.csv` — so a kind also matches its own suffix
+    // with the mode infix in front of the last segment (guard §22 pins the rule against
+    // `OptAdjRunner` and the Host's `optAdjResultNames`).
+    function kindFileSuffixes(kind) {
+      const cut = kind.lastIndexOf('_')
+      if (cut < 0) return ['_DF_' + kind + '.csv']
+      return ['_DF_' + kind + '.csv', '_DF_' + kind.slice(0, cut) + '_N1' + kind.slice(cut) + '.csv']
+    }
+
     function explorerPathForKind(meta, kind) {
-      const name = meta.files.filter((f) => f.indexOf('_DF_' + kind + '.csv') !== -1)[0]
+      const suffixes = kindFileSuffixes(kind)
+      const name = meta.files.filter((f) => suffixes.some((s) => f.indexOf(s) !== -1))[0]
       return name === undefined ? null : meta.resultDir + '/' + name
     }
 

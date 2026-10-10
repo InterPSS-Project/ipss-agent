@@ -109,8 +109,12 @@ The N-1 listed default is every branch not connected to the reference bus.
 
 | CSV | Columns |
 |---|---|
-| `<stem>_DF_optadj_gen.csv` | `genName, genP, adjP, limitMax, limitMin` — one row per reported generator, largest `adjP` first, in **MW** (a `[0, 7] pu` limit shows as `700`) |
-| `<stem>_DF_optadj_branch.csv` | `branchId, outageBranchId, limitMW, baseFlowMW, loadingBeforePct, shiftedFlowMWAfter, loadingAfterPct` — one row per scanned entry, before and after; `outageBranchId` empty in basecase mode. The runner writes `shiftedFlowMWAfter` as `0.0` on every row, so read `loadingAfterPct` (or derive `loadingAfterPct × limitMW / 100`) rather than that column |
+| `<stem>_DF_optadj_gen.csv` (basecase) / `<stem>_DF_optadj_N1_gen.csv` (`genAdjCaN_1`) | `genName, genP, adjP, limitMax, limitMin` — one row per reported generator, largest `adjP` first, in **MW** (a `[0, 7] pu` limit shows as `700`) |
+| `<stem>_DF_optadj_branch.csv` (basecase) / `<stem>_DF_optadj_N1_branch.csv` (`genAdjCaN_1`) | `branchId, outageBranchId, limitMW, baseFlowMW, loadingBeforePct, shiftedFlowMWAfter, loadingAfterPct` — one row per scanned entry, before and after; `outageBranchId` empty in basecase mode. The runner writes `shiftedFlowMWAfter` as `0.0` on every row, so read `loadingAfterPct` (or derive `loadingAfterPct × limitMW / 100`) rather than that column |
+
+The N-1 pair carries the `N1` infix since 0.7.5 (the mode picks the name, so a basecase run and an
+N-1 run of the same case do not overwrite each other); the values in this skill's examples below are
+from the basecase pair.
 
 The settled card shows the summary plus an **Explore results** row with a **Gen adjustments** and a
 **Branch loading** table, paged through the same endpoint the tab uses and opened worst

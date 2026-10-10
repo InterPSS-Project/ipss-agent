@@ -2638,18 +2638,70 @@ check('the tool, its RPC and its card are all registered',
   && rd(LIB_HOST).indexOf("'runOptAdj'") >= 0
   && rd(LIB_CLIENT).indexOf("key: 'interpss_case_optadj'") >= 0);
 // The two result files are named in three places; the client's explorer resolves a kind by the
-// `_DF_<kind>.csv` suffix, so a renamed column file would leave an empty card with no error.
-check('the two result CSVs are named the same in Java, Host and client',
-  rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
-    .indexOf('"_DF_optadj_gen.csv"') >= 0
-  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
-    .indexOf('"_DF_optadj_branch.csv"') >= 0
+// `_DF_<kind>.csv` suffix, so a renamed column file would leave an empty card with no error. The
+// OptAdj N-1 mode carries an `N1` infix in front of the last segment (0.7.5), which is exactly the
+// shape a bare suffix match misses: the runner writes `_DF_optadj_N1_gen.csv`, the explorer looks
+// for `_DF_optadj_gen.csv`, and the card renders nothing.
+const OPTADJ_RUNNER_JAVA = join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java');
+check('the Java OptAdj runner names its two CSVs from the run mode',
+  rd(OPTADJ_RUNNER_JAVA).indexOf('String suffix = cfg.isCaN1() ? "_DF_optadj_N1" : "_DF_optadj"') >= 0
+  && rd(OPTADJ_RUNNER_JAVA).indexOf('String genCsv = stem + suffix + "_gen.csv"') >= 0
+  && rd(OPTADJ_RUNNER_JAVA).indexOf('String branchCsv = stem + suffix + "_branch.csv"') >= 0,
+  rd(OPTADJ_RUNNER_JAVA).indexOf('"_DF_optadj_N1"') >= 0 ? 'N1 infix on the mode' : 'no mode-dependent suffix');
+// The Host mirrors that rule for the two paths that have no bridge reply to read; running the
+// extracted helper is what proves the mirror produces the runner's names (both modes) rather than
+// only containing the right-looking text.
+const optAdjNamesBody = (path) => {
+  const m = /function optAdjResultNames\(stem, optAdjType\) \{([\s\S]*?)\n[ \t]*\}/.exec(rd(path));
+  return m === null ? null : m[1];
+};
+const optAdjNamesFn = (path) => {
+  const body = optAdjNamesBody(path);
+  if (body === null) return null;
+  try { return new Function('stem', 'optAdjType', body); } catch (e) { return null; }
+};
+const optAdjHostFns = [LIB_HOST, DYN_HOSTB, DYN_HOST].map(optAdjNamesFn);
+const optAdjNamesOf = (fn, type) => {
+  try { return fn === null ? null : fn('ieee39', type); } catch (e) { return null; }
+};
+const optAdjPair = (fn, type) => {
+  const names = optAdjNamesOf(fn, type);
+  return names === null ? null : names.genFile + '|' + names.branchFile;
+};
+check('the Host mirrors the runner\'s names for both modes',
+  optAdjHostFns.every((fn) => optAdjPair(fn, 'genAdjBaseCase') === 'ieee39_DF_optadj_gen.csv|ieee39_DF_optadj_branch.csv'
+    && optAdjPair(fn, 'genAdjCaN_1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'),
+  optAdjHostFns.map((fn) => optAdjPair(fn, 'genAdjCaN_1')).join(' / '));
+// The client's kind lookup, run for the same reason: `optadj_gen` must find both the basecase and
+// the N-1 generator file, and must not pick up the other kind's N-1 file.
+const kindSuffixBody = (() => {
+  const m = /function kindFileSuffixes\(kind\) \{([\s\S]*?)\n[ \t]*\}/.exec(rd(LIB_CLIENT));
+  return m === null ? null : m[1];
+})();
+const kindSuffixes = (() => {
+  if (kindSuffixBody === null) return null;
+  try { return new Function('kind', kindSuffixBody); } catch (e) { return null; }
+})();
+const kindMatches = (kind, file) => {
+  if (kindSuffixes === null) return false;
+  try { return kindSuffixes(kind).some((s) => file.indexOf(s) !== -1); } catch (e) { return false; }
+};
+check('the client\'s kind lookup accepts the N-1 pair and tells the two kinds apart',
+  kindMatches('optadj_gen', 'ieee39_DF_optadj_gen.csv')
+  && kindMatches('optadj_gen', 'ieee39_DF_optadj_N1_gen.csv')
+  && kindMatches('optadj_branch', 'ieee39_DF_optadj_branch.csv')
+  && kindMatches('optadj_branch', 'ieee39_DF_optadj_N1_branch.csv')
+  && !kindMatches('optadj_gen', 'ieee39_DF_optadj_N1_branch.csv')
+  && !kindMatches('optadj_branch', 'ieee39_DF_optadj_N1_gen.csv')
+  && kindMatches('bus', 'ieee39_DF_bus.csv')
+  && !kindMatches('bus', 'ieee39_DF_optadj_N1_gen.csv')
   && rd(LIB_HOST).indexOf('optadjGenCsv: String(value.genFile') >= 0
   && rd(LIB_HOST).indexOf('optadjBranchCsv: String(value.branchFile') >= 0
   && rd(LIB_CLIENT).indexOf("kind: 'optadj_gen'") >= 0
   && rd(LIB_CLIENT).indexOf("kind: 'optadj_branch'") >= 0
   && rd(LIB_CLIENT).indexOf('meta.optadjGenCsv') >= 0
-  && rd(LIB_CLIENT).indexOf('meta.optadjBranchCsv') >= 0);
+  && rd(LIB_CLIENT).indexOf('meta.optadjBranchCsv') >= 0,
+  kindSuffixes === null ? 'no kindFileSuffixes' : String(kindSuffixes('optadj_gen')));
 check('the OptAdj runner, bridge entry point and config path exist',
   rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
     .indexOf('public static OptAdjSummary runOnNet(') >= 0

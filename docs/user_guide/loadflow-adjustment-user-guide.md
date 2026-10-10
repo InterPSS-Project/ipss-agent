@@ -399,7 +399,7 @@ Without these, the IEEE-39 demos do not show meaningful overloads (and the Chat 
 | Case          | `wspace/data/ieee/ieee39/ieee39.ieee`                                   |
 | Config        | `optAdjType: genAdjBaseCase`, scan **50%**, enforce **100%**            |
 | Limits script | `ieee39_limit_setup.gvy`                                                |
-| Result files  | `result/ieee39_DF_optadj_gen.csv`, `result/ieee39_DF_optadj_branch.csv` |
+| Result files  | `result/ieee39_DF_optadj_gen.csv`, `result/ieee39_DF_optadj_branch.csv` (an N-1 run writes the `…_optadj_N1_…` pair) |
 
 
 
@@ -490,8 +490,8 @@ above 100% when gen limits bind — that is normal for the LP.
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | `overLimitBefore` / `overLimitAfter` | Entries at or above the OptAdj threshold, before and after                                                     |
 | `controlGens` / `gensAdjusted`       | Generators considered / moved by a material `adjP`                                                             |
-| `<stem>_DF_optadj_gen.csv`           | `genName, genP, adjP, limitMax, limitMin` — MW; largest `adjP` first                                           |
-| `<stem>_DF_optadj_branch.csv`        | `branchId, outageBranchId, limitMW, …, loadingBeforePct, loadingAfterPct` — `outageBranchId` empty in basecase |
+| `<stem>_DF_optadj_gen.csv`           | `genName, genP, adjP, limitMax, limitMin` — MW; largest `adjP` first (N-1: `<stem>_DF_optadj_N1_gen.csv`)    |
+| `<stem>_DF_optadj_branch.csv`        | `branchId, outageBranchId, limitMW, …, loadingBeforePct, loadingAfterPct` — `outageBranchId` empty in basecase (N-1: `<stem>_DF_optadj_N1_branch.csv`) |
 
 
 Suggested follow-on: `$ipss-case-aclf` or `$ipss-case-ca` on the redispatched held model (or

@@ -86,6 +86,9 @@ class OptAdjRunnerTest {
 
         Path genCsv = resultsDir.resolve(summary.genCsv());
         Path branchCsv = resultsDir.resolve(summary.branchCsv());
+        // The basecase mode keeps the un-suffixed pair.
+        assertThat(summary.genCsv()).isEqualTo(stem + "_DF_optadj_gen.csv");
+        assertThat(summary.branchCsv()).isEqualTo(stem + "_DF_optadj_branch.csv");
         assertThat(genCsv).exists().content().isNotEmpty();
         assertThat(branchCsv).exists().content().isNotEmpty();
         String genHeader = Files.readString(genCsv).lines().findFirst().orElse("");
@@ -112,7 +115,14 @@ class OptAdjRunnerTest {
         assertThat(summary.contingencies()).isEqualTo(45);
         assertThat(summary.scanned()).isPositive();
         assertThat(summary.overLimitAfter()).isLessThanOrEqualTo(summary.overLimitBefore());
+        // The N-1 mode carries the `N1` infix in both names (0.7.5), so it cannot overwrite a
+        // basecase pair in the same result folder.
+        assertThat(summary.genCsv()).isEqualTo(stem + "_DF_optadj_N1_gen.csv");
+        assertThat(summary.branchCsv()).isEqualTo(stem + "_DF_optadj_N1_branch.csv");
         assertThat(resultsDir.resolve(summary.branchCsv())).exists().content().isNotEmpty();
+        assertThat(resultsDir.resolve(summary.genCsv())).exists().content().isNotEmpty();
+        assertThat(resultsDir.resolve(stem + "_DF_optadj_gen.csv")).doesNotExist();
+        assertThat(resultsDir.resolve(stem + "_DF_optadj_branch.csv")).doesNotExist();
 
         System.out.println(summary);
     }

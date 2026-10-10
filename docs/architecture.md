@@ -227,6 +227,7 @@ IpssCmd optadj <format> <input> [<cont_file>]
   4. AclfNetLoadFlowOptimizer(true) | AclfNetContigencyOptimizer(true).optimize(algo, result, optAdj %)
   5. calculateDclf + re-scan the SAME monitored set
   6. two DataFrames → stem_DF_optadj_gen.csv, stem_DF_optadj_branch.csv
+     (the N-1 mode writes the same pair as stem_DF_optadj_N1_gen.csv / _N1_branch.csv)
 ```
 
 `OptAdjRunner` serves the CLI, the bridge (`IpssAgentBridge.runOptAdjWithConfig`) and the chat tool

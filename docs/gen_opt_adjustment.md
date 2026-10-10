@@ -333,7 +333,10 @@ named without `SsaResult` in the class name (e.g. `IEEE39_OptBasecase_Sparse_Sam
   (`IpssAgentBridge.runOptAdjWithConfig`) and the chat tool `interpss_case_optadj`, with
   `config/opt_adj_run.json` persisted per case beside `ca_run.json`. `OptAdjRunConfig` now also
   carries `contingencyMode`/`contingencyFile` (the `custom` N-1 input) and `threads` (`0` = one SSA
-  worker per processor); the three-argument constructor calls above still compile.
+  worker per processor); the three-argument constructor calls above still compile. Since 0.7.5 each
+  mode writes its own result pair — `_DF_optadj_gen.csv` / `_DF_optadj_branch.csv` for the basecase,
+  `_DF_optadj_N1_gen.csv` / `_DF_optadj_N1_branch.csv` for `genAdjCaN_1` — so the two runs can share
+  one `result/` folder.
 - Related but different: voltage control via load Q is documented in
   [load-q-adjustment.md](load-q-adjustment.md), not here.
 

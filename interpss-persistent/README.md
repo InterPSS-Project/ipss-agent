@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.4**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+GUI (**0.7.5**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.4**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.5**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -50,7 +50,9 @@ parameters and results, no build-time Typert compiler required.
   threshold.
 - **Generator redispatch (OptAdj)** — `interpss_case_optadj` (0.7.4) relieves basecase or N-1
   branch overloads by redispatching control generators (SSA scan → linear program → re-scan),
-  writing `<stem>_DF_optadj_gen.csv` and `<stem>_DF_optadj_branch.csv`; its card pages both from an
+  writing `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv` for the basecase and
+  `<stem>_DF_optadj_N1_gen.csv` + `<stem>_DF_optadj_N1_branch.csv` for the N-1 mode (0.7.5), so
+  the two runs keep separate result files; its card pages both from an
   **Explore results** row. It **mutates the held model's generator P** (`reload: true` starts from
   the case file again) and needs a P gen limit per generator plus a rating MVA 1 per branch — see
   [docs/gen_opt_adjustment.md](../docs/gen_opt_adjustment.md).

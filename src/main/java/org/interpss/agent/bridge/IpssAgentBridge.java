@@ -139,8 +139,9 @@ public final class IpssAgentBridge {
      * <p>
      * {@code reload} re-parses the case first, because the run overwrites the held model's
      * generator P ({@code AclfNetSsaHelper} + the optimizer redispatch the cached network).
-     * Writes {@code stem_DF_optadj_gen.csv} and {@code stem_DF_optadj_branch.csv} under
-     * {@code absoluteResultsDir}.
+     * Writes {@code stem_DF_optadj_gen.csv} + {@code stem_DF_optadj_branch.csv}, or the
+     * {@code _DF_optadj_N1_} pair in the N-1 mode, under {@code absoluteResultsDir}; the reply's
+     * {@code genFile} / {@code branchFile} name the two files actually written.
      */
     public synchronized String runOptAdjWithConfig(String format, String absoluteCasePath,
             String absoluteContPath, String absoluteResultsDir, String stem, boolean reload,

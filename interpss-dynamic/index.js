@@ -529,6 +529,13 @@ export default {
       return out
     }
 
+    // The two result CSVs: the runner's names, mirrored for the CLI fallback and for a JAR that
+    // predates the reply's genFile/branchFile. The N-1 mode carries the `N1` infix (0.7.5).
+    function optAdjResultNames(stem, optAdjType) {
+      const suffix = optAdjType === 'genAdjCaN_1' ? '_DF_optadj_N1' : '_DF_optadj'
+      return { genFile: stem + suffix + '_gen.csv', branchFile: stem + suffix + '_branch.csv' }
+    }
+
     // The dialog reports how many entries a candidate file holds, which means
     // parsing every .json in the case folder; skip absurd ones.
     // config/net_diagram.json: the Diagram tab's flag thresholds and colours, edited from the tab's
@@ -1501,12 +1508,14 @@ function caConfigPath(root, parent) {
               reload, JSON.stringify(optAdjConfigPayload(optAdjConfig)))
             const parsed = JSON.parse(raw)
             if (parsed && parsed.ok) {
+              const type = parsed.optAdjType || optAdjConfig.optAdjType
+              const names = optAdjResultNames(stem, type)
               return {
                 ok: true,
                 resultDir: resultDir,
-                genFile: parsed.genFile || (stem + '_DF_optadj_gen.csv'),
-                branchFile: parsed.branchFile || (stem + '_DF_optadj_branch.csv'),
-                optAdjType: parsed.optAdjType || optAdjConfig.optAdjType,
+                genFile: parsed.genFile || names.genFile,
+                branchFile: parsed.branchFile || names.branchFile,
+                optAdjType: type,
                 optAdjSummary: typeof parsed.optAdjSummary === 'string' ? parsed.optAdjSummary : null,
                 stdout: parsed.stdout || '',
                 stderr: parsed.stderr || '',
@@ -1542,11 +1551,12 @@ function caConfigPath(root, parent) {
         }
 
         const summary = /OptAdjSummary:[\s\S]*?Branch Loadings=\S+/.exec(res.stdout.text || '')
+        const names = optAdjResultNames(stem, optAdjConfig.optAdjType)
         return {
           ok: true,
           resultDir: resultDir,
-          genFile: stem + '_DF_optadj_gen.csv',
-          branchFile: stem + '_DF_optadj_branch.csv',
+          genFile: names.genFile,
+          branchFile: names.branchFile,
           optAdjType: optAdjConfig.optAdjType,
           optAdjSummary: summary ? summary[0].trim() : null,
           stdout: res.stdout.text,

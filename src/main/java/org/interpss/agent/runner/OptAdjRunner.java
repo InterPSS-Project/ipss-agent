@@ -70,6 +70,12 @@ public final class OptAdjRunner {
      * In-process core: run the OptAdj flow on an already-loaded {@code net} and write
      * {@code stem_DF_optadj_gen.csv} (one row per adjusted generator) and
      * {@code stem_DF_optadj_branch.csv} (one row per scanned entry, before and after).
+     * <p>
+     * The {@link OptAdjRunConfig#GEN_ADJ_CA_N1} mode writes the same pair under a {@code N1} infix
+     * instead — {@code stem_DF_optadj_N1_gen.csv} / {@code stem_DF_optadj_N1_branch.csv} — so a
+     * basecase result and an N-1 result for one case can live in the same {@code result/} folder
+     * without the second run silently overwriting the first.
+     * <p>
      * Shared by the CLI ({@code IpssCmd}) and the in-process bridge ({@code IpssAgentBridge}).
      * <p>
      * A non-null {@code contPath} is only meaningful for
@@ -151,8 +157,11 @@ public final class OptAdjRunner {
         }
 
         Files.createDirectories(resultsDir);
-        String genCsv = stem + "_DF_optadj_gen.csv";
-        String branchCsv = stem + "_DF_optadj_branch.csv";
+        // Each mode owns its own pair: `_DF_optadj_*` for the basecase, `_DF_optadj_N1_*` for the
+        // N-1 scan, so the two can share one result folder (and the client can open either).
+        String suffix = cfg.isCaN1() ? "_DF_optadj_N1" : "_DF_optadj";
+        String genCsv = stem + suffix + "_gen.csv";
+        String branchCsv = stem + suffix + "_branch.csv";
         Csv.saver().save(genFrame(adjustments), resultsDir.resolve(genCsv).toString());
         Csv.saver().save(branchFrame(before, after, cfg.isCaN1()), resultsDir.resolve(branchCsv).toString());
 

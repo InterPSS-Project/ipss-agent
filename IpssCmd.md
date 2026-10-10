@@ -151,7 +151,8 @@ Results are written under `wspace/<input_parent>/result/`:
 - `<stem>_DF_gen.csv`
 - `<stem>_DF_load.csv`
 - `<stem>_DF_contingency.csv` (CA only)
-- `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv` (OptAdj only)
+- `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv` (OptAdj basecase)
+- `<stem>_DF_optadj_N1_gen.csv` + `<stem>_DF_optadj_N1_branch.csv` (OptAdj N-1, `genAdjCaN_1`)
 
 See [Setup.md](Setup.md) for the full layout and the report generators in
 [GenReport.md](GenReport.md).

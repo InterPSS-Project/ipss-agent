@@ -153,7 +153,7 @@ bus/branch tooltips resolve against.
 
 | Rule | Detail |
 |------|--------|
-| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus **in the file**, whatever its voltage. The Diagram tab paints an out-of-band bus red *while it renders* (0.6.18, see "How the app reads a diagram") — that colour is never written to the `.drawio` |
+| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus **in the file**, whatever its voltage. The Diagram tab paints an out-of-band bus red *while it renders* (0.6.18, see "Diagram tab — SVG viewer ↔ selected case data") — that colour is never written to the `.drawio` |
 | Labels | `Bus-N` only (no name, no data), centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
 | Branches | thin black (`strokeWidth 1.5`), **undirected** (`endArrow=none`), no edge text, staggered taps so parallel lines leave a bar at different heights |
 | Transformers | two interlocking 16 x 16 rings (`fillColor=none`, centres 8 px apart) inside one `style=group` cell, sitting inline on the branch |
@@ -162,7 +162,79 @@ bus/branch tooltips resolve against.
 | Page | white background rect over the page, title and subtitle top-left, legend box top-right listing only the symbols |
 | Voltage | not drawn. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix when present (`V1` 345 kV, `V2` 138 kV, `V3` 161 kV), else the bus table's `NomVolt` when that is a real voltage (`132000` -> 132 kV), else no voltage text at all |
 
-## How the app reads a diagram
+## Diagram tab — SVG viewer ↔ selected case data
+
+The **Diagram** tab (plugin 0.6.8+; the only preview surface since 0.6.9) is not a free-standing
+file browser. Its inline SVG viewer is keyed to **whichever simulation case the InterPSS tab has
+selected** (or that Chat last loaded into the bridge). Geometry comes from that case's
+`diagram/*.drawio`; voltages, flows, tooltips, search/filter and flag colours come from the same
+case's `result/` tables and from workspace `config/net_diagram.json`. The `.drawio` itself stays
+topology-only — one grey per bar, no baked-in alert colours.
+
+Practical how-to: [oneline_diagram_user_guide.md](user_guide/oneline_diagram_user_guide.md).
+Implementation notes: [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md).
+
+### Case selection (what the tab follows)
+
+| Source | How it reaches the Diagram tab |
+|--------|--------------------------------|
+| InterPSS tab **Simu Case** picker | `onCaseChanged(input)` writes the module-level `selectedCaseInput`; the Diagram view seeds from it on mount |
+| Chat tool load (`interpss_case_load` / `$ipss-case-load`) | One-shot `getBridgeCase` on Diagram mount adopts the bridge's held case into the same `selectedCaseInput` |
+| Tab switch | Conversation views mount one at a time, so a remount always re-reads the shared selection — no poll, no second clock |
+
+The Diagram tab never owns its own case picker. Changing the InterPSS selection (or loading from
+Chat) clears the previous diagram, result indexes and tooltips, bumps a `diagramSeq` so a late RPC
+for the old case is dropped, and reloads everything for the new path. A case with no
+`diagram/*.drawio` yet renders "no diagram" rather than an error.
+
+### Data the SVG viewer binds per case
+
+| Layer | Path / RPC | Role in the SVG |
+|-------|------------|-----------------|
+| Drawing | `<case>/diagram/*.drawio` via `listDrawioFiles` → `readDrawio` | Geometry: bus bars, labels, branches, transformer groups. Parsed once (`parseDrawioScene` → `drawioBranchPairs`); painted as inline SVG by `DrawioDiagram` |
+| Result dir | `checkResult` → `resultDir` + file list | Locates the ACLF/CA CSVs that annotate the open scene |
+| Bus results | `result/<stem>_DF_bus.csv` via paged `readCsv` | Out-of-band `|V|` flags (`VoltMag` by **header name**); area/zone/name for Search/Filter (`busMeta`, loaded on demand) |
+| Branch results | `result/<stem>_DF_branch.csv` via paged `readCsv` | Branch tooltips; base-case `Loading%` flow flags; canonical `BusN` spellings for id matching |
+| Contingency results | `result/<stem>_DF_contingency.csv` via paged `readCsv` (when present) | Contingency loading line on branch tooltips; contingency flow flags / filter |
+| Live bus detail | `busConnections` on hover (cached with neighbours) | Full bus tooltip — same wording as the InterPSS connection diagram |
+| Flag config | `config/net_diagram.json` via `getNetDiagramOptions` / gear → `saveNetDiagramOptions` | Bus voltage band/colour, base-case and contingency flow %/colours, birdseye on/off |
+
+Without ACLF CSVs the drawing still opens; tooltips say `no result data — run ACLF`, and no red /
+flow colours appear. Without a CA table, contingency lines and contingency filters stay off.
+
+### Load → paint pipeline
+
+```
+InterPSS / Chat selects case
+        │
+        ▼
+selectedCaseInput ──► listDrawioFiles(case)
+        │                 │
+        │                 ├─ 0 files → "no diagram yet"
+        │                 ├─ 1 file  → open it
+        │                 └─ N files → picker (remembers diagramChoice)
+        │
+        ├─► checkResult(case) ──► resultDir, *_DF_bus / *_DF_branch / *_DF_contingency
+        │         │
+        │         ├─► readCsv(branch) ──► pair index + Loading% map
+        │         ├─► readCsv(bus)    ──► busAlerts (|V| band) + busMeta (on dialog open)
+        │         └─► readCsv(contingency) ──► contingency LoadingPercent map
+        │
+        └─► readDrawio(path) ──► diagramXmlFrom ──► parseDrawioScene
+                                      │
+                                      ▼
+                              DrawioDiagram(scene, alert, match, hidden, flow colours…)
+                                      │
+                                      ▼
+                              inline SVG (theme tokens + paint-time overlays)
+```
+
+Caps: **20000 cells** / **4 MiB** per file (0.6.20). Theme remaps near-greys to CSS tokens; saturated
+flag and search colours pass through unchanged. Search hits paint **green** (`#2EA043`, 0.6.36+);
+filters hide non-matching buses **and** their branches/transformer symbols. None of those overlays
+are written back to the `.drawio`.
+
+### How geometry resolves to simulation rows
 
 - **Bus cells** are `busN` (lowercase) and their labels read `Bus-N`; either resolves to the bus, and
   the host matches the id against the result tables' spelling (`bus118` -> `Bus118`). The number
@@ -172,22 +244,30 @@ bus/branch tooltips resolve against.
   alone collapsed every bar onto `bus0` and every branch onto that one cell.
 - **A branch** is one edge between two bus cells, or two stub edges chained through the transformer's
   `group` cell — the group is what pairs both rings *and* both stubs with the same branch, so
-  hovering any part of a transformer gives one tooltip.
+  hovering any part of a transformer gives one tooltip. The branch CSV is indexed once per case as
+  sorted `busa|busb` keys; contingency rows use the head of `BranchID` (`Bus1001->Bus1064(1)`).
 - **Hit areas**: the drawn geometry is far too thin to hover (a 6 px bar, a 1.5 px line), so the
   preview adds a padded transparent rect or a wide invisible stroke twin per interactive cell.
-- **Preview** (the **Diagram** tab, plugin 0.6.8+; 0.6.1–0.6.8 also had a **Diagram** button
-  on the InterPSS tab that opened the same preview in a modal — 0.6.9 removed button and modal,
-  so the tab is the only surface): lists the selected case's `diagram/*.drawio`, renders inline
-  SVG (always rendered — the `R`/`S` toggle and its Source view were removed in 0.6.34), pans/zooms/fits, follows the app theme (near-grey colours are
-  re-expressed as theme tokens; a deliberately coloured element keeps its colour), and
-  shows bus/branch tooltips built from the case's result tables. It renders the subset these
-  diagrams use — square rects (`rounded=0`, honoured since 0.6.33), ellipses, text with its
-  `align`/`verticalAlign`/`spacing`/`labelBackgroundColor` mask, groups, polylines through waypoints — and
-  caps a scene at 20000 cells and reads up to 4 MiB (0.6.20; the earlier 2000-cell / 2 MiB ceilings
-  refused a 2000-bus case). The **Diagram** tab (order 2, beside InterPSS) draws it full-size
-  and follows whichever case
-  the InterPSS tab has selected. Implementation notes:
-  [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md).
+- **Paint-time only**: `DrawioDiagram` takes optional `alert` / `match` / `hidden` / flow-colour maps
+  built from the CSVs and config. The parsed scene keeps authored greys; desktop draw.io and the
+  generator PNG never see the overlays. Voltage band defaults to **0.9–1.1 pu** (strict; endpoints
+  in band) until the gear dialog changes `config/net_diagram.json`.
+- **Renderer subset**: square rects (`rounded=0`, 0.6.33+), ellipses, text with
+  `align`/`verticalAlign`/`spacing`/`labelBackgroundColor`, groups, polylines through waypoints.
+  Always the rendered scene (the `R`/`S` Source toggle was removed in 0.6.34).
+
+### Host RPCs the tab uses
+
+| RPC | Used for |
+|-----|----------|
+| `getBridgeCase` | Adopt a Chat-loaded case on mount |
+| `listDrawioFiles` | List `<case>/diagram/*.drawio` (empty list if none — not an error) |
+| `readDrawio` | Fetch one workspace-relative `.drawio` (≤ 4 MiB) |
+| `checkResult` | Discover `resultDir` and which `*_DF_*.csv` files exist |
+| `readCsv` | Page bus / branch / contingency tables (columns by header name) |
+| `busConnections` | Lazy bus tooltip payload on hover |
+| `getNetDiagramOptions` / `saveNetDiagramOptions` | Read/write flag config |
+| `openDrawio` | Launch the desktop editor for the open file (`config/ipss_plugin_env.json`) |
 
 ## Issues found and fixed
 
