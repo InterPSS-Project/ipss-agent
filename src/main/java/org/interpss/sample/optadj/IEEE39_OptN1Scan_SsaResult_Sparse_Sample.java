@@ -44,12 +44,14 @@ public class IEEE39_OptN1Scan_SsaResult_Sparse_Sample {
 				contList.add(cont);
 			});
 	
-		SsaResultContainer ssaResult = new AclfNetSsaHelper(dclfAlgo).contingencyScan(contList, 90.0);
+		double caN1LoadingThreshold = 90.0;
+		SsaResultContainer ssaResult = new AclfNetSsaHelper(dclfAlgo).contingencyScan(contList, caN1LoadingThreshold);
 		System.out.println("Total number of branches over limit before OptAdj: " + ssaResult.getCaOverLimitInfo().size());
 
 		OptAdjResultContainer optAdjResult = new OptAdjResultContainer(ssaResult);
 		
-		new AclfNetContigencyOptimizer(true).optimize(dclfAlgo, optAdjResult, 100.0);
+		double caN1OptAdjLoadingThreshold = 100.0;
+		new AclfNetContigencyOptimizer(true).optimize(dclfAlgo, optAdjResult, caN1OptAdjLoadingThreshold);
 		optAdjResult.getOptAdjResults().forEach((genName, result) -> {
 			System.out.println("GenAdjustResult: " + genName + ", " + result.toString());
 		});
