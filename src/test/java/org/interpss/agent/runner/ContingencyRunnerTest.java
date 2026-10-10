@@ -14,8 +14,8 @@ import com.interpss.core.algo.dclf.solver.DclfContingencySolutionMethod;
 
 import org.interpss.agent.cli.CliArgs;
 import org.interpss.agent.input.IeeeFileAdapter;
+import org.interpss.agent.runner.config.CaRunConfig;
 import org.interpss.agent.support.AgentTestSupport;
-import org.interpss.agent.util.CaRunConfig;
 import org.interpss.agent.util.ProjectPaths;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

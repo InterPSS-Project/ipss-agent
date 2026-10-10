@@ -3,6 +3,8 @@ package org.interpss.sample.optadj;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.interpss.agent.runner.config.OptAdjRunConfig;
+
 import com.interpss.core.DclfAlgoObjectFactory;
 import com.interpss.core.aclf.AclfBranch;
 import com.interpss.core.aclf.AclfNetwork;
@@ -28,6 +30,8 @@ public class IEEE39_OptN1Scan_SsaResult_Sparse_Sample {
 				CacheType.SenNotCached, true);
 		dclfAlgo.calculateDclf(DclfMethod.INC_LOSS);
 
+		OptAdjRunConfig optAdjRunConfig = new OptAdjRunConfig(OptAdjRunConfig.GEN_ADJ_CA_N1, 90.0, 100.0);
+
 		// define a contingency list
 		List<DclfBranchOutage> contList = new ArrayList<>();
 		net.getBranchList().stream()
@@ -44,14 +48,14 @@ public class IEEE39_OptN1Scan_SsaResult_Sparse_Sample {
 				contList.add(cont);
 			});
 	
-		double caN1LoadingThreshold = 90.0;
-		SsaResultContainer ssaResult = new AclfNetSsaHelper(dclfAlgo).contingencyScan(contList, caN1LoadingThreshold);
+		//double caN1LoadingThreshold = 90.0;
+		SsaResultContainer ssaResult = new AclfNetSsaHelper(dclfAlgo).contingencyScan(contList, optAdjRunConfig.scanLoadingThreshold());
 		System.out.println("Total number of branches over limit before OptAdj: " + ssaResult.getCaOverLimitInfo().size());
 
 		OptAdjResultContainer optAdjResult = new OptAdjResultContainer(ssaResult);
 		
-		double caN1OptAdjLoadingThreshold = 100.0;
-		new AclfNetContigencyOptimizer(true).optimize(dclfAlgo, optAdjResult, caN1OptAdjLoadingThreshold);
+		//double caN1OptAdjLoadingThreshold = 100.0;
+		new AclfNetContigencyOptimizer(true).optimize(dclfAlgo, optAdjResult, optAdjRunConfig.optAdjLoadingThreshold());
 		optAdjResult.getOptAdjResults().forEach((genName, result) -> {
 			System.out.println("GenAdjustResult: " + genName + ", " + result.toString());
 		});

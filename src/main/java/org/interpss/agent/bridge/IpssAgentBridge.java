@@ -12,7 +12,7 @@ import org.interpss.agent.report.ReportType;
 import org.interpss.agent.runner.AclfRunner;
 import org.interpss.agent.runner.ContingencyRunner;
 import org.interpss.agent.runner.GvyScriptRunner;
-import org.interpss.agent.util.CaRunConfig;
+import org.interpss.agent.runner.config.CaRunConfig;
 import org.interpss.agent.util.IpssNetworkInfo;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.result.AclfResultAdapter;

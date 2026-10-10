@@ -1,4 +1,4 @@
-package org.interpss.agent.util;
+package org.interpss.agent.runner.config;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

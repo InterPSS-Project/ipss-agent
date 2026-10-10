@@ -19,7 +19,7 @@ import org.dflib.DataFrame;
 import org.dflib.csv.Csv;
 import org.interpss.agent.cli.CliArgs;
 import org.interpss.agent.input.NetworkLoader;
-import org.interpss.agent.util.CaRunConfig;
+import org.interpss.agent.runner.config.CaRunConfig;
 import org.interpss.agent.util.ProjectPaths;
 import org.interpss.plugin.contingency.definition.BranchContingencyRecord;
 import org.interpss.plugin.contingency.util.ContingencyFileUtil;
