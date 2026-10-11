@@ -1,7 +1,7 @@
 # Release V0.7.7
 
 **Date:** 2026-10-10  
-**Range:** `0.7.0` → `0.7.7` (`dsh-dev`)  
+**Range:** `Release-V0.7.0` → `0.7.7` (`master`)  
 **Package:** `@deepseek-ai/dsh-interpss` **0.7.0 → 0.7.7**
 
 This patch closes the **0.7** line’s OptAdj ↔ Diagram gap: branch tooltips now show post-redispatch

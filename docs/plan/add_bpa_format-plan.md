@@ -23,9 +23,10 @@ isProject: false
 
 Implement on branch **`lib_update`** after commit `af30a106` (*Update dependencies and versioning for InterPSS*):
 
-- [`NetworkLoader`](src/main/java/org/interpss/agent/input/NetworkLoader.java) already has the placeholder:
+- [`NetworkLoader`](../../src/main/java/org/interpss/agent/input/NetworkLoader.java) **now dispatches BPA** (`case "bpa" -> BpaFileAdapter…`). The plan baseline below is historical:
 
 ```java
+// Was (pre-BPA):
 case "psse" -> PsseFileAdapter.createAclfNet(filePath);
 // TODO: add support for bpa format
 default -> throw new IllegalArgumentException("Invalid format: " + format);
@@ -33,7 +34,7 @@ default -> throw new IllegalArgumentException("Invalid format: " + format);
 
 - Runtime already includes BPA: `lib/ipss_runnable.jar` = **ipss.plugin.core 1.4.2**, `ipss.core.lib` **1.4.0**. IEEE ODM JARs were removed; CDF / PSS/E / BPA parsers live under `org.interpss.fadapter` inside `ipss_runnable.jar`.
 - **No new Maven dependencies** for BPA — only agent wiring.
-- [`Setup.md`](Setup.md) / [`docs/architecture.md`](docs/architecture.md) were just rewritten for 1.4.x deps; format tables still say `ieee`, `psse` only — extend those lines carefully without undoing the dependency docs.
+- [`Setup.md`](../../Setup.md) / [`docs/architecture.md`](../architecture.md) were just rewritten for 1.4.x deps; format tables still say `ieee`, `psse` only — extend those lines carefully without undoing the dependency docs.
 
 Plugin fixture layout (also recent): source file for the agent test is still
 
@@ -54,30 +55,30 @@ flowchart LR
 
 ## Approach
 
-Mirror [`IeeeFileAdapter`](src/main/java/org/interpss/agent/input/IeeeFileAdapter.java): one static `createAclfNet(path)` that calls `IpssAdapter.importAclfNet(path).setFormat(BPA).load().getImportedObj()`.
+Mirror [`IeeeFileAdapter`](../../src/main/java/org/interpss/agent/input/IeeeFileAdapter.java): one static `createAclfNet(path)` that calls `IpssAdapter.importAclfNet(path).setFormat(BPA).load().getImportedObj()`.
 
 **Chosen scope:** Java agent path only (adapter + loader + CLI + tests + format lists in CLI docs). No VS Code / persistent-plugin format picker changes in this pass.
 
 ## Changes
 
-1. **New** [`BpaFileAdapter.java`](src/main/java/org/interpss/agent/input/BpaFileAdapter.java) — same structure as `IeeeFileAdapter`, using `IpssAdapter.FileFormat.BPA`.
+1. **New** [`BpaFileAdapter.java`](../../src/main/java/org/interpss/agent/input/BpaFileAdapter.java) — same structure as `IeeeFileAdapter`, using `IpssAdapter.FileFormat.BPA`.
 
-2. **Update** [`NetworkLoader.java`](src/main/java/org/interpss/agent/input/NetworkLoader.java):
+2. **Update** [`NetworkLoader.java`](../../src/main/java/org/interpss/agent/input/NetworkLoader.java):
    - Replace the TODO with `case "bpa" -> BpaFileAdapter.createAclfNet(filePath)`.
    - Javadoc: “IEEE, PSS/E, or BPA”.
 
-3. **Update** [`CliArgs.java`](src/main/java/org/interpss/agent/cli/CliArgs.java) — accept `"bpa"` in `parseValidated` and usage text (`format: ieee | psse | bpa`).
+3. **Update** [`CliArgs.java`](../../src/main/java/org/interpss/agent/cli/CliArgs.java) — accept `"bpa"` in `parseValidated` and usage text (`format: ieee | psse | bpa`).
 
 4. **Tests**
    - Copy plugin `ieee9/IEEE9.dat` → `src/test/resources/cases/bpa/IEEE9.dat`.
-   - Add `BPA9_CASE` in [`AgentTestSupport`](src/test/java/org/interpss/agent/support/AgentTestSupport.java).
+   - Add `BPA9_CASE` in [`AgentTestSupport`](../../src/test/java/org/interpss/agent/support/AgentTestSupport.java).
    - Add `BpaFileAdapterTest` and a `NetworkLoader` dispatch test for `"bpa"` (expect 9 active buses).
    - Run against the refreshed `ipss_runnable.jar` / local m2 install from Setup.md if tests fail to resolve BPA classes.
 
 5. **Docs (format lists only)** — add `bpa` where formats are enumerated:
-   - [`IpssCmd.md`](IpssCmd.md)
-   - [`Setup.md`](Setup.md) CLI table (`format`: `ieee`, `psse`, `bpa`) and, if present, the “parsers live in ipss_runnable” note so it mentions BPA alongside CDF/PSS/E
-   - [`docs/architecture.md`](docs/architecture.md) supported-formats line + `IeeeFileAdapter` / `PsseFileAdapter` row to include `BpaFileAdapter`
+   - [`IpssCmd.md`](../../IpssCmd.md)
+   - [`Setup.md`](../../Setup.md) CLI table (`format`: `ieee`, `psse`, `bpa`) and, if present, the “parsers live in ipss_runnable” note so it mentions BPA alongside CDF/PSS/E
+   - [`docs/architecture.md`](../architecture.md) supported-formats line + `IeeeFileAdapter` / `PsseFileAdapter` row to include `BpaFileAdapter`
 
 ## Out of scope
 

@@ -24,7 +24,7 @@ visible to the other.
 
 | Artifact | Description |
 | --- | --- |
-| `interpss-persistent/deepseek-ai-dsh-interpss-<version>.tgz` | npm-pack tarball of the plugin package — the primary distributable. Current: **0.7.7** (one tarball per minor line is kept alongside it: 0.2.3, 0.3.16, 0.4.0, 0.5.0, 0.6.16, 0.6.33; inside a line the superseded patch tarballs are dropped by hand, as with the 0.6.34–0.6.37 patches and 0.7.0–0.7.2). |
+| `interpss-persistent/deepseek-ai-dsh-interpss-<version>.tgz` | npm-pack tarball of the plugin package — the primary distributable. Current: **0.7.7** (kept alongside: **0.6.33**; older line tarballs and superseded 0.7.0–0.7.6 patches were dropped). |
 | `interpss-persistent/` (the unpacked package source) | Point an install at this directory instead of the tarball. |
 | `InstallDSHPlugin.md` | This file. |
 

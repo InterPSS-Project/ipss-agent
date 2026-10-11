@@ -238,7 +238,7 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 
 - [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Diagram tab entry point, Chat tools
 - [oneline-diagram-process.md](../oneline-diagram-process.md) — layout pipeline, template contract, draw.io MCP
-- [Release-V0.7.0.md](../release_note/Release-V0.7.0.md) — Diagram search / highlight / centre-on-OK line
+- [Release-V0.7.7.md](../release_note/Release-V0.7.7.md) — OptAdj tooltip loadings; earlier Diagram line in [Release-V0.7.0.md](../release_note/Release-V0.7.0.md)
 - [Release-V0.7.7.md](../release_note/Release-V0.7.7.md) — OptAdj Diagram tooltips, OptAdj tool, BPA Dat, CA knobs
 - [gen_opt_adjustment.md](../gen_opt_adjustment.md) — OptAdj method; branch CSVs the Diagram tab quotes
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs

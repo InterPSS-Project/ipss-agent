@@ -56,6 +56,7 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 - InterPSS DSH Plugin user guide [dsh_plugin_user_guide.md](docs/user_guide/dsh_plugin_user_guide.md)
 - InterPSS One-Line Diagram user guide [oneline_diagram_user_guide.md](docs/user_guide/oneline_diagram_user_guide.md)
 - InterPSS Loadflow Adjustment user guide [loadflow-adjustment-user-guide.md](docs/user_guide/loadflow-adjustment-user-guide.md)
+- Generator OptAdj (redispatch) method [gen_opt_adjustment.md](docs/gen_opt_adjustment.md) / skill `$ipss-case-optadj`
 - iPSS Agent Chat (Batch) user guide [batch_chat_user_guide.md](docs/user_guide/batch_chat_user_guide.md)
 
 
@@ -71,7 +72,7 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 
 ## Release notes
 
-- Latest: [Release-V0.7.0.md](docs/release_note/Release-V0.7.0.md) (`@deepseek-ai/dsh-interpss` **0.7.0**)
+- Latest: [Release-V0.7.7.md](docs/release_note/Release-V0.7.7.md) (`@deepseek-ai/dsh-interpss` **0.7.7**)
 - Earlier: [docs/release_note/](docs/release_note/)
 
 
