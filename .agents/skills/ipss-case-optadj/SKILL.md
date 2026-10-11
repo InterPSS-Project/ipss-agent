@@ -137,10 +137,18 @@ Show one row per entry, worst `loadingAfterPct` first:
 | `branchId` | branch | The monitored branch |
 | `outageBranchId` | outage | The contingency that produced the entry; empty in basecase mode |
 | `limitMW` | rating | The rating the scan measured against, i.e. rating MVA 1 |
-| `baseFlowMW` | base MW | Signed by flow direction — compare **magnitudes**, not signs |
-| `loadingBeforePct` | before % | The scan's pre-redispatch loading |
+| `baseFlowMW` | — | The **pre-contingency (basecase) flow**, in MW and signed by flow direction. It is *not* the MW behind `loadingBeforePct` in N-1 mode — do not show it as the "before MW" there |
+| `loadingBeforePct` | before % | The scan's pre-redispatch loading (post-contingency, in N-1 mode) |
 | `loadingAfterPct` | after % | The post-redispatch loading — the number to filter and sort on |
+| — | before MW | Derive as `loadingBeforePct × limitMW / 100` — the flow that produced the percentage, and therefore the flow the outage actually causes. **Do not** read `baseFlowMW` for this |
 | — | after MW | Derive as `loadingAfterPct × limitMW / 100`; **do not** read `shiftedFlowMWAfter`, which the runner writes as `0.0` on every row |
+
+The two MW columns both come from the percentages, so a row is internally consistent: MW and % then
+describe the same flow. `baseFlowMW` matches the derived before MW only in basecase mode (there the
+scan is pre-contingency, so the two are the same state); in N-1 mode it is the pre-outage flow and is
+typically far smaller — IEEE 39 `Bus24->Bus23(1)` under outage `Bus22->Bus21(1)` is
+`baseFlowMW = −351.6` but `loadingBeforePct = 138.85 %` of 690 MVA = **958.1 MW**, which is the number
+the CA post-contingency flow also reports.
 
 ```bash
 cd wspace/<case dir>/result
@@ -151,10 +159,10 @@ f = lambda r, k: float(r[k] or 0)
 T = 100.0                                   # the run's resolved optAdjLoadingThreshold
 rows.sort(key=lambda r: -f(r, 'loadingAfterPct'))
 for r in rows:
-    lim, af = f(r, 'limitMW'), f(r, 'loadingAfterPct')
+    lim, bf, af = f(r, 'limitMW'), f(r, 'loadingBeforePct'), f(r, 'loadingAfterPct')
     if af >= T:
         print(f"{r['branchId']:<20}{r['outageBranchId']:<20}{lim:>7.0f}"
-              f"{f(r,'baseFlowMW'):>9.1f}{f(r,'loadingBeforePct'):>8.2f}%{af:>8.2f}%{af*lim/100:>9.1f} MW")
+              f"{bf*lim/100:>9.1f}{bf:>8.2f}%{af:>8.2f}%{af*lim/100:>9.1f} MW")
 EOF
 ```
 
@@ -188,7 +196,7 @@ card carries the counts, so the reply does not restate them.
 ```
 Basecase redispatch ran (scan 50 %, enforce 100 %) — the two basecase overloads are driven onto the limit:
 
-| Entry | Rating | Before | After |
+| Branch | Rating | Before | After |
 |---|---|---|---|
 | BUS-29 → BUS-38 | 800 MVA | −827.2 MW (103.41 %) | **100.02 %** |
 | BUS-22 → BUS-21 | 600 MVA | 606.5 MW (101.08 %) | **100.01 %** |
@@ -203,18 +211,30 @@ Adjustments (3 of 10 control generators moved):
 ```
 
 That example is the IEEE 39 basecase run verbatim, read off `ieee39_DF_optadj_branch.csv` and
-`ieee39_DF_optadj_gen.csv`.
+`ieee39_DF_optadj_gen.csv`. In basecase mode the Before MW equals the CSV's `baseFlowMW`; in N-1 mode
+it does **not**, and the card takes the flow the outage produces instead:
+
+| Branch | Rating | Before | After |
+|---|---|---|---|
+| BUS-24 → BUS-23 (outage BUS-22 → BUS-21) | 690 MVA | −958.1 MW (138.85 %) | **125.25 %** |
+| BUS-22 → BUS-21 (outage BUS-24 → BUS-23) | 690 MVA | 958.1 MW (138.85 %) | **113.79 %** |
+
+`baseFlowMW` for those two rows is only −351.6 / 606.5 MW — the pre-outage flow, which pairs with no
+percentage on the card.
 
 **Overload table** — one row per entry at or above the resolved `optAdjLoadingThreshold`, worst
 `loadingAfterPct` first, so the row count equals `overLimitAfter`. Build the rows per
 [Listing the branches after the run](#listing-the-branches-after-the-run):
 
-- **Entry** — `branchId`, rendered with `→` instead of `->`; in N-1 mode append the outage that
+- **Branch** — `branchId`, rendered with `→` instead of `->`; in N-1 mode append the outage that
   produced the row (`BUS-24 → BUS-23 (outage BUS-22 → BUS-21)`);
 - **Rating** — `limitMW` in MVA, the basis the scan measured against;
-- **Before** — `baseFlowMW` plus `(loadingBeforePct %)`: the MW is signed by flow direction, the
-  percentage is what to compare;
-- **After** — `loadingAfterPct` in **bold**, with the derived MW appended when the ranking needs it.
+- **Before** — the flow behind `loadingBeforePct`, i.e. `loadingBeforePct × limitMW / 100`, shown with
+  `(loadingBeforePct %)`. **Never** use `baseFlowMW` here in N-1 mode: it is the pre-contingency flow
+  and is typically far smaller than the post-contingency flow the percentage describes (the CA file's
+  `PostFlowMW`, or `baseFlowMW`'s sign, gives the direction);
+- **After** — `loadingAfterPct` in **bold**, with `loadingAfterPct × limitMW / 100` appended when the
+  ranking needs the MW. Do not read `shiftedFlowMWAfter` (always `0.0`).
 
 A row sitting *on* the threshold (`100.02 %`, `100.01 %`) is the LP boundary, not a violation: say so
 rather than calling it an overload. When `overLimitAfter` is 0, say the overloads cleared and carry the
