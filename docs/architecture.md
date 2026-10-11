@@ -526,7 +526,7 @@ Used at runtime by agent code:
 | `org.apache.groovy:groovy` (4.0.x) | Runtime for `org.interpss.script.gvy` — the Groovy scenario-script adapter `GvyScriptRunner` drives |
 | `org.eclipse.emf.*` | EMF model (ipss-core transitive) |
 | Sparse solvers (JKLU, CSPARSEJ, etc.) | Linear algebra |
-| `org.slf4j:slf4j-simple` | Logging |
+| `org.slf4j:slf4j-api` + `org.apache.logging.log4j:*` | Logging — SLF4J facade with the log4j2 backend (binding `log4j-slf4j-impl`), configured by `config/log4j2.xml` |
 
 ---
 

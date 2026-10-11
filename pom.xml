@@ -32,6 +32,10 @@
          inside ipss_runnable.jar without its own dependency: 4.0.x matches the
          GroovyShell/Binding API that class was compiled against. -->
     <groovy.version>4.0.27</groovy.version>
+    <!-- Runtime logging backend. The uber assembly unpacks lib/deps/*.jar, so these
+         three replace slf4j-simple as the SLF4J binding: log4j-slf4j-impl is the
+         bridge for SLF4J 1.7.x (log4j-slf4j2-impl binds SLF4J 2.x only). -->
+    <log4j.version>2.25.4</log4j.version>
   </properties>
 
   <repositories>
@@ -67,10 +71,24 @@
       <artifactId>slf4j-api</artifactId>
       <version>1.7.36</version>
     </dependency>
+    <!-- Logging backend: log4j2 plus its SLF4J 1.7 binding, configured by
+         config/log4j2.xml (level and log file are system-property overridable).
+         slf4j-simple is deliberately NOT a dependency: two SLF4J bindings on the
+         uber classpath would make the backend arbitrary. -->
     <dependency>
-      <groupId>org.slf4j</groupId>
-      <artifactId>slf4j-simple</artifactId>
-      <version>1.7.36</version>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-api</artifactId>
+      <version>${log4j.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-core</artifactId>
+      <version>${log4j.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.logging.log4j</groupId>
+      <artifactId>log4j-slf4j-impl</artifactId>
+      <version>${log4j.version}</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.emf</groupId>
@@ -177,6 +195,15 @@
   </dependencies>
 
   <build>
+    <!-- Put the project's log4j2 config on the classpath. The antrun step below copies
+         target/classes into target/uber-classes AFTER unpacking ipss_runnable.jar, so
+         this file overwrites the log4j2.xml InterPSS ships inside that jar (whose
+         RollingFile points at logs/ipss.plugin.core.log). -->
+    <resources>
+      <resource>
+        <directory>config</directory>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

@@ -28,13 +28,15 @@ ipss-agent/
 ├── pom.xml                        # Maven build for the Java CLI (Uber JAR)
 ├── config/
 │   ├── aclf_run.json              # ACLF NR / limit-control settings (used by IpssCmd)
+│   ├── log4j2.xml                 # Runtime logging config (level/file, sys-property overridable)
 │   └── gen_report.json            # Report band thresholds (used by org.interpss.agent.report)
 ├── lib/
 │   ├── ipss_runnable.jar          # Main InterPSS runnable JAR (ipss.plugin.core 1.4.2)
 │   ├── m2-repo/                   # Local Maven POMs + jar symlinks for InterPSS artifacts
 │   └── deps/                      # Runtime JARs (core + third-party resolved by Maven)
 │       ├── ipss.core.lib-1.4.0.jar
-│       ├── slf4j-api-1.7.36.jar / slf4j-simple-1.7.36.jar
+│       ├── slf4j-api-1.7.36.jar
+│       ├── log4j-api-2.25.4.jar / log4j-core-2.25.4.jar / log4j-slf4j-impl-2.25.4.jar
 │       ├── org.eclipse.emf.common-2.45.0.jar / .ecore-2.42.0.jar
 │       ├── hazelcast-5.3.6.jar
 │       ├── jaxb-api-2.3.1.jar / jaxb-impl-2.3.1.jar
@@ -175,7 +177,8 @@ IEEE CDF / PSS/E / BPA import no longer requires separate IEEE ODM JARs; parsers
 
 | JAR                                                       | Purpose                    |
 | --------------------------------------------------------- | -------------------------- |
-| `slf4j-api-1.7.36.jar` / `slf4j-simple-1.7.36.jar`        | Logging                    |
+| `slf4j-api-1.7.36.jar`                                    | Logging facade             |
+| `log4j-api-2.25.4.jar` / `log4j-core-2.25.4.jar` / `log4j-slf4j-impl-2.25.4.jar` | Logging backend (see [Logging](#logging)) |
 | `org.eclipse.emf.common-2.45.0.jar` / `.ecore-2.42.0.jar` | Eclipse Modeling Framework |
 | `hazelcast-5.3.6.jar`                                     | Distributed computing      |
 | `jaxb-api-2.3.1.jar` / `jaxb-impl-2.3.1.jar`              | XML binding                |
@@ -396,3 +399,61 @@ Expected entries include:
 .agents/skills/ipss-case-load/SKILL.md
 .agents/skills/nerc-report-html/SKILL.md
 ```
+
+## Logging
+
+The CLI and the embedded bridge log through **SLF4J → log4j2**, configured by
+[`config/log4j2.xml`](config/log4j2.xml). The build puts that file on the classpath
+(`config/` → `target/classes` → the Uber JAR), where it overrides the `log4j2.xml`
+bundled inside `lib/ipss_runnable.jar` (whose `RollingFile` points at
+`logs/ipss.plugin.core.log`).
+
+Default behaviour: root level `info`, a `Console` appender on `System.out`, and a
+`RollingFile` at **`logs/ipss.agent.log`** — a path relative to the JVM's working
+directory, so it lands in the `wspace/` folder when `IpssCmd` is run from there and in
+the `dsh web` process's cwd for the bridge. Give it an absolute path when that matters.
+
+| System property | Default | Meaning |
+| --- | --- | --- |
+| `-Dipss.log.level` | `info` | Root level (`trace`/`debug`/`info`/`warn`/`error`/`off`); `org.interpss*` follows it |
+| `-Dipss.log.level.interpss` | root level | Level for the `org.interpss*` loggers only |
+| `-Dipss.log.file` | `logs/ipss.agent.log` | RollingFile target; absolute path advised |
+| `-Dipss.log.roll.size` / `-Dipss.log.roll.max` | `100MB` / `10` | Rollover trigger and retained-file count |
+| `-Dipss.log.console.threshold` | `trace` | Raise it (or `off`) to quiet the console appender |
+| `-Dipss.log.status` | `WARN` | log4j2 internal status output |
+| `-Dlog4j2.configurationFile` | — | Point at a different config file entirely |
+
+### CLI runs
+
+Pass the properties on the command line; they need no rebuild:
+
+```bash
+cd wspace
+java -Dipss.log.level=debug -Dipss.log.file=/tmp/ipss-cli.log \
+     -jar ../target/ipss-agent-cmd-1.0.0-uber.jar aclf ieee data/ieee/ieee39/ieee39.ieee
+```
+
+### The embedded bridge
+
+The bridge JVM is created inside the `dsh web` host by `java-bridge`
+(`ensureJvm({ opts: ['-Xmx8g'] })` in `interpss-persistent/lib/index.js`), so its options
+must reach that JVM:
+
+* **No code change** — export `JAVA_TOOL_OPTIONS` before starting the host; the JVM reads
+  it at creation (the harness prints `Picked up JAVA_TOOL_OPTIONS: …` at startup):
+
+  ```bash
+  export JAVA_TOOL_OPTIONS="-Dipss.log.level=debug -Dipss.log.file=/tmp/ipss-bridge.log"
+  dsh web
+  ```
+
+  For a GUI-launched app, `launchctl setenv JAVA_TOOL_OPTIONS "…"` first. `JDK_JAVA_OPTIONS`
+  will **not** work here — the `java` launcher consumes it, an embedded JVM never sees it.
+
+* **Hardcode** the `-D` flags into the `opts` array in `interpss-persistent/lib/index.js`,
+  then repack/reinstall the persistent plugin (`scripts/setup-java-bridge.sh`).
+
+Either way the host must be **restarted**: the JVM reads options once, at creation, and one
+JVM is created per host process on the first bridge call. While a bridge call is running its
+stdout/stderr are intercepted (`captureStdio`) and attached to the tool reply, so with the
+defaults nothing is persisted — `-Dipss.log.file` is what produces a durable log.

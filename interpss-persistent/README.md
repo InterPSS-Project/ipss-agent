@@ -220,6 +220,26 @@ The Host prefers in-process calls via `java-bridge` and the uber JAR. If the
 bridge is unavailable, it falls back to shelling out with a classpath of
 `target/classes`, `lib/ipss_runnable.jar`, and `lib/deps/*`.
 
+### Bridge JVM options
+
+One JVM is created per Host process, lazily on the first bridge call, with the
+options in `ensureBridge()` (`lib/index.js`) — currently just `-Xmx8g`.
+
+* **Heap** — edit that `opts` array and reinstall the plugin.
+* **Logging** — the JVM logs through SLF4J → log4j2 using the `log4j2.xml` the
+  uber JAR carries ([Setup.md](../Setup.md#logging) lists every knob). Raise the
+  level or move the log file without touching this package by setting the
+  properties in the host environment:
+
+  ```bash
+  export JAVA_TOOL_OPTIONS="-Dipss.log.level=debug -Dipss.log.file=/tmp/ipss-bridge.log"
+  ```
+
+  The embedded JVM honours `JAVA_TOOL_OPTIONS`/`_JAVA_OPTIONS` at creation (not
+  `JDK_JAVA_OPTIONS`, which the `java` launcher consumes), so a Host restart
+  applies them. With the defaults no log file is written: the JVM's
+  stdout/stderr are captured per bridge call and attached to the tool reply.
+
 ## Install
 
 See `InstallDSHPlugin.md` in the repository root. Three methods:
