@@ -89,11 +89,11 @@ Natural-language prompts the agent can map to tools:
 
 | You say                           | Typical tools / skills                             |
 | --------------------------------- | -------------------------------------------------- |
-| Load the large-load-Q IEEE14 case | `$ipss-case-load` / `interpss_case_load`           |
-| Run ACLF                          | `$ipss-case-aclf` / `interpss_run_aclf`            |
-| Run the dV/dQ script              | `$ipss-case-script` / `interpss_run_gvy`           |
-| Adjust load Q to a target band    | `$ipss-case-aclf-adjust` (this whole workflow)     |
-| Summarize lowest voltages         | `$ipss-case-summary` / `interpss_summarize_result` |
+| Load the large-load-Q IEEE14 case | `$ipss-case-load，` /`interpss_case_load`           |
+| Run ACLF                          | `$ipss-case-aclf，` /`interpss_run_aclf`            |
+| Run the dV/dQ script              | `$ipss-case-script，` /`interpss_run_gvy`           |
+| Adjust load Q to a target band    | `/ipss-case-aclf-adjust` (this whole workflow)     |
+| Summarize lowest voltages         | `$ipss-case-summary，` /`interpss_summarize_result` |
 
 
 Bare script names resolve to the case folder’s `scripts/` directory.
@@ -131,10 +131,8 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 ### Steps in Chat
 
 ```text
-Load wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee
-Run ACLF
-Run ieee14_dvdq_Bus14_0p90to0p91.gvy
-Reload and run ieee14_adjBus14Q_0p90to0p91.gvy, then run ACLF
+/ipss-case-load wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee
+/ipss-case-aclf-adjust adjust Bus-14 load Q to raise bus voltage to [0.9 - 0.91]
 Show the lowest bus voltages
 ```
 
@@ -209,10 +207,8 @@ values are known, the setter alone reproduces the state.
 ### Steps in Chat
 
 ```text
-Load wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee
-Reload and run ieee14_qv_adjust_0p90to0p91.gvy to derive Q13 / Q14
-Reload and run ieee14_adjBus1314Q_0p90to0p91.gvy to apply them
-Run ACLF
+/ipss-case-load wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee
+/ipss-case-aclf-adjust adjust Bus-13 and Bus-14 load Q to raise bus voltage to [0.9 - 0.91]
 Show the lowest bus voltages
 ```
 
@@ -394,11 +390,11 @@ Without these, the IEEE-39 demos do not show meaningful overloads (and the Chat 
 **Goal:** Reduce pre-contingency branch loadings that exceed rating by redistributing gen P.
 
 
-|               |                                                                         |
-| ------------- | ----------------------------------------------------------------------- |
-| Case          | `wspace/data/ieee/ieee39/ieee39.ieee`                                   |
-| Config        | `optAdjType: genAdjBaseCase`, scan **50%**, enforce **100%**            |
-| Limits script | `ieee39_limit_setup.gvy`                                                |
+|               |                                                                                                                      |
+| ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Case          | `wspace/data/ieee/ieee39/ieee39.ieee`                                                                                |
+| Config        | `optAdjType: genAdjBaseCase`, scan **50%**, enforce **100%**                                                         |
+| Limits script | `ieee39_limit_setup.gvy`                                                                                             |
 | Result files  | `result/ieee39_DF_optadj_gen.csv`, `result/ieee39_DF_optadj_branch.csv` (an N-1 run writes the `…_optadj_N1_…` pair) |
 
 
@@ -407,10 +403,8 @@ Without these, the IEEE-39 demos do not show meaningful overloads (and the Chat 
 ### Steps in Chat
 
 ```text
-Load wspace/data/ieee/ieee39/ieee39.ieee
-Reload and run ieee39_limit_setup.gvy
-Relieve basecase overloads by redispatching generation
-Show the gen adjustments and before/after branch loadings
+/ipss-case-load wspace/data/ieee/ieee39/ieee39.ieee; apply wspace/data/ieee/ieee39/scripts/ieee39_limit_setup.gvy; Run Loadflow; List overloading branches
+/ipss-case-optadj basecase
 ```
 
 Equivalent tool sequence:
@@ -454,9 +448,8 @@ library build; see [gen_opt_adjustment.md](../gen_opt_adjustment.md) for regress
 ### Steps in Chat
 
 ```text
-Load wspace/data/ieee/ieee39/ieee39.ieee
-Reload and run ieee39_limit_setup.gvy
-Relieve N-1 overloads by redispatching generation
+/ipss-case-load wspace/data/ieee/ieee39/ieee39.ieee; apply wspace/data/ieee/ieee39/scripts/ieee39_limit_setup.gvy; Run CA N-1; List overloading branches (max 10)
+/ipss-case-optadj CA N-1
 ```
 
 Equivalent tool sequence:
@@ -486,11 +479,11 @@ above 100% when gen limits bind — that is normal for the LP.
 ## Reading OptAdj results
 
 
-| Field / file                         | Meaning                                                                                                        |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| `overLimitBefore` / `overLimitAfter` | Entries at or above the OptAdj threshold, before and after                                                     |
-| `controlGens` / `gensAdjusted`       | Generators considered / moved by a material `adjP`                                                             |
-| `<stem>_DF_optadj_gen.csv`           | `genName, genP, adjP, limitMax, limitMin` — MW; largest `adjP` first (N-1: `<stem>_DF_optadj_N1_gen.csv`)    |
+| Field / file                         | Meaning                                                                                                                                                                                                                   |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `overLimitBefore` / `overLimitAfter` | Entries at or above the OptAdj threshold, before and after                                                                                                                                                                |
+| `controlGens` / `gensAdjusted`       | Generators considered / moved by a material `adjP`                                                                                                                                                                        |
+| `<stem>_DF_optadj_gen.csv`           | `genName, genP, adjP, limitMax, limitMin` — MW; largest `adjP` first (N-1: `<stem>_DF_optadj_N1_gen.csv`)                                                                                                                 |
 | `<stem>_DF_optadj_branch.csv`        | `branchId, outageBranchId, limitMW, …, loadingBeforePct, loadingAfterPct` — `outageBranchId` empty in basecase (N-1: `<stem>_DF_optadj_N1_branch.csv`). The Diagram tab (0.7.7+) quotes `loadingAfterPct` on branch hover |
 
 
