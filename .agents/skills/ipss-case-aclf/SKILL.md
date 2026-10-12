@@ -100,7 +100,44 @@ On non-convergence, do not re-run the identical call and do not report the case 
 
 ### Result explorer on the card
 
-With plugin 0.3.2+ the settled card shows an **Explore results** row with **Bus / Branch / Gen / Load**, paging rows through the same endpoint the tab uses. Clicking a scope loads the first 100 rows, and scrolling the table to the bottom appends the next page automatically (there is no *Load more* control). A **Report** button in the same row (0.3.3+, next to Load) generates the AC Loadflow Markdown report from the run's CSVs and opens it in the file surface — point the user at it rather than regenerating the report by hand. Cards from an older plugin version carry no explorer metadata and render the result text only — that is expected, not a failed run.
+With plugin 0.3.2+ the settled card shows an **Explore results** row with **Bus / Branch / Gen / Load**, paging rows through the same endpoint the tab uses. Clicking a scope loads the first 100 rows, and scrolling the table to the bottom appends the next page automatically (there is no *Load more* control). A **Report** button at the end of that row (0.3.3+) generates the AC Loadflow Markdown report from the run's CSVs and opens it in the file surface — point the user at it rather than regenerating the report by hand. Cards from an older plugin version carry no explorer metadata and render the result text only — that is expected, not a failed run.
+
+The card is two stacked pieces: a monospace panel holding the tool result (the block shown under **Output** above, capped at ~260 px and scrollable), and the control row directly beneath it. Settled and collapsed — no scope open — it reads:
+
+```text
++---------------------------------------------------------------------------+
+| InterPSS AC load flow — data/ieee/Ieee118Bus/ieee118.ieee (source: selection)
+| Converged: true
+| Results: wspace/data/ieee/Ieee118Bus/result
+|
+| =====Aclf Network Information:=====
+| Number of Active Buses: 118
+| Number of Active Branches: 186
+| Total Generation (MW): 3800.44
+| Total Load (MW): 3668.00
+| PV bus limit controls: 53
+|
+| ===== Loadflow Run Information:=====
+| Loadflow converged: true
+| Max Mismatch: dPmax :  0.00001 at Bus : Bus104,     dQmax :  0.00005 at Bus : Bus105
++---------------------------------------------------------------------------+
+  Explore results    [ Bus ]  [ Branch ]  [ Gen ]  [ Load ]   |   [ Report ]
+```
+
+The panel is the run's own text; the row under it is the explorer. Clicking a scope — or the highlighted scope again, which closes it — expands the card into a status line plus a scrollable table whose headers sort on click, the active column carrying `▲` ascending or `▼` descending:
+
+```text
+  Explore results    [ Bus ]  [ Branch ]  [ Gen ]  [ Load ]   |   [ Report ]
+  100 of 118 rows
+  +-------------------------------------------------------------------------+
+  | ID      Number   Name          ...   VoltMag ▲   VoltAng   ...           |
+  | Bus1    1        Bus 1     HV  ...   1.06        0.0       ...           |
+  | Bus2    2        Bus 2     HV  ...   0.98981    -4.7152    ...           |
+  | ...                                                                     |
+  +-------------------------------------------------------------------------+
+```
+
+While the first page is in flight the status line reads `loading…`; a scope with no rows reads `no rows`; a missing result file or an unreadable one reports its own message in place of the row. **Report** shows `Generating…` while it runs, and a failure appends `AC Loadflow report failed: …` beneath the table. An errored call renders the same panel in the error colour and, when there is no result text at all, the title `InterPSS AC load flow failed — <case>`.
 
 ### Replying after a run
 
