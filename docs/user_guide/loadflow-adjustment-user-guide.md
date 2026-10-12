@@ -21,9 +21,9 @@ Engineering detail: [load-q-adjustment.md](../load-q-adjustment.md) (voltage) an
 | Situation                                                                  | Approach                                                             |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------------- |
 | One bus is outside a voltage band; other targets are weakly coupled        | Adjust **one** load Q (scalar `dV/dQ`)                               |
-| Two or more buses must land in the same band and move each other’s voltage | Adjust the loads **together usibg a** N×N `dV/dQ` sensitivity matrix |
-| Pre-contingency branch loading is above rating                             | LP-based Gen optimization adjustmemt **basecase** (`genAdjBaseCase`) |
-| Post-contingency (N-1 branch outage) loading is above rating               | LP-based Gen optimization adjustmemt **CA N-1** (`genAdjCaN_1`)      |
+| Two or more buses must land in the same band and move each other’s voltage | Adjust the loads **together using an** N×N `dV/dQ` sensitivity matrix |
+| Pre-contingency branch loading is above rating                             | LP-based Gen optimization adjustment **basecase** (`genAdjBaseCase`) |
+| Post-contingency (N-1 branch outage) loading is above rating               | LP-based Gen optimization adjustment **CA N-1** (`genAdjCaN_1`)      |
 
 
 Typical voltage goal: bring a depressed bus into a band such as **[0.90, 0.91]** pu by reducing bus load Q (active power left unchanged). The shipped IEEE14 fixtures use that band.
@@ -87,13 +87,13 @@ adjustments through DSH Chat (or an equivalent bridge session).
 Natural-language prompts the agent can map to tools:
 
 
-| You say                           | Typical tools / skills                             |
-| --------------------------------- | -------------------------------------------------- |
-| Load the large-load-Q IEEE14 case | `$ipss-case-load，` /`interpss_case_load`           |
-| Run ACLF                          | `$ipss-case-aclf，` /`interpss_run_aclf`            |
-| Run the dV/dQ script              | `$ipss-case-script，` /`interpss_run_gvy`           |
-| Adjust load Q to a target band    | `/ipss-case-aclf-adjust` (this whole workflow)     |
-| Summarize lowest voltages         | `$ipss-case-summary，` /`interpss_summarize_result` |
+| You say                           | Typical tools / skills                           |
+| --------------------------------- | ------------------------------------------------ |
+| Load the large-load-Q IEEE14 case | `$ipss-case-load` / `interpss_case_load`         |
+| Run ACLF                          | `$ipss-case-aclf` / `interpss_run_aclf`          |
+| Run the dV/dQ script              | `$ipss-case-script` / `interpss_run_gvy`         |
+| Adjust load Q to a target band    | `$ipss-case-aclf-adjust` (this whole workflow)   |
+| Summarize lowest voltages         | `$ipss-case-summary` / `interpss_case_summary`   |
 
 
 Bare script names resolve to the case folder’s `scripts/` directory.
@@ -132,7 +132,7 @@ Bare script names resolve to the case folder’s `scripts/` directory.
 
 ```text
 /ipss-case-load wspace/data/ieee/Ieee14Bus_LargeLoadQ/ieee14.ieee
-/ipss-case-aclf-adjust adjust Bus-14 load Q to raise bus voltage to [0.9 - 0.91]
+/ipss-case-aclf-adjust adjust Bus14 load Q to raise bus voltage to [0.90, 0.91]
 Show the lowest bus voltages
 ```
 
@@ -208,7 +208,7 @@ values are known, the setter alone reproduces the state.
 
 ```text
 /ipss-case-load wspace/data/ieee/Ieee14Bus_LargeLoadQ2/ieee14.ieee
-/ipss-case-aclf-adjust adjust Bus-13 and Bus-14 load Q to raise bus voltage to [0.9 - 0.91]
+/ipss-case-aclf-adjust adjust Bus13 and Bus14 load Q to raise bus voltage to [0.90, 0.91]
 Show the lowest bus voltages
 ```
 
@@ -274,7 +274,7 @@ Save under the case `scripts/` folder and run with `$ipss-case-script` (add `rel
 # Part 2 — Gen Optimize Adjustment (OptAdj)
 
 Relieve **branch thermal overloads** by redispatching generator active power (P). An SSA
-(DC-sensitivity) scan collects branches — or post-contingency pairs — above a *scan* threshold; a Linear Programing approach moves control generators so monitored loadings stay under an *OptAdj* (enforce) threshold; the same monitored set is re-checked.
+(DC-sensitivity) scan collects branches — or post-contingency pairs — above a *scan* threshold; a Linear Programming approach moves control generators so monitored loadings stay under an *OptAdj* (enforce) threshold; the same monitored set is re-checked.
 
 Packaged as `$ipss-case-optadj` / `interpss_case_optadj`. Method, Java samples, and
 regression anchors: [gen_opt_adjustment.md](../gen_opt_adjustment.md).
@@ -543,4 +543,5 @@ Suggested follow-on: `$ipss-case-aclf` or `$ipss-case-ca` on the redispatched he
 - Load-Q Example B scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ2/scripts/`
 - OptAdj IEEE39 limits: `wspace/data/ieee/ieee39/scripts/ieee39_limit_setup.gvy`
 - OptAdj samples: `src/main/java/org/interpss/sample/optadj/`
+  (`IEEE39_OptBasecase_SsaResult_Sparse_Sample`, `IEEE39_OptN1Scan_SsaResult_Sparse_Sample`)
 
