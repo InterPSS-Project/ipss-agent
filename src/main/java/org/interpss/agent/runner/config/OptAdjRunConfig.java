@@ -20,6 +20,7 @@ import com.google.gson.Gson;
  *   "optAdjLoadingThreshold": 100,
  *   "contingencyMode": "all" | "custom",
  *   "contingencyFile": "data/…/contingencies.json",
+ *   "sparseSenMatrix": true,
  *   "threads": 0
  * }
  * </pre>
@@ -28,7 +29,8 @@ import com.google.gson.Gson;
  * sensitivity matrix includes the near-limit branches, and the linear program then enforces the
  * OptAdj percentage (100 % of rating in both documented samples). Both thresholds are optional:
  * the scan default follows {@code optAdjType}, and {@code …OrDefault()} returns what the samples
- * used.
+ * used. {@code sparseSenMatrix} selects the sparse (default) or dense sensitivity path in
+ * {@code AclfNetLoadFlowOptimizer} / {@code AclfNetContigencyOptimizer}.
  * <p>
  * {@link #load} / {@link #fromJson} validate what they read — an unknown mode token, a threshold
  * outside {@code 0..1000}, a negative worker count or a {@code custom} contingency mode with no
@@ -36,10 +38,10 @@ import com.google.gson.Gson;
  * requested mode or limit is worse than one that says why it cannot run.
  */
 public record OptAdjRunConfig(String optAdjType, Double scanLoadingThreshold, Double optAdjLoadingThreshold,
-        String contingencyMode, String contingencyFile, Integer threads) {
+        String contingencyMode, String contingencyFile, Boolean sparseSenMatrix, Integer threads) {
 
     public static final String GEN_ADJ_BASE_CASE = "genAdjBaseCase";
-    public static final String GEN_ADJ_CA_N1 = "genAdjCaN_1";
+    public static final String GEN_ADJ_CA_N1 = "genAdjCA_N-1";
 
     /** The two documented modes, in the order the tool and the config file name them. */
     public static final List<String> TYPES = List.of(GEN_ADJ_BASE_CASE, GEN_ADJ_CA_N1);
@@ -53,18 +55,20 @@ public record OptAdjRunConfig(String optAdjType, Double scanLoadingThreshold, Do
     public static final double DEFAULT_SCAN_CA_N1 = 90.0;
     /** The loading (%) the optimizer enforces, in both samples. */
     public static final double DEFAULT_OPT_ADJ_THRESHOLD = 100.0;
+    /** Sparse sensitivity matrix — what the documented samples and the runner used before the knob. */
+    public static final boolean DEFAULT_SPARSE_SEN_MATRIX = true;
     /** {@code 0} = one SSA worker per available processor. */
     public static final int DEFAULT_THREADS = 0;
 
-    /** Basecase mode, sample thresholds, all N-1 outages, one worker per processor. */
-    public static final OptAdjRunConfig DEFAULT = new OptAdjRunConfig(null, null, null, null, null, null);
+    /** Basecase mode, sample thresholds, sparse sensitivities, all N-1 outages, one worker per processor. */
+    public static final OptAdjRunConfig DEFAULT = new OptAdjRunConfig(null, null, null, null, null, null, null);
 
     /**
      * The doc's three-argument form (mode plus the two thresholds), kept so the
      * IEEE-39 samples in {@code org.interpss.sample.optadj} compile unchanged.
      */
     public OptAdjRunConfig(String optAdjType, Double scanLoadingThreshold, Double optAdjLoadingThreshold) {
-        this(optAdjType, scanLoadingThreshold, optAdjLoadingThreshold, ALL, null, DEFAULT_THREADS);
+        this(optAdjType, scanLoadingThreshold, optAdjLoadingThreshold, ALL, null, null, DEFAULT_THREADS);
     }
 
     /** Read {@code configFile}; unknown keys are ignored and blank values become {@code null}. */
@@ -90,6 +94,7 @@ public record OptAdjRunConfig(String optAdjType, Double scanLoadingThreshold, Do
                 CaRunConfig.loadingPercentage(raw.optAdjLoadingThreshold(), source, "optAdjLoadingThreshold"),
                 CaRunConfig.mode(raw.contingencyMode(), source, "contingencyMode"),
                 CaRunConfig.blankToNull(raw.contingencyFile()),
+                raw.sparseSenMatrix(),
                 CaRunConfig.count(raw.threads(), source, "threads"));
     }
 
@@ -115,6 +120,11 @@ public record OptAdjRunConfig(String optAdjType, Double scanLoadingThreshold, Do
         return optAdjLoadingThreshold == null ? DEFAULT_OPT_ADJ_THRESHOLD : optAdjLoadingThreshold;
     }
 
+    /** Sparse ({@code true}) or dense sensitivity matrix; unset is the samples' sparse path. */
+    public boolean sparseSenMatrixOrDefault() {
+        return sparseSenMatrix == null ? DEFAULT_SPARSE_SEN_MATRIX : sparseSenMatrix;
+    }
+
     /** SSA worker count; {@code 0} means one per available processor. */
     public int threadsOrDefault() {
         return threads == null ? DEFAULT_THREADS : threads;
@@ -132,6 +142,6 @@ public record OptAdjRunConfig(String optAdjType, Double scanLoadingThreshold, Do
     /** This config with the scan percentage replaced (the tool's per-call override). */
     public OptAdjRunConfig withScanLoadingThreshold(double value) {
         return new OptAdjRunConfig(optAdjType, value, optAdjLoadingThreshold,
-                contingencyMode, contingencyFile, threads);
+                contingencyMode, contingencyFile, sparseSenMatrix, threads);
     }
 }

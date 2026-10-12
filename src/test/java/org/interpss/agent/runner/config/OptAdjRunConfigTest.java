@@ -23,6 +23,7 @@ class OptAdjRunConfigTest {
         assertThat(config.scanLoadingThresholdOrDefault()).isEqualTo(50.0);
         assertThat(config.optAdjLoadingThresholdOrDefault()).isEqualTo(100.0);
         assertThat(config.threadsOrDefault()).isZero();
+        assertThat(config.sparseSenMatrixOrDefault()).isTrue();
         assertThat(config.contingencyIsCustom()).isFalse();
         assertThat(config.contingencyInput()).isNull();
     }
@@ -53,6 +54,7 @@ class OptAdjRunConfigTest {
         assertThat(config.optAdjLoadingThreshold()).isEqualTo(100.0);
         assertThat(config.contingencyMode()).isEqualTo(OptAdjRunConfig.ALL);
         assertThat(config.contingencyFile()).isNull();
+        assertThat(config.sparseSenMatrixOrDefault()).isTrue();
         assertThat(config.threadsOrDefault()).isZero();
     }
 
@@ -64,6 +66,7 @@ class OptAdjRunConfigTest {
                 + "  \"optAdjLoadingThreshold\": 99,\n"
                 + "  \"contingencyMode\": \"custom\",\n"
                 + "  \"contingencyFile\": \"data/psse/Texas2K/2k_contingencies_115kVAbove.json\",\n"
+                + "  \"sparseSenMatrix\": false,\n"
                 + "  \"threads\": 4\n"
                 + "}\n");
 
@@ -75,6 +78,7 @@ class OptAdjRunConfigTest {
         assertThat(config.optAdjLoadingThresholdOrDefault()).isEqualTo(99.0);
         assertThat(config.contingencyIsCustom()).isTrue();
         assertThat(config.contingencyInput()).isEqualTo("data/psse/Texas2K/2k_contingencies_115kVAbove.json");
+        assertThat(config.sparseSenMatrixOrDefault()).isFalse();
         assertThat(config.threadsOrDefault()).isEqualTo(4);
     }
 
@@ -133,12 +137,13 @@ class OptAdjRunConfigTest {
     void withScanLoadingThreshold_keepsEveryOtherField() {
         OptAdjRunConfig stricter = OptAdjRunConfig
                 .fromJson("{\"optAdjType\":\"genAdjCaN_1\",\"threads\":3,\"contingencyMode\":\"custom\","
-                        + "\"contingencyFile\":\"data/x.json\"}", "test")
+                        + "\"contingencyFile\":\"data/x.json\",\"sparseSenMatrix\":false}", "test")
                 .withScanLoadingThreshold(70.0);
 
         assertThat(stricter.scanLoadingThresholdOrDefault()).isEqualTo(70.0);
         assertThat(stricter.optAdjTypeOrDefault()).isEqualTo(OptAdjRunConfig.GEN_ADJ_CA_N1);
         assertThat(stricter.threadsOrDefault()).isEqualTo(3);
+        assertThat(stricter.sparseSenMatrixOrDefault()).isFalse();
         assertThat(stricter.contingencyInput()).isEqualTo("data/x.json");
         assertThat(OptAdjRunConfig.DEFAULT.scanLoadingThresholdOrDefault()).isEqualTo(50.0);
     }

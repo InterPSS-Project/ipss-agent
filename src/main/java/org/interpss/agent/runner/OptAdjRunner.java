@@ -139,9 +139,10 @@ public final class OptAdjRunner {
         Map<String, SsaBranchOverLimitInfo> after = new LinkedHashMap<>();
         if (!before.isEmpty()) {
             OptAdjResultContainer optAdjResult = new OptAdjResultContainer(scanned);
+            boolean sparseSenMatrix = cfg.sparseSenMatrixOrDefault();
             Map<String, GenAdjustResult> optimized = cfg.isCaN1()
-                    ? new AclfNetContigencyOptimizer(true).optimize(algo, optAdjResult, optAdjThreshold)
-                    : new AclfNetLoadFlowOptimizer(true).optimize(algo, optAdjResult, optAdjThreshold);
+                    ? new AclfNetContigencyOptimizer(sparseSenMatrix).optimize(algo, optAdjResult, optAdjThreshold)
+                    : new AclfNetLoadFlowOptimizer(sparseSenMatrix).optimize(algo, optAdjResult, optAdjThreshold);
             adjustments = optimized != null
                     ? optimized
                     : (optAdjResult.getOptAdjResults() == null ? Map.of() : optAdjResult.getOptAdjResults());
@@ -211,7 +212,8 @@ public final class OptAdjRunner {
 
         if (explicitCont != null) {
             config = new OptAdjRunConfig(config.optAdjType(), config.scanLoadingThreshold(),
-                    config.optAdjLoadingThreshold(), OptAdjRunConfig.CUSTOM, cli.contFile(), config.threads());
+                    config.optAdjLoadingThreshold(), OptAdjRunConfig.CUSTOM, cli.contFile(),
+                    config.sparseSenMatrix(), config.threads());
             return new ValidatedOptAdjInputs(explicitCont, config);
         }
         Path contPath = ContingencyRunner.resolveConfigEntry(paths, configFile, config.contingencyInput(),
