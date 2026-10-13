@@ -2658,7 +2658,7 @@ check('the Java OptAdj record is the runner-config record the plugin mirrors',
   OPTADJ_JAVA_FOUND.length + ' OptAdjRunConfig.java under src/main/java: '
   + (optAdjJavaPath === null ? 'none or ambiguous' : optAdjJavaPath.slice(ROOT.length + 1)));
 
-// The Host's six-key config block, parsed out of each half (see `hostCaDefaults` for the rules).
+// The Host's seven-key config block, parsed out of each half (see `hostCaDefaults` for the rules).
 const hostOptAdjDefaults = (path) => {
   const src = rd(path);
   const start = src.indexOf('const DEFAULT_OPTADJ_CONFIG = {');
@@ -2672,27 +2672,45 @@ const hostOptAdjDefaults = (path) => {
 };
 const optAdjLibDefaults = hostOptAdjDefaults(LIB_HOST);
 const optAdjDynDefaults = hostOptAdjDefaults(DYN_HOSTB);
-check('the six OptAdj keys are the same in all three host halves',
-  optAdjLibDefaults !== null && Object.keys(optAdjLibDefaults).length === 6
+check('the seven OptAdj keys are the same in all three host halves',
+  optAdjLibDefaults !== null && Object.keys(optAdjLibDefaults).length === 7
   && optAdjDynDefaults !== null
   && Object.keys(optAdjLibDefaults).every((k) => Object.prototype.hasOwnProperty.call(optAdjDynDefaults, k)),
   optAdjLibDefaults === null ? 'no DEFAULT_OPTADJ_CONFIG' : Object.keys(optAdjLibDefaults).join(', '));
 check('the Java OptAdj defaults and mode tokens are the Host\'s',
   optAdjJava.indexOf('GEN_ADJ_BASE_CASE = "genAdjBaseCase"') >= 0
-  && optAdjJava.indexOf('GEN_ADJ_CA_N1 = "genAdjCaN_1"') >= 0
+  && optAdjJava.indexOf('GEN_ADJ_CA_N1 = "genAdjCA_N-1"') >= 0
   && optAdjJava.indexOf('List.of(GEN_ADJ_BASE_CASE, GEN_ADJ_CA_N1)') >= 0
   && optAdjJava.indexOf('DEFAULT_SCAN_BASE_CASE = 50.0') >= 0
   && optAdjJava.indexOf('DEFAULT_SCAN_CA_N1 = 90.0') >= 0
   && optAdjJava.indexOf('DEFAULT_OPT_ADJ_THRESHOLD = 100.0') >= 0
+  && optAdjJava.indexOf('DEFAULT_SPARSE_SEN_MATRIX = true') >= 0
   && optAdjJava.indexOf('DEFAULT_THREADS = 0') >= 0
+  && optAdjJava.indexOf('sparseSenMatrixOrDefault()') >= 0
   && optAdjLibDefaults.optAdjType === "'genAdjBaseCase'"
   && String(optAdjLibDefaults.optAdjLoadingThreshold) === '100'
   && String(optAdjLibDefaults.threads) === '0'
   && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
     const s = rd(p);
-    return s.indexOf("const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCaN_1']") >= 0
-      && s.indexOf('const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, genAdjCaN_1: 90 }') >= 0;
+    return s.indexOf("const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']") >= 0
+      && s.indexOf("const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }") >= 0;
   }));
+// The sparse/dense knob is one field per half plus the Java record, and the runner must actually
+// hand it to both optimizers; a half that dropped the key, or a runner that kept the old literal
+// `true`, would silently run the other sensitivity setting.
+check('the sparse-sensitivity knob reaches both Java optimizers from every host half',
+  optAdjJava.indexOf('Boolean sparseSenMatrix, Integer threads') >= 0
+  && optAdjJava.indexOf('DEFAULT_SPARSE_SEN_MATRIX = true') >= 0
+  && optAdjJava.indexOf('sparseSenMatrixOrDefault()') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('new AclfNetContigencyOptimizer(sparseSenMatrix)') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('new AclfNetLoadFlowOptimizer(sparseSenMatrix)') >= 0
+  && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => /sparseSenMatrix: true/.test(rd(p)))
+  && rd(LIB_HOST).indexOf('sparseSenMatrix must be true or false') >= 0
+  && rd(DYN_HOST).indexOf('sparseSenMatrix must be true or false') >= 0
+  && String(optAdjLibDefaults.sparseSenMatrix) === 'true'
+  && String(optAdjDynDefaults.sparseSenMatrix) === 'true');
 // The tool, its RPC and its card: a registered tool without the RPC (or without the card) is a
 // row that fails the moment it is called, or one that renders nothing.
 check('the tool, its RPC and its card are all registered',
@@ -2718,10 +2736,31 @@ const optAdjNamesBody = (path) => {
   const m = /function optAdjResultNames\(stem, optAdjType\) \{([\s\S]*?)\n[ \t]*\}/.exec(rd(path));
   return m === null ? null : m[1];
 };
+// The name rule now reads the mode through each half's own `canonicalOptAdjType`, so the harness
+// composes that half's real canonicalizer with its real tables: evaluating the pair together is what
+// proves a legacy spelling lands on the same N-1 pair as the canonical token.
+const optAdjCanonBody = (path) => {
+  const m = /function canonicalOptAdjType\(value\) \{([\s\S]*?)\n[ \t]*\}/.exec(rd(path));
+  return m === null ? null : m[1];
+};
+const optAdjLiteral = (path, re) => {
+  const m = re.exec(rd(path));
+  if (m === null) return null;
+  try { return new Function('return ' + m[1])(); } catch (e) { return null; }
+};
 const optAdjNamesFn = (path) => {
+  const canon = optAdjCanonBody(path);
   const body = optAdjNamesBody(path);
-  if (body === null) return null;
-  try { return new Function('stem', 'optAdjType', body); } catch (e) { return null; }
+  const types = optAdjLiteral(path, /const OPTADJ_TYPES = (\[[^\]]*\])/);
+  const legacy = optAdjLiteral(path, /const OPTADJ_LEGACY_TYPES = (\{[^}]*\})/);
+  if (canon === null || body === null || types === null || legacy === null) return null;
+  // Each captured slice is a function BODY, so the composed source re-declares both names around it.
+  const src = 'function canonicalOptAdjType(value) {' + canon + '\n}\n'
+    + 'function optAdjResultNames(stem, optAdjType) {' + body + '\n}\n'
+    + 'return optAdjResultNames';
+  try {
+    return new Function('OPTADJ_TYPES', 'OPTADJ_LEGACY_TYPES', src)(types, legacy);
+  } catch (e) { return null; }
 };
 const optAdjHostFns = [LIB_HOST, DYN_HOSTB, DYN_HOST].map(optAdjNamesFn);
 const optAdjNamesOf = (fn, type) => {
@@ -2731,10 +2770,24 @@ const optAdjPair = (fn, type) => {
   const names = optAdjNamesOf(fn, type);
   return names === null ? null : names.genFile + '|' + names.branchFile;
 };
-check('the Host mirrors the runner\'s names for both modes',
+check('the Host mirrors the runner\'s names for both modes, retired spelling included',
   optAdjHostFns.every((fn) => optAdjPair(fn, 'genAdjBaseCase') === 'ieee39_DF_optadj_gen.csv|ieee39_DF_optadj_branch.csv'
-    && optAdjPair(fn, 'genAdjCaN_1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'),
-  optAdjHostFns.map((fn) => optAdjPair(fn, 'genAdjCaN_1')).join(' / '));
+    && optAdjPair(fn, 'genAdjCA_N-1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'
+    && optAdjPair(fn, 'genAdjCaN_1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'
+    && optAdjPair(fn, 'genAdjN2') === 'ieee39_DF_optadj_gen.csv|ieee39_DF_optadj_branch.csv'),
+  optAdjHostFns.map((fn) => optAdjPair(fn, 'genAdjCA_N-1')).join(' / '));
+// The alias lives in the Host, never in the bridge: the Java record rejects the retired token (its
+// own test pins that), so every half's validator has to map it before the payload is built — and the
+// tool schema still advertises the canonical token only.
+check('every host half normalises the retired mode token before the bridge sees it',
+  [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
+    const s = rd(p);
+    return s.indexOf('const type = canonicalOptAdjType(rawType)') >= 0
+      && s.indexOf('const OPTADJ_LEGACY_TYPES = { genAdjCaN_1:') >= 0;
+  })
+  && rd(LIB_HOST).indexOf('enum: OPTADJ_TYPES') >= 0
+  && rd(LIB_HOST).indexOf('is still accepted inside `optAdjConfig`') >= 0,
+  rd(LIB_HOST).indexOf('OPTADJ_LEGACY_TYPES') >= 0 ? 'legacy map present' : 'no legacy map');
 // The client's kind lookup, run for the same reason: `optadj_gen` must find both the basecase and
 // the N-1 generator file, and must not pick up the other kind's N-1 file.
 const kindSuffixBody = (() => {

@@ -295,7 +295,7 @@ class IpssAgentBridgeTest {
         assertThat(o.get("ok").getAsBoolean()).isFalse();
         assertThat(o.get("error").getAsString())
                 .contains("unsupported optAdjType 'genAdjN2'")
-                .contains("genAdjBaseCase|genAdjCaN_1");
+                .contains("genAdjBaseCase|genAdjCA_N-1");
     }
 
     /**

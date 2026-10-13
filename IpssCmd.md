@@ -128,12 +128,17 @@ built-in defaults:
 
 | Key | Values | Meaning |
 | --- | --- | --- |
-| `optAdjType` | `genAdjBaseCase` (default) \| `genAdjCaN_1` | Relieve pre-contingency (basecase) or post-contingency (single branch outage) loading |
+| `optAdjType` | `genAdjBaseCase` (default) \| `genAdjCA_N-1` | Relieve pre-contingency (basecase) or post-contingency (single branch outage) loading |
 | `scanLoadingThreshold` | `0 < t <= 1000`; unset = 50 basecase / 90 N-1 | Candidate-collection percentage |
 | `optAdjLoadingThreshold` | `0 < t <= 1000` (default `100`) | Percentage the optimizer enforces |
-| `contingencyMode` | `all` (default) \| `custom` | All N-1 outages, or the listed contingencies (`genAdjCaN_1` only) |
+| `contingencyMode` | `all` (default) \| `custom` | All N-1 outages, or the listed contingencies (`genAdjCA_N-1` only) |
 | `contingencyFile` | path under `wspace/` | The contingency JSON; required when the mode is `custom` |
+| `sparseSenMatrix` | `true` (default) \| `false` | Sensitivity path passed to the LP's optimizer: sparse, or dense |
 | `threads` | `>= 0` (default `0`) | SSA workers; `0` = one per available processor |
+
+The N-1 mode token was renamed from `genAdjCaN_1` to `genAdjCA_N-1` in 0.7.8. The record accepts the
+canonical token only; the DSH Host folds the retired spelling onto it, so an older `opt_adj_run.json`
+still runs through the plugin, while a CLI run reads the file directly and rejects it.
 
 Two preconditions are refused with the reason rather than producing a meaningless run: every active
 generator needs a **P gen limit** and every branch a **rating MVA 1** (the scan divides the flow by
@@ -152,7 +157,7 @@ Results are written under `wspace/<input_parent>/result/`:
 - `<stem>_DF_load.csv`
 - `<stem>_DF_contingency.csv` (CA only)
 - `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv` (OptAdj basecase)
-- `<stem>_DF_optadj_N1_gen.csv` + `<stem>_DF_optadj_N1_branch.csv` (OptAdj N-1, `genAdjCaN_1`)
+- `<stem>_DF_optadj_N1_gen.csv` + `<stem>_DF_optadj_N1_branch.csv` (OptAdj N-1, `genAdjCA_N-1`)
 
 See [Setup.md](Setup.md) for the full layout and the report generators in
 [GenReport.md](GenReport.md).

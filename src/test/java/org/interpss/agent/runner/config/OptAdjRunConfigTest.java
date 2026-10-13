@@ -61,7 +61,7 @@ class OptAdjRunConfigTest {
     @Test
     void load_readsEveryField() throws Exception {
         Path file = write("{\n"
-                + "  \"optAdjType\": \"genAdjCaN_1\",\n"
+                + "  \"optAdjType\": \"genAdjCA_N-1\",\n"
                 + "  \"scanLoadingThreshold\": 85,\n"
                 + "  \"optAdjLoadingThreshold\": 99,\n"
                 + "  \"contingencyMode\": \"custom\",\n"
@@ -85,7 +85,7 @@ class OptAdjRunConfigTest {
     @Test
     void load_ignoresUnknownKeysAndNormalisesBlanks() throws Exception {
         Path file = write("{\n"
-                + "  \"optAdjType\": \"  genAdjCaN_1  \",\n"
+                + "  \"optAdjType\": \"  genAdjCA_N-1  \",\n"
                 + "  \"contingencyMode\": \"  CUSTOM  \",\n"
                 + "  \"contingencyFile\": \"  \",\n"
                 + "  \"futureSetting\": 42\n"
@@ -106,7 +106,13 @@ class OptAdjRunConfigTest {
         assertThatThrownBy(() -> OptAdjRunConfig.fromJson("{\"optAdjType\":\"genAdjN2\"}", "test"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("unsupported optAdjType 'genAdjN2'")
-                .hasMessageContaining("genAdjBaseCase|genAdjCaN_1");
+                .hasMessageContaining("genAdjBaseCase|genAdjCA_N-1");
+        // The retired 0.7.4-0.7.7 spelling is not a Java mode token: the DSH Host maps it onto
+        // `genAdjCA_N-1` before the bridge ever sees it, so the record stays strict here.
+        assertThatThrownBy(() -> OptAdjRunConfig.fromJson("{\"optAdjType\":\"genAdjCaN_1\"}", "test"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("unsupported optAdjType 'genAdjCaN_1'")
+                .hasMessageContaining("genAdjBaseCase|genAdjCA_N-1");
         assertThatThrownBy(() -> OptAdjRunConfig.fromJson("{\"scanLoadingThreshold\":0}", "test"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("scanLoadingThreshold must be a loading percentage between 0 and 1000");
@@ -136,7 +142,7 @@ class OptAdjRunConfigTest {
     @Test
     void withScanLoadingThreshold_keepsEveryOtherField() {
         OptAdjRunConfig stricter = OptAdjRunConfig
-                .fromJson("{\"optAdjType\":\"genAdjCaN_1\",\"threads\":3,\"contingencyMode\":\"custom\","
+                .fromJson("{\"optAdjType\":\"genAdjCA_N-1\",\"threads\":3,\"contingencyMode\":\"custom\","
                         + "\"contingencyFile\":\"data/x.json\",\"sparseSenMatrix\":false}", "test")
                 .withScanLoadingThreshold(70.0);
 

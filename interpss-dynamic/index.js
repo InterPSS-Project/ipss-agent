@@ -501,7 +501,7 @@ export default {
     }
 
     // Generator-redispatch (OptAdj) run config (config/opt_adj_run.json beside config/ca_run.json),
-    // the same six keys the persistent host writes and `OptAdjRunConfig` parses. Kept here even
+    // the same seven keys the persistent host writes and `OptAdjRunConfig` parses. Kept here even
     // though this half only *runs* OptAdj through the persistent host's javaBridge provider: a
     // case file must mean the same thing to both halves.
     const DEFAULT_OPTADJ_CONFIG = {
@@ -510,29 +510,42 @@ export default {
       optAdjLoadingThreshold: 100,
       contingencyMode: 'all',
       contingencyFile: null,
+      // true = sparse sensitivities (what the runner hard-coded before the Java knob), false = dense.
+      sparseSenMatrix: true,
       threads: 0,
     }
-    const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCaN_1']
-    const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, genAdjCaN_1: 90 }
+    // `genAdjCaN_1` is the retired 0.7.4-0.7.7 spelling of `genAdjCA_N-1`; the Java record renamed
+    // the token, so the legacy name is mapped onto the canonical one before it reaches the bridge.
+    const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']
+    const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }
+    const OPTADJ_LEGACY_TYPES = { genAdjCaN_1: 'genAdjCA_N-1' }
     const OPTADJ_CONFIG_KEYS = Object.keys(DEFAULT_OPTADJ_CONFIG)
+
+    // The canonical mode token for an untrusted value, '' when it names no known mode.
+    function canonicalOptAdjType(value) {
+      if (typeof value !== 'string') return ''
+      const token = value.trim()
+      if (OPTADJ_TYPES.indexOf(token) >= 0) return token
+      const mapped = OPTADJ_LEGACY_TYPES[token]
+      return mapped === undefined ? '' : mapped
+    }
 
     function optAdjConfigPayload(config) {
       const source = config && typeof config === 'object' ? config : DEFAULT_OPTADJ_CONFIG
-      const type = OPTADJ_TYPES.indexOf(source.optAdjType) >= 0
-        ? source.optAdjType
-        : DEFAULT_OPTADJ_CONFIG.optAdjType
+      const type = canonicalOptAdjType(source.optAdjType)
       const out = {}
       for (const key of OPTADJ_CONFIG_KEYS) {
         out[key] = source[key] === undefined ? DEFAULT_OPTADJ_CONFIG[key] : source[key]
       }
-      if (out.scanLoadingThreshold === null) out.scanLoadingThreshold = OPTADJ_SCAN_DEFAULTS[type]
+      out.optAdjType = type === '' ? DEFAULT_OPTADJ_CONFIG.optAdjType : type
+      if (out.scanLoadingThreshold === null) out.scanLoadingThreshold = OPTADJ_SCAN_DEFAULTS[out.optAdjType]
       return out
     }
 
     // The two result CSVs: the runner's names, mirrored for the CLI fallback and for a JAR that
     // predates the reply's genFile/branchFile. The N-1 mode carries the `N1` infix (0.7.5).
     function optAdjResultNames(stem, optAdjType) {
-      const suffix = optAdjType === 'genAdjCaN_1' ? '_DF_optadj_N1' : '_DF_optadj'
+      const suffix = canonicalOptAdjType(optAdjType) === 'genAdjCA_N-1' ? '_DF_optadj_N1' : '_DF_optadj'
       return { genFile: stem + suffix + '_gen.csv', branchFile: stem + suffix + '_branch.csv' }
     }
 
@@ -815,14 +828,15 @@ function caConfigPath(root, parent) {
 
       const rawType = value.optAdjType
       if (rawType !== undefined && rawType !== null && rawType !== '') {
-        if (OPTADJ_TYPES.indexOf(rawType) < 0) {
+        const type = canonicalOptAdjType(rawType)
+        if (type === '') {
           return {
             ok: false,
             error: 'unsupported optAdjType ' + JSON.stringify(rawType) +
               ' (expected ' + OPTADJ_TYPES.join('|') + ')',
           }
         }
-        out.optAdjType = rawType
+        out.optAdjType = type
       }
 
       const loading = (key) => {
@@ -838,6 +852,20 @@ function caConfigPath(root, parent) {
       for (const key of ['scanLoadingThreshold', 'optAdjLoadingThreshold']) {
         const bad = loading(key)
         if (bad !== null) return { ok: false, error: bad }
+      }
+
+      // Sparse (true) or dense (false) sensitivities; the two strings collapse to a real boolean.
+      const rawSparse = value.sparseSenMatrix
+      if (rawSparse !== undefined && rawSparse !== null && rawSparse !== '') {
+        if (typeof rawSparse === 'boolean') out.sparseSenMatrix = rawSparse
+        else if (rawSparse === 'true') out.sparseSenMatrix = true
+        else if (rawSparse === 'false') out.sparseSenMatrix = false
+        else {
+          return {
+            ok: false,
+            error: 'sparseSenMatrix must be true or false (got ' + JSON.stringify(rawSparse) + ')',
+          }
+        }
       }
 
       const rawThreads = value.threads

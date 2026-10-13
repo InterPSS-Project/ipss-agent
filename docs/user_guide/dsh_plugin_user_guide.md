@@ -401,8 +401,13 @@ the monitored loadings stay under an enforce percentage, and the same set is re-
 chosen by `optAdjType`:
 
 - `genAdjBaseCase` (default) — pre-contingency loading, scan default 50 %;
-- `genAdjCaN_1` — post-contingency loading for single branch outages, scan default 90 %; pass a
+- `genAdjCA_N-1` — post-contingency loading for single branch outages, scan default 90 %; pass a
 `contingencyFile` to use a listed contingency set instead of all N-1 outages.
+
+The config's other keys ride along in `optAdjConfig`: `contingencyMode`, `sparseSenMatrix` (`true` =
+sparse sensitivities, the default) and `threads`. The N-1 token was renamed from `genAdjCaN_1` in
+0.7.8 — the older spelling is still accepted (in `optAdjConfig` or `config/opt_adj_run.json`) and
+normalised, so an existing config file keeps working.
 
 The card reports the mode, both thresholds, the before → after overload counts, how many control
 generators moved, and an **Explore results** row with the *Gen adjustments* (`adjP` per generator, in

@@ -13,7 +13,7 @@ This note follows the sparse SSA-result path used by the IEEE-39 samples in
 |                               | **Basecase OptAdj**                            | **N-1 contingency OptAdj**                                 |
 | ----------------------------- | ---------------------------------------------- | ---------------------------------------------------------- |
 | When                          | Pre-contingency branch loading is above rating | Post-contingency (branch outage) loading is above rating   |
-| `OptAdjRunConfig` type        | `GEN_ADJ_BASE_CASE` (`"genAdjBaseCase"`)       | `GEN_ADJ_CA_N1` (`"genAdjCaN_1"`)                          |
+| `OptAdjRunConfig` type        | `GEN_ADJ_BASE_CASE` (`"genAdjBaseCase"`)       | `GEN_ADJ_CA_N1` (`"genAdjCA_N-1"`)                          |
 | SSA scan                      | `AclfNetSsaHelper.baseCaseScan(thresholdPct)`  | `AclfNetSsaHelper.contingencyScan(contList, thresholdPct)` |
 | Optimizer                     | `AclfNetLoadFlowOptimizer(sparse)`             | `AclfNetContigencyOptimizer(sparse)`                       |
 | IEEE39 sample                 | `IEEE39_OptBasecase_SsaResult_Sparse_Sample`   | `IEEE39_OptN1Scan_SsaResult_Sparse_Sample`                 |
@@ -50,7 +50,7 @@ public record OptAdjRunConfig(
     Double optAdjLoadingThreshold) {
 
     public static final String GEN_ADJ_BASE_CASE = "genAdjBaseCase";
-    public static final String GEN_ADJ_CA_N1 = "genAdjCaN_1";
+    public static final String GEN_ADJ_CA_N1 = "genAdjCA_N-1";
 }
 ```
 
@@ -59,6 +59,12 @@ public record OptAdjRunConfig(
 | `optAdjType` | Mode token: basecase vs N-1 CA |
 | `scanLoadingThreshold` | Percent used by the SSA scan (candidate collection) |
 | `optAdjLoadingThreshold` | Percent enforced by the LP optimizer |
+| `sparseSenMatrix` | Sensitivity path handed to both optimizer constructors: `true` = sparse (the default, and what the runner hard-coded before the knob), `false` = dense |
+
+The agent record carries the run-control fields beside these (`contingencyMode`, `contingencyFile`,
+`threads`), and the DSH Host mirrors all seven in `DEFAULT_OPTADJ_CONFIG`. The N-1 token was renamed
+from `genAdjCaN_1` to `genAdjCA_N-1` when `sparseSenMatrix` landed; the Host still accepts the older
+spelling and normalises it, while the record itself rejects it.
 
 Both IEEE-39 samples build the config up front and pass the two doubles into scan / optimize —
 they no longer hard-code bare `50.0` / `90.0` / `100.0` at the call sites.
@@ -73,7 +79,8 @@ they no longer hard-code bare `50.0` / `90.0` / `100.0` at the call sites.
    90%) so the sparse sensitivity matrix includes branches that are near limit. The optimizer
    enforces a *higher* limit (typically **100%** of rating). In samples:
    `optAdjRunConfig.scanLoadingThreshold()` vs `optAdjRunConfig.optAdjLoadingThreshold()`.
-2. **Sparse SSA path.** Pass `true` to the optimizer constructor and wrap the scan result in
+2. **Sparse SSA path.** Pass `true` to the optimizer constructor — the config's
+   `sparseSenMatrix`, sparse by default — and wrap the scan result in
    `OptAdjResultContainer`. Control gens and monitored branches are taken from the SSA
    over-limit set, not the full network — smaller LP / sparse PTDF matrix.
 3. **Null result container (full-network path).** In
@@ -335,7 +342,7 @@ named without `SsaResult` in the class name (e.g. `IEEE39_OptBasecase_Sparse_Sam
   carries `contingencyMode`/`contingencyFile` (the `custom` N-1 input) and `threads` (`0` = one SSA
   worker per processor); the three-argument constructor calls above still compile. Since 0.7.5 each
   mode writes its own result pair — `_DF_optadj_gen.csv` / `_DF_optadj_branch.csv` for the basecase,
-  `_DF_optadj_N1_gen.csv` / `_DF_optadj_N1_branch.csv` for `genAdjCaN_1` — so the two runs can share
+  `_DF_optadj_N1_gen.csv` / `_DF_optadj_N1_branch.csv` for `genAdjCA_N-1` — so the two runs can share
   one `result/` folder.
 - Since **0.7.7** the Diagram tab’s branch tooltip quotes those branch tables: **Basecase OptAdj
   Loading(%)** from `_DF_optadj_branch.csv` and **Contingency OptAdj Loading(%)** from

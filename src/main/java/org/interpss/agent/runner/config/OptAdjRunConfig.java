@@ -15,7 +15,7 @@ import com.google.gson.Gson;
  *
  * <pre>
  * {
- *   "optAdjType": "genAdjBaseCase" | "genAdjCaN_1",
+ *   "optAdjType": "genAdjBaseCase" | "genAdjCA_N-1",
  *   "scanLoadingThreshold": 50,
  *   "optAdjLoadingThreshold": 100,
  *   "contingencyMode": "all" | "custom",

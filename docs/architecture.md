@@ -243,9 +243,11 @@ still writes both CSVs. Method, prerequisites and anchors:
 **OptAdj config resolution** (`OptAdjRunner.resolveInputs`, printed as `Using opt_adj_run.json: …`):
 an explicit CLI contingency file pins the `custom` mode to it; else the case-specific
 `wspace/<input_parent>/config/opt_adj_run.json`; else the built-in defaults (basecase mode, 50 %
-scan, 100 % enforcement, all N-1 outages, one SSA worker per processor). Only `genAdjCaN_1` reads a
+scan, 100 % enforcement, all N-1 outages, sparse sensitivities, one SSA worker per processor). Only
+`genAdjCA_N-1` reads a
 contingency file — a basecase run rejects one. The chat tool layers its scalar arguments and its
-`optAdjConfig` object over the same file, so GUI-less and scripted runs agree.
+`optAdjConfig` object over the same file, so GUI-less and scripted runs agree; the retired
+`genAdjCaN_1` spelling is folded onto `genAdjCA_N-1` before the bridge sees it (0.7.8).
 
 ### Step 5 — Report generation
 
@@ -290,7 +292,7 @@ Analyzers (`VoltageAnalyzer`, `BranchLoadingAnalyzer`, `GeneratorQAnalyzer`, `Co
 | `<stem>_DF_load.csv` | ACLF |
 | `<stem>_DF_contingency.csv` | CA |
 | `<stem>_DF_optadj_gen.csv` / `<stem>_DF_optadj_branch.csv` | OptAdj basecase (`genAdjBaseCase`) |
-| `<stem>_DF_optadj_N1_gen.csv` / `<stem>_DF_optadj_N1_branch.csv` | OptAdj N-1 (`genAdjCaN_1`, 0.7.5+) |
+| `<stem>_DF_optadj_N1_gen.csv` / `<stem>_DF_optadj_N1_branch.csv` | OptAdj N-1 (`genAdjCA_N-1`, 0.7.5+) |
 | `AC_Loadflow_Report.md` | `report aclf` |
 | `NERC_TPL_001_5_Report.md` | `report nerc` |
 
