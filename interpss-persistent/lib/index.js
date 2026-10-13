@@ -1118,22 +1118,6 @@ async function validateOptAdjConfig(ctx, root, value, requireFiles) {
     }
   }
 
-  // A loading percentage: 0 < t <= 1000, the rule the Java record enforces.
-  const loading = (key) => {
-    const raw = value[key]
-    if (raw === undefined || raw === null || raw === '') return null
-    const n = Number(raw)
-    if (!Number.isFinite(n) || n <= 0 || n > 1000) {
-      return key + ' must be a loading percentage between 0 and 1000 (got ' + JSON.stringify(raw) + ')'
-    }
-    out[key] = n
-    return null
-  }
-  for (const key of ['scanLoadingThreshold', 'optAdjLoadingThreshold']) {
-    const bad = loading(key)
-    if (bad !== null) return { ok: false, error: bad }
-  }
-
   const rawThreads = value.threads
   if (rawThreads !== undefined && rawThreads !== null && rawThreads !== '') {
     const n = Number(rawThreads)
