@@ -981,10 +981,13 @@ function caConfigPath(root, parent) {
               // Listed whether or not a CA has been run: the client reads what it can, and an
               // absent file simply means "no contingency data" (0.6.31).
               stem + '_DF_contingency.csv',
-              // The two OptAdj branch tables: the Diagram tab's tooltip adds a line per mode when the
-              // table lists the branch, and an absent file just means "no OptAdj data" (0.7.7).
+              // The four OptAdj tables: the Diagram tab's tooltip adds a line per mode when the
+              // branch table lists the branch, an absent file just means "no OptAdj data" (0.7.7),
+              // and the `_gen` pair is what the OptAdj card's Gen adjustments table reads (0.7.10).
               stem + '_DF_optadj_branch.csv',
               stem + '_DF_optadj_N1_branch.csv',
+              stem + '_DF_optadj_gen.csv',
+              stem + '_DF_optadj_N1_gen.csv',
               stem + '_network_info.txt',
             ],
           }
@@ -1155,7 +1158,7 @@ function caConfigPath(root, parent) {
         const path = args && typeof args.path === 'string' ? args.path : ''
         // Every result family a client read can ask for belongs in this list (0.7.7: the OptAdj pair
         // was missing, so the Diagram tab's OptAdj tooltip reads were rejected as invalid paths).
-        if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency|optadj_branch|optadj_N1_branch)\.csv$/.test(path)) {
+        if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency|optadj_branch|optadj_N1_branch|optadj_gen|optadj_N1_gen)\.csv$/.test(path)) {
           return { ok: false, error: 'Invalid result path: ' + path }
         }
         const start = (args && typeof args.start === 'number' && args.start > 0) ? Math.floor(args.start) : 0

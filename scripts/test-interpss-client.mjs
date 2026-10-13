@@ -860,7 +860,8 @@ if (scene) {
     if (m === null) return null;
     try { return new Function('return ' + m[1])(); } catch (e) { return null; }
   };
-  const RESULT_TABLES = ['bus', 'branch', 'gen', 'load', 'contingency', 'optadj_branch', 'optadj_N1_branch'];
+  const RESULT_TABLES = ['bus', 'branch', 'gen', 'load', 'contingency', 'optadj_branch', 'optadj_N1_branch',
+    'optadj_gen', 'optadj_N1_gen'];
   check('every result family the tab reads passes the Host\'s readCsv allow-list',
     HOST_HALVES.every((p) => {
       const rx = readCsvPattern(p);
@@ -870,6 +871,16 @@ if (scene) {
         && !rx.test('data/ieee/ieee39/result/../../etc/passwd_DF_branch.csv');
     }),
     HOST_HALVES.map((p) => (readCsvPattern(p) === null ? 'no pattern' : String(readCsvPattern(p)))).join(' || '));
+  // Discovery must name the same families the reader allows, or a card can find nothing to ask for
+  // (or ask for something the gate then rejects). The OptAdj *gen* tables are the ones a card's
+  // "Gen adjustments" button reads, and they were missing from both the pattern and this list.
+  check('every Host half lists every OptAdj table it lets the client read',
+    HOST_HALVES.every((p) => {
+      const src = rd(join(ROOT, p));
+      return RESULT_TABLES.filter((f) => f.indexOf('optadj') === 0)
+        .every((f) => src.indexOf("stem + '_DF_" + f + ".csv'") >= 0);
+    }),
+    RESULT_TABLES.filter((f) => f.indexOf('optadj') === 0).join(', '));
 }
 
 // --- 12. the Diagram tab (a second conversation view, order 2) --------------
