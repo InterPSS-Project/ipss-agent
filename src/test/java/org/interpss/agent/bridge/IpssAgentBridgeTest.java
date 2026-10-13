@@ -289,7 +289,7 @@ class IpssAgentBridgeTest {
     @Test
     void runOptAdjWithConfig_rejectsAnUnknownMode() {
         String json = bridge.runOptAdjWithConfig("ieee", casePath, null, resultsDir.toString(), stem,
-                false, "{\"optAdjType\":\"genAdjN2\"}");
+                false, "genAdjN2", "{}");
         JsonObject o = JsonParser.parseString(json).getAsJsonObject();
 
         assertThat(o.get("ok").getAsBoolean()).isFalse();
@@ -305,7 +305,7 @@ class IpssAgentBridgeTest {
     @Test
     void runOptAdjWithConfig_refusesACaseWithoutLimitsOrRatings() {
         String json = bridge.runOptAdjWithConfig("ieee", casePath, null, resultsDir.toString(), stem,
-                true, "{}");
+                true, "genAdjBaseCase", "{}");
         JsonObject o = JsonParser.parseString(json).getAsJsonObject();
 
         assertThat(o.get("ok").getAsBoolean()).isFalse();
@@ -341,7 +341,7 @@ class IpssAgentBridgeTest {
         assertThat(applied.get("ok").getAsBoolean()).as(applied.toString()).isTrue();
 
         JsonObject o = JsonParser.parseString(bridge.runOptAdjWithConfig("ieee", absCase, null,
-                resultsDir.toString(), "ieee39", false, "{\"optAdjType\":\"genAdjBaseCase\"}"))
+                resultsDir.toString(), "ieee39", false, "genAdjBaseCase", "{}"))
                 .getAsJsonObject();
 
         assertThat(o.get("ok").getAsBoolean()).as(o.toString()).isTrue();

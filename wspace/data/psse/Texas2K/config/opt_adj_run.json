@@ -1,0 +1,8 @@
+{
+  "scanLoadingThreshold": 90,
+  "optAdjLoadingThreshold": 100,
+  "contingencyMode": "custom",
+  "contingencyFile": "data/psse/Texas2K/contingencies.json",
+  "sparseSenMatrix": true,
+  "threads": 0
+}

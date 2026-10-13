@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.7.8**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.7.11**.
 
 ## Tool surface
 
@@ -299,19 +299,26 @@ tool's contract.
 | `optAdjConfig` | — | The same keys as one object (partial; an unknown key is rejected with the list of known ones). The scalar arguments above win per key |
 | `reload` | `false` | Re-parse the case file before running |
 
-The run configuration resolves most-specific-first: `optAdjConfig` → the scalar arguments → the case
-folder's `config/opt_adj_run.json` → the built-in defaults. There is no filename discovery (unlike
-CA): only the N-1 mode reads a contingency file, and it must be named. The config carries seven keys:
-the five above plus `contingencyMode` (`all` \| `custom`) and two knobs with no scalar argument —
-`sparseSenMatrix` (boolean, default `true` = the sparse sensitivity path the runner hard-coded before
-0.7.8; `false` selects the dense path) and `threads` (`0` = one SSA worker per available processor).
+The run configuration resolves most-specific-first: `optAdjConfig` → the scalar file-key arguments →
+the case folder's `config/opt_adj_run.json` → the built-in defaults. There is no filename
+discovery (unlike CA): only the N-1 mode reads a contingency file, and it must be named. The file
+carries **six** keys: `scanLoadingThreshold`, `optAdjLoadingThreshold`, `contingencyMode`
+(`all` \| `custom`), `contingencyFile`, `sparseSenMatrix` (boolean, default `true` = sparse
+sensitivities; `false` selects the dense path) and `threads` (`0` = one SSA worker per available
+processor).
+
+`optAdjType` is **not** one of those keys — since 0.7.11 the Java record reads six and the mode
+travels as its own argument to the bridge, so the payload the Host sends never contains it. The Host
+is the layer that decides it: the tool argument wins, then an `optAdjType` named in `optAdjConfig` or
+in the case file (0.7.4–0.7.10 files name it there), and when neither names one a contingency file
+means N-1 and otherwise the basecase — the same inference the CLI makes, so a GUI-less run and a chat
+run of one file agree.
 
 **Mode-token compatibility.** The Java record renamed the N-1 token to `genAdjCA_N-1` in 0.7.8 (the
 0.7.4–0.7.7 spelling was `genAdjCaN_1`). The bridge accepts only the canonical token, so every Host
-half maps the retired spelling onto it before the payload is built: a `config/opt_adj_run.json` or an
-`optAdjConfig` object written against the older docs keeps working, and both spellings produce the
-same `_DF_optadj_N1_` result pair. The tool's own `optAdjType` argument advertises the canonical token
-only.
+half maps the retired spelling onto it wherever the mode is read — the argument, the `optAdjConfig`
+object or the file — before the call: both spellings produce the same `_DF_optadj_N1_` result pair.
+The tool's own `optAdjType` argument advertises the canonical token only.
 
 | Result file | Columns |
 | --- | --- |
@@ -767,6 +774,7 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.7.8 | **The OptAdj config follows the backend's sparse-sensitivity change.** The Java commit that added `OptAdjRunConfig.sparseSenMatrix` also renamed the N-1 mode token, and both move the Host: `DEFAULT_OPTADJ_CONFIG` gains `sparseSenMatrix` (boolean, default `true` — the sparse path `AclfNetLoadFlowOptimizer` / `AclfNetContigencyOptimizer` were constructed with before the knob, so an absent key changes no result), and the mode token becomes **`genAdjCA_N-1`** (`OptAdjRunConfig.GEN_ADJ_CA_N1`). The bridge accepts the canonical token only, so all three Host halves gained one `canonicalOptAdjType` mapping that folds the retired 0.7.4–0.7.7 spelling `genAdjCaN_1` onto it — a `config/opt_adj_run.json` or `optAdjConfig` object written against the older docs still runs, and both spellings yield the same `_DF_optadj_N1_` pair, while the tool's `optAdjType` argument advertises the canonical token. The same pass repaired the backend commit's own tests: `OptAdjRunConfigTest` (four stale payloads) and `IpssAgentBridgeTest` still asserted the old token, so `./mvnw test` was red, and `CliArgs`' usage line and the record's javadoc still spelled it; the record now has a test pinning that it **rejects** the retired token, which is what keeps the alias a Host concern. Host + Java changed, so the app needs a restart (the client half is unchanged). Guard §22 grew to eight checks: the seven-key table in all three halves, the Java record's token/defaults/`DEFAULT_SPARSE_SEN_MATRIX` against the Host's, both optimizers receiving `sparseSenMatrix`, the name rule still run per half — now composing each half's real `canonicalOptAdjType` — over the canonical **and** retired spelling, and the validator's normalization in every half. 354 checks |
 | 0.7.9 | **Hotfix — 0.7.8's Host half did not parse, so no InterPSS tool ever registered.** The 0.7.8 pass that inserted the `sparseSenMatrix` block spliced it between `validateOptAdjConfig`'s `loading` helper and that function's `rawThreads` block but left the helper and its `scanLoadingThreshold` / `optAdjLoadingThreshold` loop in place below the new code, so `lib/index.js` declared `const loading` **twice in the same scope** and Node refused the module outright: `SyntaxError: Identifier 'loading' has already been declared`. A module that cannot be parsed never applies, so the Cordis loader mounted no `interpss` row, `ctx.get('tools')` was never consulted and all seven chat tools (`interpss_case_load`, `interpss_network_info`, `interpss_run_aclf`, `interpss_case_summary`, `interpss_run_gvy`, `interpss_run_ca`, `interpss_case_optadj`) were absent from the session — with **no diagnostic line**, because `diag()` is called from `apply()`, which never ran; a stale `$TMPDIR/dsh-interpss-diagnostic.log` is the signature (the troubleshooting table now says so). The fix deletes the duplicated helper and its loop — a pure duplicate, identical body and identical idempotent effect, so behaviour is unchanged — and `node --check`, a full Host-half import with the profile's dependencies and the client guard are all green again. The duplicated block was the **only** damage: no other construct in the packed file appears twice, and the 0.7.8 → 0.7.9 diff is exactly that deletion. Host only, so install the 0.7.9 tarball through the app's plugin manager and restart the app; the client half is unchanged |
 | 0.7.10 | **Hotfix — the OptAdj card's *Gen adjustments* button always answered `Invalid result path`.** The card's two explorer kinds are `optadj_gen` and `optadj_branch`, each resolving to its basecase and `_N1_` table, but only the **branch** pair ever reached the two Host-side gates that stand between a card and a table: `readCsv`'s allow-list named `optadj_branch` / `optadj_N1_branch` and stopped there (0.7.7 taught it the branch families for the Diagram tab's tooltip, which is the only consumer that existed then), and `checkResult`'s discovery list named the same two files, so `_DF_optadj_gen.csv` / `_DF_optadj_N1_gen.csv` — the pair 0.7.4 introduced *for this card* — were neither listed nor readable. The visible symptom is the card's own error line, `Invalid result path: data/ieee/ieee39/result/ieee39_DF_optadj_N1_gen.csv`, while **Branch loading** next to it works. Both gates now carry all four OptAdj families in all three Host halves. The reason no check caught it: §11's family list — the names it runs each half's extracted pattern over — was `bus, branch, gen, load, contingency, optadj_branch, optadj_N1_branch`, i.e. exactly the families that already worked; it now includes the two OptAdj `gen` families, and a **new** check pins the other half of the contract, that every Host half's `checkResult` list names every OptAdj family its reader allows (discovery and reading can no longer drift apart — the same class of bug 0.7.6/0.7.7 fixed on the branch side). Host only, so reinstall the 0.7.10 tarball and restart the app; the client half is unchanged |
+| 0.7.11 | **The OptAdj mode leaves the config file and becomes a call argument — the plugin follows, without losing file compatibility.** The backend dropped `optAdjType` from `OptAdjRunConfig` (six file keys now), added `parseType` / `isCaN1(String)` / `scanLoadingThresholdOrDefault(String)` and moved the mode into `OptAdjRunner.runOnNet` and `IpssAgentBridge.runOptAdjWithConfig` (`… reload, optAdjType, optAdjConfigJson`); the CLI **infers** it — a contingency path means N-1, otherwise basecase — and a leftover `optAdjType` in a file is ignored by Java. The Host therefore sends the mode as its own argument and its payload is exactly the six keys Java reads, checked by *running* the payload builder in all three halves. The Host keeps honoring an `optAdjType` in `optAdjConfig` or in `config/opt_adj_run.json` (0.7.4–0.7.10 files name it), canonicalising the retired `genAdjCaN_1` on the way, so an older file still runs as the N-1 scan it asks for; when neither the argument nor the config names a mode, the Host uses the CLI's own inference, so a chat run and a CLI run of one file agree. Precedence is argument → object/file → contingency inference → basecase. Host + Java changed (the client half did not), so **restart the app**. Guard §22 gains three checks (record/signature split, the six-key payload per half, the mode beside the payload plus the file/object read-back) and now runs a brace-matched body extractor, since the payload builder's `for` loop defeated the old non-greedy regex. 358 checks |
 
 ## Troubleshooting
 

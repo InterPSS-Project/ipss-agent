@@ -44,20 +44,23 @@ interpss_case_optadj({ case?, optAdjType?, scanLoadingThreshold?, optAdjLoadingT
 | `optAdjConfig` | — | The same keys as one partial object; an unknown key is rejected with the list of known ones. The scalar arguments win per key |
 | `reload` | `false` | Re-parse the case file before running |
 
-Resolution is most-specific-first: `optAdjConfig` → the scalar arguments → the case folder's
-`config/opt_adj_run.json` → the built-in defaults. There is no filename discovery (unlike CA): only
-the N-1 mode reads a contingency file, and it must be named.
+Resolution is most-specific-first: `optAdjConfig` → the scalar file-key arguments → the case folder's
+`config/opt_adj_run.json` → the built-in defaults. `optAdjType` is **not** one of the six keys the Java
+record reads — it travels as its own argument to the bridge, so the payload never contains it. The
+Host resolves it as **tool argument → an `optAdjType` in `optAdjConfig` or in the file (0.7.4–0.7.10
+files name it there) → a contingency file means N-1, otherwise basecase**, the same inference the CLI
+makes. There is no filename discovery (unlike CA): only the N-1 mode reads a contingency file, and it
+must be named.
 
-The config has **seven** keys: the five above plus `contingencyMode` (`all` \| `custom`) and two with
-no scalar argument — `sparseSenMatrix` (boolean, `true` = sparse sensitivities, the default; `false`
-selects the dense path) and `threads` (`0` = one SSA worker per available processor).
+The file has **six** keys: `scanLoadingThreshold`, `optAdjLoadingThreshold`, `contingencyMode`
+(`all` \| `custom`), `contingencyFile`, `sparseSenMatrix` (boolean, `true` = sparse sensitivities, the
+default; `false` selects the dense path) and `threads` (`0` = one SSA worker per available processor).
 
 **The N-1 mode token changed in 0.7.8.** The Java record renamed `genAdjCaN_1` to `genAdjCA_N-1`, and
-the bridge now accepts the canonical token only. The Host maps the retired spelling onto it, so
-`optAdjType: 'genAdjCaN_1'` inside `optAdjConfig` — or in a `config/opt_adj_run.json` written against
-the older docs — still runs and still writes the `_DF_optadj_N1_` pair; the tool's own `optAdjType`
-argument takes the canonical token, and a bad token now reports
-`expected genAdjBaseCase|genAdjCA_N-1`.
+the bridge now accepts the canonical token only. The Host maps the retired spelling wherever it reads
+the mode — the argument, `optAdjConfig` or the file — so `optAdjType: 'genAdjCaN_1'` still runs and
+still writes the `_DF_optadj_N1_` pair; the tool advertises the canonical token, and a bad token
+reports `expected genAdjBaseCase|genAdjCA_N-1`.
 
 The call returns the mode, both resolved thresholds, `contingencies`, `scanned`,
 `overLimitBefore` / `overLimitAfter`, `controlGens`, `gensAdjusted`, the two result file names and
@@ -309,9 +312,10 @@ the NERC report.
 - Large cases take minutes: the SSA scan and the LODF constraints scale with contingencies ×
   branches. `threads` in `optAdjConfig` (`0` = one worker per processor) is the only knob;
   `sparseSenMatrix` picks the sensitivity path but does not change the work the scan does.
-- The mode token is `genAdjCA_N-1` since 0.7.8. `genAdjCaN_1` still works through `optAdjConfig` and a
-  config file, but it is a Host-side alias: the CLI reads the file itself, so a CLI run on a
-  `genAdjCaN_1` file reports `unsupported optAdjType` until the file says `genAdjCA_N-1`.
+- The mode token is `genAdjCA_N-1` since 0.7.8. `genAdjCaN_1` still works on the tool's `optAdjType`
+  argument (Host-side alias). The CLI does not take a mode flag: it infers N-1 when a contingency
+  path is present (positional `cont_file` or `contingencyMode: custom` in the case config), otherwise
+  basecase. A leftover `optAdjType` in `config/opt_adj_run.json` is ignored.
 
 ## Fallbacks
 
@@ -323,9 +327,11 @@ cd wspace
 java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar optadj ieee <input_path> [<cont_file>]
 ```
 
-The CLI reads the same case-folder `config/opt_adj_run.json` (and takes at most one positional file,
-the N-1 contingency JSON: a monitor file is rejected), writing the same two CSVs under
-`<input_parent>/result/`. It is its own JVM, so the case is parsed again and nothing stays loaded.
+The CLI reads the same case-folder `config/opt_adj_run.json` (thresholds / contingency / sparse /
+threads) and takes at most one positional file (the N-1 contingency JSON: a monitor file is
+rejected). A contingency path selects N-1; otherwise the run is basecase. It writes the same two
+CSVs under `<input_parent>/result/`. It is its own JVM, so the case is parsed again and nothing
+stays loaded.
 
 The samples `org.interpss.sample.optadj.IEEE39_OptBasecase_SsaResult_Sparse_Sample` and
 `IEEE39_OptN1Scan_SsaResult_Sparse_Sample` run the same flow from an IDE run configuration.
@@ -337,8 +343,8 @@ The samples `org.interpss.sample.optadj.IEEE39_OptBasecase_SsaResult_Sparse_Samp
 | `… generator(s) have no P gen limit: …` | The case has no `pGenLimit`s; apply the case's limit script first (`interpss_run_gvy`) |
 | `… branch(es) have no rating MVA 1 (LimMvaA): …` | The case carries no branch ratings; apply the ratings script first |
 | `a basecase OptAdj run has no contingencies` | Drop `contingencyFile`, or switch `optAdjType` to `genAdjCA_N-1` |
-| `unsupported optAdjType …` | Use `genAdjBaseCase` or `genAdjCA_N-1` |
-| `unsupported optAdjType 'genAdjCaN_1'` from a **CLI** run | The retired spelling is a Host-side alias; the CLI reads the file itself, so update `config/opt_adj_run.json` to `genAdjCA_N-1` (the plugin path already normalises it) |
+| `unsupported optAdjType …` | Use `genAdjBaseCase` or `genAdjCA_N-1` on the tool/bridge arg (not in the config file) |
+| `unsupported optAdjType 'genAdjCaN_1'` from the **bridge** | Pass the canonical `genAdjCA_N-1`, or let the Host map the retired spelling on the tool arg |
 | `scanLoadingThreshold must be a loading percentage between 0 and 1000` | The threshold is out of range or not a number; pass a percentage such as `90` |
 | Both CSVs are header-only | Nothing was above the scan threshold — normal for an unloaded case; lower `scanLoadingThreshold` if you expected candidates |
 | `overLimitAfter` equals `overLimitBefore` | The generators' P limits left no room; check `gensAdjusted` and the `adjP` column |

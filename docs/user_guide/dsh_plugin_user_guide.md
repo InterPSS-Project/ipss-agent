@@ -405,9 +405,12 @@ chosen by `optAdjType`:
 `contingencyFile` to use a listed contingency set instead of all N-1 outages.
 
 The config's other keys ride along in `optAdjConfig`: `contingencyMode`, `sparseSenMatrix` (`true` =
-sparse sensitivities, the default) and `threads`. The N-1 token was renamed from `genAdjCaN_1` in
-0.7.8 — the older spelling is still accepted (in `optAdjConfig` or `config/opt_adj_run.json`) and
-normalised, so an existing config file keeps working.
+sparse sensitivities, the default) and `threads` — six file keys in all, since the mode is not one of
+them (0.7.11): it is the argument above, or an `optAdjType` inside `optAdjConfig` / the case's
+`config/opt_adj_run.json`, and when none names one a `contingencyFile` means N-1 and otherwise the
+basecase — the same inference a CLI run makes. The N-1 token was renamed from `genAdjCaN_1` in 0.7.8 —
+the older spelling is still accepted wherever the mode is read and normalised, so an existing config
+file keeps working.
 
 The card reports the mode, both thresholds, the before → after overload counts, how many control
 generators moved, and an **Explore results** row with the *Gen adjustments* (`adjP` per generator, in

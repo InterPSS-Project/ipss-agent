@@ -23,7 +23,7 @@ public class IEEE39_OptBasecase_SsaResult_Sparse_Sample {
 				CacheType.SenNotCached, true);
 		dclfAlgo.calculateDclf(DclfMethod.INC_LOSS);
 
-		OptAdjRunConfig optAdjRunConfig = new OptAdjRunConfig(OptAdjRunConfig.GEN_ADJ_BASE_CASE, 50.0, 100.0);
+		OptAdjRunConfig optAdjRunConfig = new OptAdjRunConfig(50.0, 100.0);
 
 		//double baseCaseLoadingThreshold = 50.0;
 		SsaResultContainer ssaResult = new AclfNetSsaHelper(dclfAlgo).baseCaseScan(optAdjRunConfig.scanLoadingThreshold());

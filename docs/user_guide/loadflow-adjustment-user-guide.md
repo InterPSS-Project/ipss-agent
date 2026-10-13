@@ -290,8 +290,12 @@ regression anchors: [gen_opt_adjustment.md](../gen_opt_adjustment.md).
 | IEEE39 sample                 | `IEEE39_OptBasecase_SsaResult_Sparse_Sample` | `IEEE39_OptN1Scan_SsaResult_Sparse_Sample`            |
 
 The N-1 token was renamed from `genAdjCaN_1` to `genAdjCA_N-1` in 0.7.8. The bridge accepts the
-canonical token only and the Host maps the retired spelling onto it, so a config file written from an
-older copy of this guide still runs.
+canonical token only and the Host maps the retired spelling wherever it reads the mode — the
+`optAdjType` argument above, an `optAdjType` inside `optAdjConfig`, or the one in a
+`config/opt_adj_run.json` written from an older copy of this guide — so such a file still runs. The
+mode is not one of the six file keys the record reads (0.7.11): when neither the argument nor the file
+names one, a contingency file means N-1 and otherwise the basecase, which is how a CLI run of the same
+file decides it.
 
 
 ---

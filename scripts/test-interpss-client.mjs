@@ -2683,8 +2683,9 @@ const hostOptAdjDefaults = (path) => {
 };
 const optAdjLibDefaults = hostOptAdjDefaults(LIB_HOST);
 const optAdjDynDefaults = hostOptAdjDefaults(DYN_HOSTB);
-check('the seven OptAdj keys are the same in all three host halves',
-  optAdjLibDefaults !== null && Object.keys(optAdjLibDefaults).length === 7
+check('the six OptAdj file keys are the same in all three host halves',
+  optAdjLibDefaults !== null && Object.keys(optAdjLibDefaults).length === 6
+  && !Object.prototype.hasOwnProperty.call(optAdjLibDefaults, 'optAdjType')
   && optAdjDynDefaults !== null
   && Object.keys(optAdjLibDefaults).every((k) => Object.prototype.hasOwnProperty.call(optAdjDynDefaults, k)),
   optAdjLibDefaults === null ? 'no DEFAULT_OPTADJ_CONFIG' : Object.keys(optAdjLibDefaults).join(', '));
@@ -2698,12 +2699,15 @@ check('the Java OptAdj defaults and mode tokens are the Host\'s',
   && optAdjJava.indexOf('DEFAULT_SPARSE_SEN_MATRIX = true') >= 0
   && optAdjJava.indexOf('DEFAULT_THREADS = 0') >= 0
   && optAdjJava.indexOf('sparseSenMatrixOrDefault()') >= 0
-  && optAdjLibDefaults.optAdjType === "'genAdjBaseCase'"
+  && optAdjJava.indexOf('parseType(') >= 0
+  && optAdjJava.indexOf('scanLoadingThresholdOrDefault(String') >= 0
   && String(optAdjLibDefaults.optAdjLoadingThreshold) === '100'
   && String(optAdjLibDefaults.threads) === '0'
   && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
     const s = rd(p);
     return s.indexOf("const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']") >= 0
+      && s.indexOf("const OPTADJ_DEFAULT_TYPE = 'genAdjBaseCase'") >= 0
+      && s.indexOf('function resolveOptAdjType(') >= 0
       && s.indexOf("const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }") >= 0;
   }));
 // The sparse/dense knob is one field per half plus the Java record, and the runner must actually
@@ -2736,7 +2740,7 @@ check('the tool, its RPC and its card are all registered',
 // for `_DF_optadj_gen.csv`, and the card renders nothing.
 const OPTADJ_RUNNER_JAVA = join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java');
 check('the Java OptAdj runner names its two CSVs from the run mode',
-  rd(OPTADJ_RUNNER_JAVA).indexOf('String suffix = cfg.isCaN1() ? "_DF_optadj_N1" : "_DF_optadj"') >= 0
+  rd(OPTADJ_RUNNER_JAVA).indexOf('String suffix = caN1 ? "_DF_optadj_N1" : "_DF_optadj"') >= 0
   && rd(OPTADJ_RUNNER_JAVA).indexOf('String genCsv = stem + suffix + "_gen.csv"') >= 0
   && rd(OPTADJ_RUNNER_JAVA).indexOf('String branchCsv = stem + suffix + "_branch.csv"') >= 0,
   rd(OPTADJ_RUNNER_JAVA).indexOf('"_DF_optadj_N1"') >= 0 ? 'N1 infix on the mode' : 'no mode-dependent suffix');
@@ -2750,30 +2754,73 @@ const optAdjNamesBody = (path) => {
 // The name rule now reads the mode through each half's own `canonicalOptAdjType`, so the harness
 // composes that half's real canonicalizer with its real tables: evaluating the pair together is what
 // proves a legacy spelling lands on the same N-1 pair as the canonical token.
-const optAdjCanonBody = (path) => {
-  const m = /function canonicalOptAdjType\(value\) \{([\s\S]*?)\n[ \t]*\}/.exec(rd(path));
-  return m === null ? null : m[1];
-};
 const optAdjLiteral = (path, re) => {
   const m = re.exec(rd(path));
   if (m === null) return null;
   try { return new Function('return ' + m[1])(); } catch (e) { return null; }
 };
-const optAdjNamesFn = (path) => {
-  const canon = optAdjCanonBody(path);
-  const body = optAdjNamesBody(path);
+// Brace-matched function-body extraction: a non-greedy regex stops at the first nested `}`, which
+// truncates a body that contains a loop or an `if` block (optAdjConfigPayload has a `for`).
+const optAdjFnBody = (src, name) => {
+  const head = 'function ' + name + '(';
+  const start = src.indexOf(head);
+  if (start < 0) return null;
+  const argsEnd = src.indexOf(')', start + head.length);
+  if (argsEnd < 0) return null;
+  const open = src.indexOf('{', argsEnd);
+  if (open < 0) return null;
+  let depth = 0;
+  let quote = '';
+  for (let i = open; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quote !== '') {
+      if (ch === '\\') { i += 1; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i);
+      if (nl < 0) return null;
+      i = nl;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return { args: src.slice(start + head.length, argsEnd), body: src.slice(open + 1, i) };
+      }
+    }
+  }
+  return null;
+};
+const optAdjBody = (path, name) => optAdjFnBody(rd(path), name);
+const optAdjScopeFn = (path) => {
+  const canon = optAdjBody(path, 'canonicalOptAdjType');
+  const resolve = optAdjBody(path, 'resolveOptAdjType');
+  const names = optAdjBody(path, 'optAdjResultNames');
+  const payload = optAdjBody(path, 'optAdjConfigPayload');
   const types = optAdjLiteral(path, /const OPTADJ_TYPES = (\[[^\]]*\])/);
   const legacy = optAdjLiteral(path, /const OPTADJ_LEGACY_TYPES = (\{[^}]*\})/);
-  if (canon === null || body === null || types === null || legacy === null) return null;
-  // Each captured slice is a function BODY, so the composed source re-declares both names around it.
-  const src = 'function canonicalOptAdjType(value) {' + canon + '\n}\n'
-    + 'function optAdjResultNames(stem, optAdjType) {' + body + '\n}\n'
-    + 'return optAdjResultNames';
+  const defaults = optAdjLiteral(path, /const DEFAULT_OPTADJ_CONFIG = (\{[\s\S]*?\n[ \t]*\})/);
+  if (canon === null || resolve === null || names === null || payload === null || types === null
+      || legacy === null || defaults === null) return null;
+  // Each captured slice is a function BODY, so the composed source re-declares every name around it.
+  const src = 'function canonicalOptAdjType(' + canon.args + ') {' + canon.body + '\n}\n'
+    + 'function resolveOptAdjType(' + resolve.args + ') {' + resolve.body + '\n}\n'
+    + 'function optAdjResultNames(' + names.args + ') {' + names.body + '\n}\n'
+    + 'function optAdjConfigPayload(' + payload.args + ') {' + payload.body + '\n}\n'
+    + 'return { optAdjResultNames, optAdjConfigPayload, resolveOptAdjType }';
   try {
-    return new Function('OPTADJ_TYPES', 'OPTADJ_LEGACY_TYPES', src)(types, legacy);
+    return new Function('OPTADJ_TYPES', 'OPTADJ_LEGACY_TYPES', 'DEFAULT_OPTADJ_CONFIG',
+      'OPTADJ_SCAN_DEFAULTS', 'OPTADJ_CONFIG_KEYS', 'OPTADJ_DEFAULT_TYPE', src)(
+      types, legacy, defaults, { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 },
+      Object.keys(defaults), 'genAdjBaseCase');
   } catch (e) { return null; }
 };
-const optAdjHostFns = [LIB_HOST, DYN_HOSTB, DYN_HOST].map(optAdjNamesFn);
+const optAdjScopes = [LIB_HOST, DYN_HOSTB, DYN_HOST].map(optAdjScopeFn);
+const optAdjHostFns = optAdjScopes.map((scope) => (scope === null ? null : scope.optAdjResultNames));
 const optAdjNamesOf = (fn, type) => {
   try { return fn === null ? null : fn('ieee39', type); } catch (e) { return null; }
 };
@@ -2788,17 +2835,65 @@ check('the Host mirrors the runner\'s names for both modes, retired spelling inc
     && optAdjPair(fn, 'genAdjN2') === 'ieee39_DF_optadj_gen.csv|ieee39_DF_optadj_branch.csv'),
   optAdjHostFns.map((fn) => optAdjPair(fn, 'genAdjCA_N-1')).join(' / '));
 // The alias lives in the Host, never in the bridge: the Java record rejects the retired token (its
-// own test pins that), so every half's validator has to map it before the payload is built — and the
-// tool schema still advertises the canonical token only.
+// own test pins that), so every half's resolveOptAdjType maps it before the mode reaches the
+// bridge — and the tool schema still advertises the canonical token only. The mode is a call
+// argument, not a config-file key.
 check('every host half normalises the retired mode token before the bridge sees it',
   [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
     const s = rd(p);
-    return s.indexOf('const type = canonicalOptAdjType(rawType)') >= 0
+    return s.indexOf('function resolveOptAdjType(') >= 0
       && s.indexOf('const OPTADJ_LEGACY_TYPES = { genAdjCaN_1:') >= 0;
   })
   && rd(LIB_HOST).indexOf('enum: OPTADJ_TYPES') >= 0
-  && rd(LIB_HOST).indexOf('is still accepted inside `optAdjConfig`') >= 0,
+  && rd(LIB_HOST).indexOf('is still accepted on this argument') >= 0
+  && rd(LIB_HOST).indexOf('is not one of the six keys the Java record reads') >= 0,
   rd(LIB_HOST).indexOf('OPTADJ_LEGACY_TYPES') >= 0 ? 'legacy map present' : 'no legacy map');
+// 0.7.11 — the mode left the Java record: the runner/bridge take it as a call argument, a leftover
+// `optAdjType` in a file is ignored by Java, and the Host is the one that keeps honoring it.
+const OPTADJ_BRIDGE_JAVA = join(JAVA_SRC, 'org', 'interpss', 'agent', 'bridge', 'IpssAgentBridge.java');
+check('the Java mode is a call argument, not a record field',
+  optAdjJava.indexOf('public record OptAdjRunConfig(Double scanLoadingThreshold') >= 0
+  && optAdjJava.indexOf('Boolean sparseSenMatrix, Integer threads)') >= 0
+  && optAdjJava.indexOf('public static String parseType(') >= 0
+  && optAdjJava.indexOf('public static boolean isCaN1(String optAdjType)') >= 0
+  && optAdjJava.indexOf('public double scanLoadingThresholdOrDefault(String optAdjType)') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('String optAdjType, OptAdjRunConfig config') >= 0
+  && rd(OPTADJ_BRIDGE_JAVA).indexOf('String optAdjType, String optAdjConfigJson') >= 0,
+  optAdjJava.indexOf('public record OptAdjRunConfig(') >= 0 ? 'record found' : 'no record');
+// The payload is exactly the six file keys the Java record reads, and the mode rides beside it as its
+// own bridge argument: a half that kept the mode in the JSON would have Java ignore it (the record no
+// longer reads the key), silently running the basecase.
+const optAdjPayloadOf = (scope, config, type) => {
+  try { return scope === null ? null : scope.optAdjConfigPayload(config, type); } catch (e) { return null; }
+};
+check('every host half sends the six Java file keys and no mode',
+  optAdjScopes.every((scope) => {
+    const payload = optAdjPayloadOf(scope, { scanLoadingThreshold: null, contingencyFile: null }, 'genAdjCA_N-1');
+    if (payload === null) return false;
+    const keys = Object.keys(payload).sort().join(',');
+    return keys === 'contingencyFile,contingencyMode,optAdjLoadingThreshold,scanLoadingThreshold,sparseSenMatrix,threads'
+      && payload.optAdjType === undefined
+      && payload.scanLoadingThreshold === 90
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjCaN_1').scanLoadingThreshold === 90
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjBaseCase').scanLoadingThreshold === 50
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: 77 }, 'genAdjBaseCase').scanLoadingThreshold === 77;
+  }),
+  optAdjScopes.map((scope) => {
+    const p = optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjCA_N-1');
+    return p === null ? 'null' : Object.keys(p).join(',');
+  }).join(' / '));
+check('every host half passes the mode beside the payload and reads it back from a file or object',
+  [LIB_HOST, DYN_HOST, DYN_HOSTB].every((p) => {
+    const s = rd(p);
+    return s.indexOf('optAdjType, JSON.stringify(optAdjConfigPayload(') >= 0
+      || s.indexOf('reload === true, optAdjType, optAdjConfigJson') >= 0;
+  })
+  && rd(LIB_HOST).indexOf('reload === true, optAdjType, optAdjConfigJson') >= 0
+  && [LIB_HOST, DYN_HOST, DYN_HOSTB].every((p) => rd(p).indexOf('const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])') >= 0
+    && rd(p).indexOf('const rawType = value[OPTADJ_MODE_KEY]') >= 0)
+  && rd(LIB_HOST).indexOf('config[OPTADJ_MODE_KEY]') >= 0,
+  rd(LIB_HOST).indexOf('OPTADJ_INPUT_KEYS') >= 0 ? 'mode accepted as an input key' : 'no mode input key');
 // The client's kind lookup, run for the same reason: `optadj_gen` must find both the basecase and
 // the N-1 generator file, and must not pick up the other kind's N-1 file.
 const kindSuffixBody = (() => {

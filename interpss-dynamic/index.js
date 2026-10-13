@@ -501,11 +501,10 @@ export default {
     }
 
     // Generator-redispatch (OptAdj) run config (config/opt_adj_run.json beside config/ca_run.json),
-    // the same seven keys the persistent host writes and `OptAdjRunConfig` parses. Kept here even
-    // though this half only *runs* OptAdj through the persistent host's javaBridge provider: a
-    // case file must mean the same thing to both halves.
+    // the same six file keys the persistent host writes and `OptAdjRunConfig` parses. The mode is a
+    // call argument, not a file key. Kept here even though this half only *runs* OptAdj through the
+    // persistent host's javaBridge provider: a case file must mean the same thing to both halves.
     const DEFAULT_OPTADJ_CONFIG = {
-      optAdjType: 'genAdjBaseCase',
       scanLoadingThreshold: null,
       optAdjLoadingThreshold: 100,
       contingencyMode: 'all',
@@ -514,12 +513,18 @@ export default {
       sparseSenMatrix: true,
       threads: 0,
     }
-    // `genAdjCaN_1` is the retired 0.7.4-0.7.7 spelling of `genAdjCA_N-1`; the Java record renamed
-    // the token, so the legacy name is mapped onto the canonical one before it reaches the bridge.
+    // `genAdjCaN_1` is the retired 0.7.4-0.7.7 spelling of `genAdjCA_N-1`; the Host maps it onto the
+    // canonical token before it reaches the bridge. Default mode when the caller names none.
     const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']
+    const OPTADJ_DEFAULT_TYPE = 'genAdjBaseCase'
     const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }
     const OPTADJ_LEGACY_TYPES = { genAdjCaN_1: 'genAdjCA_N-1' }
+    // The six keys Java reads from `config/opt_adj_run.json` — exactly what the payload carries.
     const OPTADJ_CONFIG_KEYS = Object.keys(DEFAULT_OPTADJ_CONFIG)
+    // The mode is not a Java file key (it is its own bridge argument), but the Host still honors an
+    // `optAdjType` in the config file or in the config object, so it is an accepted input key.
+    const OPTADJ_MODE_KEY = 'optAdjType'
+    const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])
 
     // The canonical mode token for an untrusted value, '' when it names no known mode.
     function canonicalOptAdjType(value) {
@@ -530,15 +535,23 @@ export default {
       return mapped === undefined ? '' : mapped
     }
 
-    function optAdjConfigPayload(config) {
+    function resolveOptAdjType(explicitType, contRel) {
+      const type = canonicalOptAdjType(explicitType)
+      if (type !== '') return type
+      return contRel !== null && contRel !== undefined && contRel !== ''
+        ? 'genAdjCA_N-1'
+        : OPTADJ_DEFAULT_TYPE
+    }
+
+    // Config JSON for the bridge (no mode). Scan default follows the resolved mode.
+    function optAdjConfigPayload(config, optAdjType) {
       const source = config && typeof config === 'object' ? config : DEFAULT_OPTADJ_CONFIG
-      const type = canonicalOptAdjType(source.optAdjType)
+      const type = resolveOptAdjType(optAdjType, source.contingencyFile)
       const out = {}
       for (const key of OPTADJ_CONFIG_KEYS) {
         out[key] = source[key] === undefined ? DEFAULT_OPTADJ_CONFIG[key] : source[key]
       }
-      out.optAdjType = type === '' ? DEFAULT_OPTADJ_CONFIG.optAdjType : type
-      if (out.scanLoadingThreshold === null) out.scanLoadingThreshold = OPTADJ_SCAN_DEFAULTS[out.optAdjType]
+      if (out.scanLoadingThreshold === null) out.scanLoadingThreshold = OPTADJ_SCAN_DEFAULTS[type]
       return out
     }
 
@@ -818,15 +831,17 @@ function caConfigPath(root, parent) {
       return { ok: true, config: await suggestCaConfig(root, parent), source: 'suggested' }
     }
 
-    // Normalise an untrusted OptAdj payload to the six known keys: an absent key keeps its
-    // default, a present one must be usable. The Java `OptAdjRunConfig` rejects the same values.
+    // Normalise an untrusted OptAdj payload to the six known file keys plus the optional mode: an
+    // absent key keeps its default, a present one must be usable. The mode is not a Java file key,
+    // so it rides on the validated object and never enters the payload; a retired spelling is mapped
+    // onto the canonical token, because Java rejects it.
     async function validateOptAdjConfig(root, value, requireFiles) {
       if (value === null || typeof value !== 'object' || Array.isArray(value)) {
         return { ok: false, error: 'the run configuration must be a JSON object' }
       }
       const out = Object.assign({}, DEFAULT_OPTADJ_CONFIG)
 
-      const rawType = value.optAdjType
+      const rawType = value[OPTADJ_MODE_KEY]
       if (rawType !== undefined && rawType !== null && rawType !== '') {
         const type = canonicalOptAdjType(rawType)
         if (type === '') {
@@ -836,7 +851,7 @@ function caConfigPath(root, parent) {
               ' (expected ' + OPTADJ_TYPES.join('|') + ')',
           }
         }
-        out.optAdjType = type
+        out[OPTADJ_MODE_KEY] = type
       }
 
       const loading = (key) => {
@@ -1515,8 +1530,10 @@ function caConfigPath(root, parent) {
       },
 
       // Generator redispatch (OptAdj): the same config ladder as CA, and the same in-process
-      // bridge first (the persistent host's `runOptAdjWithConfig` provider), CLI second. The run
-      // mutates the held model's generator P, so `reload` re-parses the case first.
+      // bridge first (the persistent host's `runOptAdjWithConfig` provider), CLI second. The mode
+      // is `args.optAdjType`, else one the config payload named (the validator canonicalises it),
+      // else inferred from a contingency path. The run mutates the held model's generator P, so
+      // `reload` re-parses first.
       async runOptAdj(args) {
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
         const format = normalizeCaseFormat(args && args.format, caseInput)
@@ -1535,6 +1552,18 @@ function caConfigPath(root, parent) {
         const optAdjConfig = resolved.config
         const contRel = optAdjConfig.contingencyFile
         const reload = args && args.reload === true
+        // `args.optAdjType` wins over a mode the config payload named (already canonicalised), which
+        // in turn wins over the contingency-path inference.
+        let requestedType = optAdjConfig[OPTADJ_MODE_KEY]
+        if (args && args.optAdjType !== undefined && args.optAdjType !== null && args.optAdjType !== '') {
+          const mapped = canonicalOptAdjType(args.optAdjType)
+          if (mapped === '') {
+            return { ok: false, error: 'unsupported optAdjType ' + JSON.stringify(args.optAdjType) +
+              ' (expected ' + OPTADJ_TYPES.join('|') + ')' }
+          }
+          requestedType = mapped
+        }
+        const optAdjType = resolveOptAdjType(requestedType, contRel)
 
         if (javaBridge !== undefined && typeof javaBridge.runOptAdjWithConfig === 'function') {
           try {
@@ -1542,10 +1571,10 @@ function caConfigPath(root, parent) {
             const absCont = contRel !== null ? root + '/wspace/' + contRel : null
             const absResults = root + '/wspace/' + resultDir
             const raw = await javaBridge.runOptAdjWithConfig(format, absCase, absCont, absResults, stem,
-              reload, JSON.stringify(optAdjConfigPayload(optAdjConfig)))
+              reload, optAdjType, JSON.stringify(optAdjConfigPayload(optAdjConfig, optAdjType)))
             const parsed = JSON.parse(raw)
             if (parsed && parsed.ok) {
-              const type = parsed.optAdjType || optAdjConfig.optAdjType
+              const type = parsed.optAdjType || optAdjType
               const names = optAdjResultNames(stem, type)
               return {
                 ok: true,
@@ -1565,7 +1594,8 @@ function caConfigPath(root, parent) {
           }
         }
 
-        // Fallback: shell out to the Java OptAdj subcommand (IpssCmd optadj).
+        // Fallback: shell out to the Java OptAdj subcommand (IpssCmd optadj). CLI infers N-1 from
+        // a contingency path the same way resolveOptAdjType does.
         const shell = ctx.get('shell')
         if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
 
@@ -1588,13 +1618,13 @@ function caConfigPath(root, parent) {
         }
 
         const summary = /OptAdjSummary:[\s\S]*?Branch Loadings=\S+/.exec(res.stdout.text || '')
-        const names = optAdjResultNames(stem, optAdjConfig.optAdjType)
+        const names = optAdjResultNames(stem, optAdjType)
         return {
           ok: true,
           resultDir: resultDir,
           genFile: names.genFile,
           branchFile: names.branchFile,
-          optAdjType: optAdjConfig.optAdjType,
+          optAdjType: optAdjType,
           optAdjSummary: summary ? summary[0].trim() : null,
           stdout: res.stdout.text,
           stderr: res.stderr.text,

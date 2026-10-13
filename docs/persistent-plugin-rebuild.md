@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.7.8.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.11.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.8.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.11.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 354 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 358 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,
@@ -611,8 +611,9 @@ its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
   four layers that must agree on three things: the Java `OptAdjRunConfig`'s location and package
   (found by name, like §21), its mode tokens and default thresholds against the Host's
   `DEFAULT_OPTADJ_CONFIG` / `OPTADJ_TYPES` / `OPTADJ_SCAN_DEFAULTS` in **all three** Host halves
-  (basecase 50 %, N-1 90 %, enforce 100 %, `sparseSenMatrix` true, `threads` 0 — seven keys, and the
-  runner must hand `sparseSenMatrix` to **both** optimizers rather than the old literal `true`), the
+  (basecase 50 %, N-1 90 %, enforce 100 %, `sparseSenMatrix` true, `threads` 0 — six **file** keys,
+  mode as a separate runner/bridge argument via `resolveOptAdjType` / `OptAdjRunConfig.parseType`, and
+  the runner must hand `sparseSenMatrix` to **both** optimizers rather than the old literal `true`), the
   tool + RPC + card registration
   (`caseOptAdjTool` in `chatToolDefs`, `runOptAdj` in `METHODS`, the `tool.call.toolview` key in the
   persistent client), and the two result file names across Java (`OptAdjRunner`'s mode-dependent
@@ -626,7 +627,17 @@ its 26 with neither `endArrow=none` nor `strokeColor` — was dropped from it):
   One more check pins the alias itself: every half's validator routes the raw token through
   `canonicalOptAdjType` and carries the legacy map, while the tool schema advertises the canonical
   token — because the Java record rejects the retired spelling, so the mapping has to happen in the
-  Host. It closes with the runner/bridge/config entry points
+  Host.
+- §22 also pins the **0.7.11 mode split**, which is the shape a silent regression would take: the mode
+  left the Java record (the check reads the record's six-component signature, `parseType`, the static
+  `isCaN1(String)` / `scanLoadingThresholdOrDefault(String)`, `OptAdjRunner`'s
+  `String optAdjType, OptAdjRunConfig config` and `IpssAgentBridge.runOptAdjWithConfig`'s
+  `String optAdjType, String optAdjConfigJson`), the payload builder is **run per half** and must
+  return exactly the six file keys with no `optAdjType` and a mode-dependent scan default (50 basecase
+  / 90 N-1, the retired spelling included), and every half must both pass the mode beside the payload
+  and keep reading it back from a file or object — the Host honors an `optAdjType` there because the
+  bridge would ignore it in the JSON and silently run the basecase. It closes with the
+  runner/bridge/config entry points
   (`OptAdjRunner.runOnNet`/`resolveInputs`, `IpssAgentBridge.runOptAdjWithConfig`,
   `ProjectPaths.caseOptAdjRunConfig`).
 - §11 compares the reference and the live case diagram **as parsed scenes**, not as bytes:
