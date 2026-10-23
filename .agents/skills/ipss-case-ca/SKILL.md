@@ -1,6 +1,6 @@
 ---
 name: ipss-case-ca
-description: Use when asked to run a DC contingency analysis (CA / N-1 screening) for the current InterPSS simulation case, or for a named IEEE CDF / PSS/E RAW case, and to report the overload summary or the contingency result CSV the NERC report needs.
+description: Use when asked to run a DC contingency analysis (CA / N-1 screening) for the current InterPSS simulation case, or for a named IEEE CDF / PSS/E RAW / BPA Dat case, and to report the overload summary or the contingency result CSV the NERC report needs.
 metadata:
   short-description: Run DC contingency analysis
 ---
@@ -60,6 +60,43 @@ else is rejected before the bridge is called. Omit it and `ca_run.json`'s `overl
 applies — the resolved number always comes back as `threshold`. An argument overrides **only the key
 it names** (plugin 0.4.7+), so passing `overloadThreshold` alone keeps the case's contingency and
 monitored-branch selection.
+
+`caConfig` (plugin 0.7.2+) carries the DC contingency **solver** knobs — the fields of the engine's
+`DclfContingencyConfig` plus the worker count — as a partial object keyed like
+`config/ca_run.json`. It is merged per key over the case config (and `overloadThreshold` still wins
+over `caConfig.overloadThreshold`); the tab's dialog edits the same fifteen knobs in its **Advanced
+solver settings** panel. Every default is the value the runner used before the keys existed, so a
+call that omits `caConfig` behaves exactly as it always did.
+
+| `caConfig` key | Default | Values |
+|---|---|---|
+| `dclfInclLoss` | `true` | bool — DC model with losses |
+| `dclfScreening` | `false` | bool — the engine's screening pass |
+| `dcLoadingCutoff` | `100` | `0`-`1000` percent (`0` = no cutoff) |
+| `dcFlowChangeCutoff` | `200` | `0`-`1000` percent |
+| `solutionMethod` | `SparseEqnSolve` | `SparseEqnSolve` \| `WoodburyMatrixUpdate` |
+| `kluEndpointRhsBatchSize` | `0` | integer `>= 0` |
+| `cacheViolationCombinedShiftFactors` | `false` | bool |
+| `islandingTreatment` | `ANCHORED_COMPENSATE_ONE_BUS` | `SKIP` \| `ANCHORED_COMPENSATE_ONE_BUS` \| `FULL_DCLF_REPLAY` |
+| `n1IslandingReplayEnabled` | `false` | bool |
+| `multiOutageReplayMode` | `EXACT_TOPOLOGY` | `EXACT_TOPOLOGY` \| `HIGH_IMPEDANCE` |
+| `highImpedanceReactancePu` | `10000` | number `> 0` |
+| `turnOffIslandBus` | `true` | bool |
+| `autoTurnLine2Xfr` | `true` | bool |
+| `ratingProvider` | `default` | `default` \| `RATING_A` \| `RATING_B` — which branch rating the overload check uses (`RATING_A` = rating MVA 1; `RATING_B` = rating MVA 2, falling back to rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when MVA 2 is zero) |
+| `threads` | `0` | integer `>= 0`; `0` = one per available processor |
+
+```
+interpss_run_ca({ caConfig: { ratingProvider: 'RATING_A', threads: 4 } })
+```
+
+**Overload detection compares each post-contingency flow against a branch rating.** A case whose
+branch table carries no ratings (`LimMvaA`/`LimMvaB`/`LimMvaC` all zero) reports **0 overloads at any
+threshold and any `ratingProvider`** — that is the case's data, not the run. The IEEE 39 fixture is
+one: apply its `scripts/ieee39_limit_setup.gvy` first (it rates 34 lines at 600 MVA and 12
+transformers at 800 MVA), after which the same N-1 run reports overloads — 20 at 90 % under the
+default provider (which checks 690 MW against a 600 MVA line and 1080 MW against an 800 MVA
+transformer), 25 with `ratingProvider: 'RATING_A'` (600 / 800 MW) and 7 at `overloadThreshold: 100`.
 
 | Argument form | Example |
 |---|---|

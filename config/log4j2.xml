@@ -1,20 +1,47 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<Configuration status="INFO">
+<!--
+  Runtime logging config for the ipss-agent uber JAR / InterPSS bridge.
+  Shipped on the classpath by the Maven build (config/ -> target/classes -> uber JAR),
+  where it overwrites the log4j2.xml bundled inside lib/ipss_runnable.jar.
+
+  Everything below is overridable from the JVM command line, so raising the level or
+  moving the file needs no rebuild:
+
+    -Dipss.log.level=debug                  root level (trace|debug|info|warn|error|off);
+                                            org.interpss* follows it unless overridden
+    -Dipss.log.level.interpss=debug         level for the org.interpss* loggers only
+    -Dipss.log.file=/var/log/ipss/bridge.log  RollingFile target (absolute path advised:
+                                             a relative one resolves against the JVM cwd)
+    -Dipss.log.console.threshold=off        silence the Console appender (keep file only)
+    -Dlog4j2.configurationFile=/path/to/other-log4j2.xml   replace this file entirely
+
+  For the in-process bridge JVM these must reach the JVM that java-bridge creates inside
+  the `dsh web` host - set them in JAVA_TOOL_OPTIONS before starting it, or add them to
+  the hardcoded opts in interpss-persistent/lib/index.js, then restart. See Setup.md.
+-->
+<Configuration status="${sys:ipss.log.status:-WARN}">
   <Appenders>
     <Console name="Console" target="SYSTEM_OUT">
+      <ThresholdFilter level="${sys:ipss.log.console.threshold:-trace}"
+                       onMatch="ACCEPT" onMismatch="DENY"/>
       <PatternLayout pattern="[%d{HH:mm:ss}] [%t] %-5level %logger{36} - %msg%n"/>
     </Console>
-    <RollingFile name="FileLogger" fileName="logs/ipss.agent.log"
-                 filePattern="logs/common/app-%d{yyyy-MM-dd}-%i.log.gz">
-      <PatternLayout pattern="[%d{yyyy-MM-dd HH:mm:ss}] %p %c{1} - %m%n"/>
+    <RollingFile name="FileLogger" fileName="${sys:ipss.log.file:-logs/ipss.agent.log}"
+                 filePattern="${sys:ipss.log.file:-logs/ipss.agent.log}.%d{yyyy-MM-dd}-%i.gz"
+                 append="true">
+      <PatternLayout pattern="[%d{yyyy-MM-dd HH:mm:ss}] %-5level %logger{36} - %msg%n"/>
       <Policies>
-        <SizeBasedTriggeringPolicy size="100MB"/>
+        <SizeBasedTriggeringPolicy size="${sys:ipss.log.roll.size:-100MB}"/>
       </Policies>
-      <DefaultRolloverStrategy max="10"/>
+      <DefaultRolloverStrategy max="${sys:ipss.log.roll.max:-10}"/>
     </RollingFile>
   </Appenders>
   <Loggers>
-    <Root level="info">
+    <!-- Per-logger override; it defaults to the root level (log4j2 nested lookup
+         defaults), so -Dipss.log.level=debug also turns on org.interpss* debug. -->
+    <Logger name="org.interpss"
+            level="${sys:ipss.log.level.interpss:-${sys:ipss.log.level:-info}}"/>
+    <Root level="${sys:ipss.log.level:-info}">
       <AppenderRef ref="Console"/>
       <AppenderRef ref="FileLogger"/>
     </Root>

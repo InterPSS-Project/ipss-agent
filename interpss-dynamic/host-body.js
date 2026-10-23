@@ -11,7 +11,7 @@
 // workspace README.md's first H1 is exactly "iPSS Agent".
 
 const NAMESPACE = 'interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio', 'openDrawio']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runOptAdj', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio', 'openDrawio', 'getNetDiagramOptions', 'saveNetDiagramOptions']
 
 function shellQuote(value) {
   return "'" + String(value) + "'"
@@ -72,6 +72,28 @@ const DEFAULT_ACLF_CONFIG = {
   psXfrPContrlAccFactor: 1.0,
 }
 
+// Case-file types the tab and the tools accept: IEEE CDF (.ieee), PSS/E RAW (.raw/.RAW) and
+// BPA Dat (.dat/.DAT). The extension maps to the format string `NetworkLoader` dispatches on,
+// and the regexes are case-insensitive so an upper-case `.DAT`/`.RAW` is a case file too.
+const CASE_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|dat)$/i
+const CASE_FORMATS = ['ieee', 'psse', 'bpa']
+
+function formatOfCasePath(casePath) {
+  if (/\.raw$/i.test(casePath)) return 'psse'
+  if (/\.dat$/i.test(casePath)) return 'bpa'
+  return 'ieee'
+}
+
+// The format a request declares, when it is one we know; otherwise the path decides.
+function normalizeCaseFormat(format, casePath) {
+  return CASE_FORMATS.indexOf(format) >= 0 ? format : formatOfCasePath(casePath)
+}
+
+// `IEEE9.dat` -> `IEEE9` (matches the Java `ProjectPaths.stem`, any extension stripped).
+function caseStem(fileName) {
+  return String(fileName).replace(/\.(ieee|raw|dat)$/i, '')
+}
+
 async function scanCases(fs, dirTarget, relDir, out) {
   let entries
   try {
@@ -86,12 +108,16 @@ async function scanCases(fs, dirTarget, relDir, out) {
     } else if (entry.type === 'file') {
       if (/\.ieee$/i.test(entry.name)) out.push({ path: rel, format: 'ieee' })
       else if (/\.raw$/i.test(entry.name)) out.push({ path: rel, format: 'psse' })
+      else if (/\.dat$/i.test(entry.name)) out.push({ path: rel, format: 'bpa' })
     }
   }
 }
 
-// The preview reads one diagram at a time, so this bounds what it accepts as text.
-const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
+// The preview reads one diagram at a time, so this bounds what it accepts as text. It is checked
+// BEFORE the read, so an oversized file never reaches the RPC payload. 4 MiB covers the largest
+// drawing this workspace produces -- a 2000-bus case is ~2.9 MiB of XML (Texas 2K) -- with room
+// for a hand-edited one on top; the 20000-cell preview cap is the other half of the bound.
+const MAX_DRAWIO_BYTES = 4 * 1024 * 1024
 
 // --- Launch the local draw.io app (shared, byte-identical in both hosts) -----
 // The browser cannot start a process, so the Diagram tab's edit button asks the Host — and the
@@ -367,7 +393,7 @@ return {
     function caseParts(caseInput) {
       const slash = caseInput.lastIndexOf('/')
       const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
-      const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+      const stem = caseStem(caseInput.slice(slash + 1))
       return { parent: parent, stem: stem }
     }
 
@@ -418,18 +444,195 @@ return {
       // lands in the result CSV. The CA dialog's field and config/ca_run.json both feed
       // this one number.
       overloadThreshold: 90,
+      // The solver knobs behind the DC contingency analysis (0.7.2) — the fields of
+      // ipss.core.lib's `DclfContingencyConfig`, which the runner copies onto the solver, plus
+      // the runner's worker count. Every default is the value the runner used before they
+      // became selectable, so a ca_run.json that names none of them behaves as it always did.
+      dclfInclLoss: true,
+      dclfScreening: false,
+      dcLoadingCutoff: 100,
+      dcFlowChangeCutoff: 200,
+      solutionMethod: 'SparseEqnSolve',
+      kluEndpointRhsBatchSize: 0,
+      cacheViolationCombinedShiftFactors: false,
+      islandingTreatment: 'ANCHORED_COMPENSATE_ONE_BUS',
+      n1IslandingReplayEnabled: false,
+      multiOutageReplayMode: 'EXACT_TOPOLOGY',
+      highImpedanceReactancePu: 10000,
+      turnOffIslandBus: true,
+      autoTurnLine2Xfr: true,
+      // Which branch rating the overload check compares against: the library's own provider
+      // (`RATING_B` on ipss.core.lib 1.4.0 — rating MVA 2, or rating MVA 1 × 1.15 for a line /
+      // × 1.35 for a transformer when MVA 2 is zero), or either rating pinned.
+      ratingProvider: 'default',
+      // 0 = one worker per available processor, the runner's historical choice.
+      threads: 0,
+    }
+
+    // The solver knobs, by kind: validation, the dialog and the guard read one table. The enum
+    // lists are the Java enums' constant names verbatim, and the Java `CaRunConfig` rejects the
+    // same values with the same wording.
+    const CA_SOLUTION_METHODS = ['SparseEqnSolve', 'WoodburyMatrixUpdate']
+    const CA_ISLANDING_TREATMENTS = ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY']
+    const CA_MULTI_OUTAGE_REPLAY_MODES = ['EXACT_TOPOLOGY', 'HIGH_IMPEDANCE']
+    const CA_RATING_PROVIDERS = ['default', 'RATING_A', 'RATING_B']
+    const CA_BOOL_KEYS = ['dclfInclLoss', 'dclfScreening', 'cacheViolationCombinedShiftFactors',
+      'n1IslandingReplayEnabled', 'turnOffIslandBus', 'autoTurnLine2Xfr']
+    const CA_CHOICE_KEYS = [
+      ['solutionMethod', CA_SOLUTION_METHODS],
+      ['islandingTreatment', CA_ISLANDING_TREATMENTS],
+      ['multiOutageReplayMode', CA_MULTI_OUTAGE_REPLAY_MODES],
+      ['ratingProvider', CA_RATING_PROVIDERS],
+    ]
+    const CA_COUNT_KEYS = ['kluEndpointRhsBatchSize', 'threads']
+    const CA_CUTOFF_KEYS = ['dcLoadingCutoff', 'dcFlowChangeCutoff']
+    const CA_POSITIVE_KEYS = ['highImpedanceReactancePu']
+    const CA_CONFIG_KEYS = Object.keys(DEFAULT_CA_CONFIG)
+
+    // The file's key order, and the exact payload written to config/ca_run.json and handed to
+    // the bridge: one list so the dialog, the tool and the file cannot drift.
+    function caConfigPayload(config) {
+      const source = config && typeof config === 'object' ? config : DEFAULT_CA_CONFIG
+      const out = {}
+      for (const key of CA_CONFIG_KEYS) {
+        out[key] = source[key] === undefined ? DEFAULT_CA_CONFIG[key] : source[key]
+      }
+      return out
+    }
+
+    // Generator-redispatch (OptAdj) run config (config/opt_adj_run.json beside config/ca_run.json),
+    // the same six file keys the persistent host writes and `OptAdjRunConfig` parses. The mode is a
+    // call argument, not a file key. Kept here even though this half only *runs* OptAdj through the
+    // persistent host's javaBridge provider: a case file must mean the same thing to both halves.
+    const DEFAULT_OPTADJ_CONFIG = {
+      scanLoadingThreshold: null,
+      optAdjLoadingThreshold: 100,
+      contingencyMode: 'all',
+      contingencyFile: null,
+      // true = sparse sensitivities (what the runner hard-coded before the Java knob), false = dense.
+      sparseSenMatrix: true,
+      threads: 0,
+    }
+    // `genAdjCaN_1` is the retired 0.7.4-0.7.7 spelling of `genAdjCA_N-1`; the Host maps it onto the
+    // canonical token before it reaches the bridge. Default mode when the caller names none.
+    const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']
+    const OPTADJ_DEFAULT_TYPE = 'genAdjBaseCase'
+    const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }
+    const OPTADJ_LEGACY_TYPES = { genAdjCaN_1: 'genAdjCA_N-1' }
+    // The six keys Java reads from `config/opt_adj_run.json` — exactly what the payload carries.
+    const OPTADJ_CONFIG_KEYS = Object.keys(DEFAULT_OPTADJ_CONFIG)
+    // The mode is not a Java file key (it is its own bridge argument), but the Host still honors an
+    // `optAdjType` in the config file or in the config object, so it is an accepted input key.
+    const OPTADJ_MODE_KEY = 'optAdjType'
+    const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])
+
+    // The canonical mode token for an untrusted value, '' when it names no known mode.
+    function canonicalOptAdjType(value) {
+      if (typeof value !== 'string') return ''
+      const token = value.trim()
+      if (OPTADJ_TYPES.indexOf(token) >= 0) return token
+      const mapped = OPTADJ_LEGACY_TYPES[token]
+      return mapped === undefined ? '' : mapped
+    }
+
+    function resolveOptAdjType(explicitType, contRel) {
+      const type = canonicalOptAdjType(explicitType)
+      if (type !== '') return type
+      return contRel !== null && contRel !== undefined && contRel !== ''
+        ? 'genAdjCA_N-1'
+        : OPTADJ_DEFAULT_TYPE
+    }
+
+    // Config JSON for the bridge (no mode). Scan default follows the resolved mode.
+    function optAdjConfigPayload(config, optAdjType) {
+      const source = config && typeof config === 'object' ? config : DEFAULT_OPTADJ_CONFIG
+      const type = resolveOptAdjType(optAdjType, source.contingencyFile)
+      const out = {}
+      for (const key of OPTADJ_CONFIG_KEYS) {
+        out[key] = source[key] === undefined ? DEFAULT_OPTADJ_CONFIG[key] : source[key]
+      }
+      if (out.scanLoadingThreshold === null) out.scanLoadingThreshold = OPTADJ_SCAN_DEFAULTS[type]
+      return out
+    }
+
+    // The two result CSVs: the runner's names, mirrored for the CLI fallback and for a JAR that
+    // predates the reply's genFile/branchFile. The N-1 mode carries the `N1` infix (0.7.5).
+    function optAdjResultNames(stem, optAdjType) {
+      const suffix = canonicalOptAdjType(optAdjType) === 'genAdjCA_N-1' ? '_DF_optadj_N1' : '_DF_optadj'
+      return { genFile: stem + suffix + '_gen.csv', branchFile: stem + suffix + '_branch.csv' }
     }
 
     // The dialog reports how many entries a candidate file holds, which means
     // parsing every .json in the case folder; skip absurd ones.
-    const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
+    // config/net_diagram.json: the Diagram tab's flag thresholds and colours, edited from the tab's
+// gear dialog (0.6.26). WORKSPACE-level -- one flag style for every case -- and a PREVIEW setting:
+// the generator bakes no colour into a .drawio, so the desktop app and the PNG stay plain.
+const DEFAULT_NET_DIAGRAM_CONFIG = {
+  Bus_flag_upper_limit: 1.1,
+  Bus_flag_lower_limit: 0.9,
+  Bus_flag_color: 'red',
+  Basecase_branch_flow_flag_percent: 80.0,
+  Basecase_branch_flow_flag_color: 'green',
+  Contingency_branch_flow_flag_percent: 100.0,
+  Contingency_branch_flow_flag_color: 'blue',
+  Show_birdseye_view: true,
+}
 
-    function caConfigPath(root, parent) {
+const NET_DIAGRAM_COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\([^)]*\)|hsla?\([^)]*\))$/i
+
+// The seven known keys, validated; every other key is passed through untouched. The client
+// validates the same way for immediate feedback, the Host sanitizes again so nothing bad lands.
+function sanitizeNetDiagramConfig(raw) {
+  const out = raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.assign({}, raw) : {}
+  const defaults = DEFAULT_NET_DIAGRAM_CONFIG
+  const num = (key, fallback, lo, hi) => {
+    const v = Number(out[key])
+    out[key] = Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback
+  }
+  const color = (key, fallback) => {
+    const v = typeof out[key] === 'string' ? out[key].trim() : ''
+    out[key] = NET_DIAGRAM_COLOR_RE.test(v) ? v : fallback
+  }
+  num('Bus_flag_upper_limit', defaults.Bus_flag_upper_limit, 0.05, 5.0)
+  num('Bus_flag_lower_limit', defaults.Bus_flag_lower_limit, 0.05, 5.0)
+  if (!(out.Bus_flag_lower_limit < out.Bus_flag_upper_limit)) {
+    out.Bus_flag_lower_limit = defaults.Bus_flag_lower_limit
+    out.Bus_flag_upper_limit = defaults.Bus_flag_upper_limit
+  }
+  color('Bus_flag_color', defaults.Bus_flag_color)
+  num('Basecase_branch_flow_flag_percent', defaults.Basecase_branch_flow_flag_percent, 0.0, 1000.0)
+  color('Basecase_branch_flow_flag_color', defaults.Basecase_branch_flow_flag_color)
+  num('Contingency_branch_flow_flag_percent', defaults.Contingency_branch_flow_flag_percent, 0.0, 1000.0)
+  color('Contingency_branch_flow_flag_color', defaults.Contingency_branch_flow_flag_color)
+  // The one switch: on unless it was explicitly turned off (the word counts, for a hand edit).
+  const bird = out.Show_birdseye_view
+  out.Show_birdseye_view = (bird === false || bird === 0 || String(bird).trim().toLowerCase() === 'false')
+    ? false
+    : ((bird === true || bird === 1 || String(bird).trim().toLowerCase() === 'true')
+      ? true : defaults.Show_birdseye_view)
+  return out
+}
+
+const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
+
+    function netDiagramConfigPath(root) {
+  return root + '/config/net_diagram.json'
+}
+
+function caConfigPath(root, parent) {
       return root + '/wspace/' + wspaceJoin(parent, 'config/ca_run.json')
     }
 
     function caConfigRel(parent) {
       return wspaceJoin(parent, 'config/ca_run.json')
+    }
+
+    function optAdjConfigPath(root, parent) {
+      return root + '/wspace/' + wspaceJoin(parent, 'config/opt_adj_run.json')
+    }
+
+    function optAdjConfigRel(parent) {
+      return wspaceJoin(parent, 'config/opt_adj_run.json')
     }
 
     // Case-folder .json files that can be contingency inputs: our own two
@@ -551,6 +754,51 @@ return {
         }
         out[fileKey] = rel
       }
+
+      // The solver knobs (0.7.2). An absent key keeps its default; a present one must be usable —
+      // the Java runner rejects the same values, and a knob silently replaced by a default is a
+      // run that ignores what the dialog said. Numbers accept the dialog's string form, and a
+      // missing value ('') means "unset", exactly like the threshold above.
+      const number = (key, lo, hi, message) => {
+        const raw = value[key]
+        if (raw === undefined || raw === null || raw === '') return null
+        const n = Number(raw)
+        if (!Number.isFinite(n) || n < lo || n > hi) return message
+        out[key] = n
+        return null
+      }
+      for (const key of CA_BOOL_KEYS) {
+        const raw = value[key]
+        if (raw === undefined || raw === null) continue
+        if (typeof raw !== 'boolean') {
+          return { ok: false, error: key + ' must be true or false (got ' + JSON.stringify(raw) + ')' }
+        }
+        out[key] = raw
+      }
+      for (const entry of CA_CHOICE_KEYS) {
+        const key = entry[0]
+        const allowed = entry[1]
+        const raw = value[key]
+        if (raw === undefined || raw === null || raw === '') continue
+        if (allowed.indexOf(raw) < 0) {
+          return { ok: false, error: 'unsupported ' + key + ' ' + JSON.stringify(raw) +
+            ' (expected ' + allowed.join('|') + ')' }
+        }
+        out[key] = raw
+      }
+      for (const key of CA_COUNT_KEYS) {
+        const bad = number(key, 0, Number.MAX_SAFE_INTEGER, key + ' must be 0 or more')
+        if (bad !== null) return { ok: false, error: bad }
+        out[key] = Math.floor(out[key])
+      }
+      for (const key of CA_CUTOFF_KEYS) {
+        const bad = number(key, 0, 1000, key + ' must be a percentage between 0 and 1000')
+        if (bad !== null) return { ok: false, error: bad }
+      }
+      for (const key of CA_POSITIVE_KEYS) {
+        const bad = number(key, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER, key + ' must be a positive number')
+        if (bad !== null) return { ok: false, error: bad }
+      }
       return { ok: true, config: out }
     }
 
@@ -583,6 +831,118 @@ return {
       return { ok: true, config: await suggestCaConfig(root, parent), source: 'suggested' }
     }
 
+    // Normalise an untrusted OptAdj payload to the six known file keys plus the optional mode: an
+    // absent key keeps its default, a present one must be usable. The mode is not a Java file key,
+    // so it rides on the validated object and never enters the payload; a retired spelling is mapped
+    // onto the canonical token, because Java rejects it.
+    async function validateOptAdjConfig(root, value, requireFiles) {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        return { ok: false, error: 'the run configuration must be a JSON object' }
+      }
+      const out = Object.assign({}, DEFAULT_OPTADJ_CONFIG)
+
+      const rawType = value[OPTADJ_MODE_KEY]
+      if (rawType !== undefined && rawType !== null && rawType !== '') {
+        const type = canonicalOptAdjType(rawType)
+        if (type === '') {
+          return {
+            ok: false,
+            error: 'unsupported optAdjType ' + JSON.stringify(rawType) +
+              ' (expected ' + OPTADJ_TYPES.join('|') + ')',
+          }
+        }
+        out[OPTADJ_MODE_KEY] = type
+      }
+
+      const loading = (key) => {
+        const raw = value[key]
+        if (raw === undefined || raw === null || raw === '') return null
+        const n = Number(raw)
+        if (!Number.isFinite(n) || n <= 0 || n > 1000) {
+          return key + ' must be a loading percentage between 0 and 1000 (got ' + JSON.stringify(raw) + ')'
+        }
+        out[key] = n
+        return null
+      }
+      for (const key of ['scanLoadingThreshold', 'optAdjLoadingThreshold']) {
+        const bad = loading(key)
+        if (bad !== null) return { ok: false, error: bad }
+      }
+
+      // Sparse (true) or dense (false) sensitivities; the two strings collapse to a real boolean.
+      const rawSparse = value.sparseSenMatrix
+      if (rawSparse !== undefined && rawSparse !== null && rawSparse !== '') {
+        if (typeof rawSparse === 'boolean') out.sparseSenMatrix = rawSparse
+        else if (rawSparse === 'true') out.sparseSenMatrix = true
+        else if (rawSparse === 'false') out.sparseSenMatrix = false
+        else {
+          return {
+            ok: false,
+            error: 'sparseSenMatrix must be true or false (got ' + JSON.stringify(rawSparse) + ')',
+          }
+        }
+      }
+
+      const rawThreads = value.threads
+      if (rawThreads !== undefined && rawThreads !== null && rawThreads !== '') {
+        const n = Number(rawThreads)
+        if (!Number.isFinite(n) || n < 0) {
+          return { ok: false, error: 'threads must be 0 or more (got ' + JSON.stringify(rawThreads) + ')' }
+        }
+        out.threads = Math.floor(n)
+      }
+
+      const rawMode = value.contingencyMode
+      if (rawMode !== undefined && rawMode !== null && rawMode !== '' && rawMode !== 'all' && rawMode !== 'custom') {
+        return { ok: false, error: "contingencyMode must be 'all' or 'custom' (got " + JSON.stringify(rawMode) + ')' }
+      }
+      const mode = rawMode === 'custom' ? 'custom' : 'all'
+      out.contingencyMode = mode
+      if (mode === 'custom') {
+        const rel = typeof value.contingencyFile === 'string' ? value.contingencyFile.trim() : ''
+        if (rel === '') {
+          return { ok: false, error: "contingencyMode is 'custom' but no contingencyFile is set" }
+        }
+        const check = await caEntryCheck(root, rel)
+        if (!check.ok) return { ok: false, error: 'contingencyFile: ' + check.error }
+        if (requireFiles && !check.exists) {
+          return { ok: false, error: 'contingencyFile not found: ' + rel }
+        }
+        out.contingencyFile = rel
+      }
+      return { ok: true, config: out }
+    }
+
+    // Effective OptAdj config: an explicit payload, else the case-folder opt_adj_run.json, else
+    // the built-in default. Unlike CA there is no filename discovery: only the N-1 mode reads a
+    // contingency file, and the caller names it explicitly.
+    async function resolveOptAdjRunConfig(root, parent, explicit) {
+      if (explicit !== undefined && explicit !== null) {
+        const validated = await validateOptAdjConfig(root, explicit, true)
+        if (!validated.ok) return { ok: false, error: 'invalid run configuration: ' + validated.error }
+        return { ok: true, config: validated.config, source: 'request' }
+      }
+      const fs = ctx.get('fs')
+      if (fs !== undefined) {
+        let text = null
+        try {
+          text = await fs.readText(await fs.resolve(optAdjConfigPath(root, parent)))
+        } catch (e) {}
+        if (text !== null) {
+          let parsed = null
+          try {
+            parsed = JSON.parse(text)
+          } catch (e) {
+            return { ok: false, error: optAdjConfigRel(parent) + ' is not valid JSON' }
+          }
+          const validated = await validateOptAdjConfig(root, parsed, true)
+          if (!validated.ok) return { ok: false, error: validated.error }
+          return { ok: true, config: validated.config, source: 'case' }
+        }
+      }
+      return { ok: true, config: Object.assign({}, DEFAULT_OPTADJ_CONFIG), source: 'default' }
+    }
+
     const handlers = {
       async isActivated(args) {
         const fs = ctx.get('fs')
@@ -608,7 +968,7 @@ return {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const casePath = args && typeof args.input === 'string' ? args.input : ''
-        if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+        if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
           return { ok: false, error: 'Invalid case path: ' + casePath }
         }
         const root = resolveWorkspaceRoot(args && args.sessionId)
@@ -616,7 +976,7 @@ return {
         const wspace = root + '/wspace'
         const slash = casePath.lastIndexOf('/')
         const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-        const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+        const stem = caseStem(casePath.slice(slash + 1))
         const infoRel = parent + '/result/' + stem + '_network_info.txt'
         try {
           const target = await fs.resolve(wspace + '/' + infoRel)
@@ -633,6 +993,16 @@ return {
               stem + '_DF_branch.csv',
               stem + '_DF_gen.csv',
               stem + '_DF_load.csv',
+              // Listed whether or not a CA has been run: the client reads what it can, and an
+              // absent file simply means "no contingency data" (0.6.31).
+              stem + '_DF_contingency.csv',
+              // The four OptAdj tables: the Diagram tab's tooltip adds a line per mode when the
+              // branch table lists the branch, an absent file just means "no OptAdj data" (0.7.7),
+              // and the `_gen` pair is what the OptAdj card's Gen adjustments table reads (0.7.10).
+              stem + '_DF_optadj_branch.csv',
+              stem + '_DF_optadj_N1_branch.csv',
+              stem + '_DF_optadj_gen.csv',
+              stem + '_DF_optadj_N1_gen.csv',
               stem + '_network_info.txt',
             ],
           }
@@ -645,7 +1015,7 @@ return {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const casePath = args && typeof args.input === 'string' ? args.input : ''
-        if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+        if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
           return { ok: false, error: 'Invalid case path: ' + casePath }
         }
         const root = resolveWorkspaceRoot(args && args.sessionId)
@@ -653,7 +1023,7 @@ return {
         const wspace = root + '/wspace'
         const slash = casePath.lastIndexOf('/')
         const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-        const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+        const stem = caseStem(casePath.slice(slash + 1))
         const resultDir = parent + '/result'
         const files = [
           stem + '_DF_bus.csv',
@@ -704,7 +1074,7 @@ return {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const caseInput = args && typeof args.case === 'string' ? args.case : ''
-        if (caseInput === '' || caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+        if (caseInput === '' || caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
           return { ok: false, error: 'Invalid case path: ' + caseInput }
         }
         const root = resolveWorkspaceRoot(args && args.sessionId)
@@ -801,7 +1171,9 @@ return {
         const fs = ctx.get('fs')
         if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
         const path = args && typeof args.path === 'string' ? args.path : ''
-        if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency)\.csv$/.test(path)) {
+        // Every result family a client read can ask for belongs in this list (0.7.7: the OptAdj pair
+        // was missing, so the Diagram tab's OptAdj tooltip reads were rejected as invalid paths).
+        if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency|optadj_branch|optadj_N1_branch|optadj_gen|optadj_N1_gen)\.csv$/.test(path)) {
           return { ok: false, error: 'Invalid result path: ' + path }
         }
         const start = (args && typeof args.start === 'number' && args.start > 0) ? Math.floor(args.start) : 0
@@ -966,9 +1338,9 @@ return {
       },
 
       async runAclf(args) {
-        const format = args && args.format === 'psse' ? 'psse' : 'ieee'
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
-        if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+        const format = normalizeCaseFormat(args && args.format, caseInput)
+        if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
           return { ok: false, error: 'Invalid case path: ' + caseInput }
         }
 
@@ -1060,15 +1432,18 @@ return {
             stem + '_DF_branch.csv',
             stem + '_DF_gen.csv',
             stem + '_DF_load.csv',
+            // Listed whether or not a CA has been run: the client reads what it can, and an
+            // absent file simply means "no contingency data" (0.6.31).
+            stem + '_DF_contingency.csv',
             stem + '_network_info.txt',
           ],
         }
       },
 
       async runCa(args) {
-        const format = args && args.format === 'psse' ? 'psse' : 'ieee'
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
-        if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+        const format = normalizeCaseFormat(args && args.format, caseInput)
+        if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
           return { ok: false, error: 'Invalid case path: ' + caseInput }
         }
 
@@ -1095,8 +1470,14 @@ return {
             const absCont = contRel !== null ? root + '/wspace/' + contRel : null
             const absMon = monRel !== null ? root + '/wspace/' + monRel : null
             const absResults = root + '/wspace/' + resultDir
-            const raw = await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
-              caConfig.overloadThreshold)
+            // The whole run config goes over, not just the threshold, so the dialog's solver
+            // knobs reach the runner; a provider without the config entry point still runs
+            // with the threshold alone, which is what it did before the knobs existed.
+            const raw = typeof javaBridge.runContingencyWithConfig === 'function'
+              ? await javaBridge.runContingencyWithConfig(format, absCase, absCont, absMon, absResults, stem,
+                JSON.stringify(caConfigPayload(caConfig)))
+              : await javaBridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
+                caConfig.overloadThreshold)
             const parsed = JSON.parse(raw)
             if (parsed && parsed.ok) {
               return {
@@ -1148,10 +1529,113 @@ return {
         return { ok: true, resultDir: resultDir, contingencyFile: stem + '_DF_contingency.csv', caSummary: caSummary, stdout: res.stdout.text, stderr: res.stderr.text, input: caseInput }
       },
 
-      async loadCase(args) {
-        const format = args && args.format === 'psse' ? 'psse' : 'ieee'
+      // Generator redispatch (OptAdj): the same config ladder as CA, and the same in-process
+      // bridge first (the persistent host's `runOptAdjWithConfig` provider), CLI second. The mode
+      // is `args.optAdjType`, else one the config payload named (the validator canonicalises it),
+      // else inferred from a contingency path. The run mutates the held model's generator P, so
+      // `reload` re-parses first.
+      async runOptAdj(args) {
         const caseInput = args && typeof args.input === 'string' ? args.input : ''
-        if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+        const format = normalizeCaseFormat(args && args.format, caseInput)
+        if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
+          return { ok: false, error: 'Invalid case path: ' + caseInput }
+        }
+
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+
+        const { parent, stem } = caseParts(caseInput)
+        const resultDir = parent + '/result'
+
+        const resolved = await resolveOptAdjRunConfig(root, parent, args && args.config)
+        if (!resolved.ok) return { ok: false, error: resolved.error }
+        const optAdjConfig = resolved.config
+        const contRel = optAdjConfig.contingencyFile
+        const reload = args && args.reload === true
+        // `args.optAdjType` wins over a mode the config payload named (already canonicalised), which
+        // in turn wins over the contingency-path inference.
+        let requestedType = optAdjConfig[OPTADJ_MODE_KEY]
+        if (args && args.optAdjType !== undefined && args.optAdjType !== null && args.optAdjType !== '') {
+          const mapped = canonicalOptAdjType(args.optAdjType)
+          if (mapped === '') {
+            return { ok: false, error: 'unsupported optAdjType ' + JSON.stringify(args.optAdjType) +
+              ' (expected ' + OPTADJ_TYPES.join('|') + ')' }
+          }
+          requestedType = mapped
+        }
+        const optAdjType = resolveOptAdjType(requestedType, contRel)
+
+        if (javaBridge !== undefined && typeof javaBridge.runOptAdjWithConfig === 'function') {
+          try {
+            const absCase = root + '/wspace/' + caseInput
+            const absCont = contRel !== null ? root + '/wspace/' + contRel : null
+            const absResults = root + '/wspace/' + resultDir
+            const raw = await javaBridge.runOptAdjWithConfig(format, absCase, absCont, absResults, stem,
+              reload, optAdjType, JSON.stringify(optAdjConfigPayload(optAdjConfig, optAdjType)))
+            const parsed = JSON.parse(raw)
+            if (parsed && parsed.ok) {
+              const type = parsed.optAdjType || optAdjType
+              const names = optAdjResultNames(stem, type)
+              return {
+                ok: true,
+                resultDir: resultDir,
+                genFile: parsed.genFile || names.genFile,
+                branchFile: parsed.branchFile || names.branchFile,
+                optAdjType: type,
+                optAdjSummary: typeof parsed.optAdjSummary === 'string' ? parsed.optAdjSummary : null,
+                stdout: parsed.stdout || '',
+                stderr: parsed.stderr || '',
+                input: caseInput,
+              }
+            }
+            return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runOptAdj failed' }
+          } catch (e) {
+            // Bridge threw (e.g. stale JAR / signature mismatch): fall through to the CLI below.
+          }
+        }
+
+        // Fallback: shell out to the Java OptAdj subcommand (IpssCmd optadj). CLI infers N-1 from
+        // a contingency path the same way resolveOptAdjType does.
+        const shell = ctx.get('shell')
+        if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
+
+        const wspace = root + '/wspace'
+        const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
+        let command = shellQuote(javaLauncher()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd optadj '
+          + format + ' ' + caseInput
+        if (contRel !== null) command += ' ' + shellQuote(contRel)
+        const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
+
+        let res
+        try {
+          res = await shell.run(spec)
+        } catch (e) {
+          return { ok: false, error: 'command failed to start: ' + (e && e.message ? e.message : String(e)) }
+        }
+
+        if (res.exitCode !== 0) {
+          return { ok: false, error: 'generator redispatch failed (exit ' + res.exitCode + ')\n' + (res.stderr.text || res.stdout.text || '') }
+        }
+
+        const summary = /OptAdjSummary:[\s\S]*?Branch Loadings=\S+/.exec(res.stdout.text || '')
+        const names = optAdjResultNames(stem, optAdjType)
+        return {
+          ok: true,
+          resultDir: resultDir,
+          genFile: names.genFile,
+          branchFile: names.branchFile,
+          optAdjType: optAdjType,
+          optAdjSummary: summary ? summary[0].trim() : null,
+          stdout: res.stdout.text,
+          stderr: res.stderr.text,
+          input: caseInput,
+        }
+      },
+
+      async loadCase(args) {
+        const caseInput = args && typeof args.input === 'string' ? args.input : ''
+        const format = normalizeCaseFormat(args && args.format, caseInput)
+        if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
           return { ok: false, error: 'Invalid case path: ' + caseInput }
         }
         if (javaBridge === undefined || typeof javaBridge.loadCase !== 'function') {
@@ -1227,7 +1711,7 @@ return {
 
       async runReport(args) {
         const casePath = args && typeof args.input === 'string' ? args.input : ''
-        if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+        if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
           return { ok: false, error: 'Invalid case path: ' + casePath }
         }
 
@@ -1236,7 +1720,7 @@ return {
 
         const slash = casePath.lastIndexOf('/')
         const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-        const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+        const stem = caseStem(casePath.slice(slash + 1))
         const resultDir = parent + '/result'
 
         let displayName = args && typeof args.displayName === 'string' && args.displayName.trim() !== '' ? args.displayName.trim() : stem
@@ -1366,6 +1850,60 @@ return {
         }
       },
 
+      // The Diagram tab's gear dialog (0.6.26): read and write the workspace
+      // config/net_diagram.json. A read never fails the diagram -- missing or
+      // unparseable falls back to the built-in defaults, with a warning the dialog
+      // shows. A write merges over what is on disk (unknown keys survive) and always
+      // writes a sanitized document.
+      async getNetDiagramOptions(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const cfgPath = netDiagramConfigPath(root)
+        const rel = 'config/net_diagram.json'
+        try {
+          const target = await fs.resolve(cfgPath)
+          const text = await fs.readText(target)
+          let raw = null
+          try {
+            raw = JSON.parse(text)
+          } catch (e) {
+            return { ok: true, config: DEFAULT_NET_DIAGRAM_CONFIG, exists: true, path: rel,
+                     warning: rel + ' is not valid JSON; using the built-in defaults' }
+          }
+          return { ok: true, config: sanitizeNetDiagramConfig(raw), exists: true, path: rel }
+        } catch (e) {
+          return { ok: true, config: DEFAULT_NET_DIAGRAM_CONFIG, exists: false, path: rel }
+        }
+      },
+
+      async saveNetDiagramOptions(args) {
+        const fs = ctx.get('fs')
+        if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+        const config = args && args.config && typeof args.config === 'object' ? args.config : null
+        if (config === null) return { ok: false, error: 'missing options payload' }
+        const root = resolveWorkspaceRoot(args && args.sessionId)
+        if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+        const cfgPath = netDiagramConfigPath(root)
+        let onDisk = {}
+        try {
+          const target = await fs.resolve(cfgPath)
+          const parsed = JSON.parse(await fs.readText(target))
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) onDisk = parsed
+        } catch (e) {
+          onDisk = {}
+        }
+        const merged = sanitizeNetDiagramConfig(Object.assign(onDisk, config))
+        try {
+          const target = await fs.resolve(cfgPath)
+          await fs.writeText(target, JSON.stringify(merged, null, 2) + '\n')
+          return { ok: true, config: merged, path: 'config/net_diagram.json' }
+        } catch (e) {
+          return { ok: false, error: 'failed to write ' + cfgPath + ': ' + (e && e.message ? e.message : String(e)) }
+        }
+      },
+
       // Candidate contingency / monitored-branch inputs: every .json beside the
       // case file, with the entry counts the dialog reports after a pick.
       async listCaFiles(args) {
@@ -1455,15 +1993,10 @@ return {
         if (!validated.ok) return { ok: false, error: validated.error }
 
         const cfgRel = caConfigRel(parent)
-        const payload = {
-          contingencyMode: validated.config.contingencyMode,
-          contingencyFile: validated.config.contingencyFile,
-          monitorMode: validated.config.monitorMode,
-          monitoredBranchFile: validated.config.monitoredBranchFile,
-          // The dialog's over loading threshold. It must round-trip, or the next dialog
-          // open and the CLI silently fall back to 90.
-          overloadThreshold: validated.config.overloadThreshold,
-        }
+        // The whole validated config, in the file's key order: the two mode/file pairs, the over
+        // loading threshold and the solver knobs. It must round-trip, or the next dialog open and
+        // the CLI silently fall back to the defaults.
+        const payload = caConfigPayload(validated.config)
         try {
           const target = await fs.resolve(caConfigPath(root, parent))
           await fs.writeText(target, JSON.stringify(payload, null, 2) + '\n')

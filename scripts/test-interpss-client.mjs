@@ -18,7 +18,7 @@
 //
 // Node has no DOMParser, so this file supplies a minimal one covering exactly what the
 // renderer uses. It has no dependencies and does not need a browser.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -108,13 +108,39 @@ function build(overrides) {
     slice + '\nreturn { InterPssView: InterPssView, DrawioDiagram: DrawioDiagram, parseDrawioScene: parseDrawioScene,'
       + ' diagramXmlFrom: diagramXmlFrom, styleMap: styleMap, labelLines: labelLines,'
       + ' drawioFitRect: drawioFitRect, drawioZoomLimits: drawioZoomLimits, drawioZoomRect: drawioZoomRect,'
+      + ' drawioZoomPercent: drawioZoomPercent, DRAWIO_ZOOM_PRESETS: DRAWIO_ZOOM_PRESETS,'
+      + ' drawioSearchHits: drawioSearchHits, drawioFilterHidden: drawioFilterHidden,'
+      + ' drawioBusMeta: drawioBusMeta, drawioEdgeBusPair: drawioEdgeBusPair, drawioRingIndex: drawioRingIndex,'
+      + ' drawioIsBusCell: drawioIsBusCell,'
+      + ' drawioSearchHelp: drawioSearchHelp,'
+      + ' DRAWIO_NET_DEFAULTS: DRAWIO_NET_DEFAULTS, DRAWIO_NET_FIELDS: DRAWIO_NET_FIELDS,'
+      + ' drawioNetConfig: drawioNetConfig, drawioNetConfigErrors: drawioNetConfigErrors,'
+      + ' drawioBranchLoads: drawioBranchLoads, drawioContingencyLoads: drawioContingencyLoads,'
+      + ' drawioOptAdjLoads: drawioOptAdjLoads, drawioPairLoads: drawioPairLoads,'
+      + ' drawioBandText: drawioBandText,'
+      + ' drawioBirdseyePaths: drawioBirdseyePaths, drawioBirdseyeRect: drawioBirdseyeRect,'
+      + ' DrawioBirdseye: DrawioBirdseye,'
+      + ' drawioColIndex: drawioColIndex, drawioFlagPaint: drawioFlagPaint,'
+      + ' drawioMergedPaint: drawioMergedPaint,'
       + ' drawioPanRect: drawioPanRect, drawioWheelFactor: drawioWheelFactor, drawioZoomPercent: drawioZoomPercent,'
       + ' drawioThemeColor: drawioThemeColor,'
       + ' drawioBranchPairs: drawioBranchPairs, drawioIsBusId: drawioIsBusId, drawioLabelBusId: drawioLabelBusId,'
       + ' drawioHoverTarget: drawioHoverTarget, drawioCanonicalBusId: drawioCanonicalBusId,'
       + ' drawioPairLabel: drawioPairLabel, drawioFallbackTip: drawioFallbackTip,'
       + ' drawioTabChoice: drawioTabChoice, DiagramView: DiagramView,'
-      + ' busTooltip: busTooltip, branchTooltip: branchTooltip };');
+      + ' drawioBusAlerts: drawioBusAlerts, drawioBusCellId: drawioBusCellId,'
+      + ' drawioVoltOutsideBand: drawioVoltOutsideBand, drawioVoltColumns: drawioVoltColumns,'
+      + ' DRAWIO_MAX_CELLS: DRAWIO_MAX_CELLS,'
+      + ' DRAWIO_MATCH_FILL: DRAWIO_MATCH_FILL, DRAWIO_BIRDSEYE_FRAME: DRAWIO_BIRDSEYE_FRAME,'
+      + ' drawioSelectionMarks: drawioSelectionMarks, DRAWIO_SELECT_STROKE: DRAWIO_SELECT_STROKE,'
+      + ' DRAWIO_SELECT_PAD: DRAWIO_SELECT_PAD,'
+      + ' drawioHitBounds: drawioHitBounds, drawioCentreRect: drawioCentreRect,'
+      + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText,'
+      + ' CASE_FORMATS: CASE_FORMATS, caseFormatOfPath: caseFormatOfPath, caseFormatEntry: caseFormatEntry,'
+      + ' casePickerEmptyText: casePickerEmptyText, caseStem: caseStem,'
+      + ' bridgeCaseSelection: bridgeCaseSelection,'
+      + ' CA_SOLVER_FIELDS: CA_SOLVER_FIELDS, caSolverFieldValue: caSolverFieldValue,'
+      + ' caSolverError: caSolverError, caSolverPayload: caSolverPayload };');
 
 
   return factory(makeReact(overrides || {}), { call: () => Promise.resolve({}) }, { get: () => undefined },
@@ -172,11 +198,30 @@ if (scene) {
   check('15 bus bars / 15 text labels / 10 transformer ellipses',
     kinds.rect === 15 && kinds.text === 15 && kinds.ellipse === 10, JSON.stringify(kinds));
   // group children carry geometry relative to their group, so they must land at the
-  // group's own coordinates and not be offset twice
+  // group's own coordinates and not be offset twice. The group's position is read from the FILE
+  // rather than hard-coded: the point is the parser's rule, not where the diagram's author put the
+  // symbol — a case diagram is a file the draw.io button invites you to edit, and one such edit
+  // moved this very group (x=462 -> x=503), which used to fail a hard-coded check.
+  const groupGeometryOf = (src, id) => {
+    const cell = new RegExp('<mxCell id="' + id + '"[^>]*>([\\s\\S]*?)</mxCell>').exec(src);
+    if (cell === null) return null;
+    const geom = /<mxGeometry\b([^>]*?)\/?>/.exec(cell[1]);
+    if (geom === null) return null;
+    const attr = (name) => {
+      const m = new RegExp(name + '="([-\\d.]+)"').exec(geom[1]);
+      return m === null ? 0 : parseFloat(m[1]);
+    };
+    return { x: attr('x'), y: attr('y') };
+  };
   const xf15 = scene.nodes.find((n) => n.id === 'xf15');
   const xf15b = scene.nodes.find((n) => n.id === 'xf15b');
-  check('a group child lands at its group origin', xf15 && xf15.x === 462 && xf15.y === 306, xf15 && `${xf15.x},${xf15.y}`);
-  check('its pair applies the relative offset', xf15b && xf15b.x === 462 && xf15b.y === 314, xf15b && `${xf15b.x},${xf15b.y}`);
+  const group3 = groupGeometryOf(xml, '3');
+  check('a group child lands at its group origin',
+    xf15 !== undefined && group3 !== null && xf15.x === group3.x && xf15.y === group3.y,
+    (xf15 ? xf15.x + ',' + xf15.y : 'no xf15') + ' vs group ' + JSON.stringify(group3));
+  check('its pair applies the relative offset',
+    xf15b !== undefined && group3 !== null && xf15b.x === group3.x && xf15b.y === group3.y + 8,
+    (xf15b ? xf15b.x + ',' + xf15b.y : 'no xf15b') + ' vs group ' + JSON.stringify(group3));
   check('no group container is drawn', !scene.nodes.some((n) => n.id === '3' || n.id === '7'));
   // A one-line diagram is undirected: every branch carries endArrow=none. Anything with an
   // arrowhead here came from a stray edge, and 0.6.4 removed the last two (a transformer
@@ -586,19 +631,27 @@ check('the single-diagram shortcut helper went with the modal (no dead code left
 console.log('\n11. diagram bus/branch tooltips');
 const partsOf = (g) => (Array.isArray(g.kids[0]) ? g.kids[0] : g.kids);
 const groupsOf = (svg) => (svg.kids.length === 1 && Array.isArray(svg.kids[0]) ? svg.kids[0] : svg.kids);
-// The template is the style contract the case diagrams are copied from. draw.io
-// re-serialises a file it opens — viewport offsets, attribute order — so the two are no
-// longer byte-identical; what must hold is that they describe the same drawing.
+// The template is the style contract the case diagrams are drawn from, and the two must stay the
+// SAME DRAWING — same cells, same kinds, same edges. Geometry is deliberately NOT compared: a case
+// diagram is a file the draw.io button invites you to open and edit, and once a symbol is nudged in
+// draw.io (a local edit moved transformer group 3 from x=462 to x=503, leaving every id, kind and
+// edge intact) an equality of coordinates fails for a change the workflow intends. What must not
+// drift is the inventory the preview resolves against: the `busN` bars, `Bus-N` labels, the
+// group-wrapped transformer rings and the undirected edges.
 let templateScene = null;
 try {
   templateScene = api.parseDrawioScene(readFileSync(TEMPLATE_DIAGRAM, 'utf8'));
 } catch (e) {
   templateScene = null;
 }
-const sceneShape = (s) => JSON.stringify({ viewBox: s.viewBox, nodes: s.nodes, edges: s.edges });
-const sameDrawing = templateScene !== null && scene !== null && sceneShape(templateScene) === sceneShape(scene);
-check('the template and the live case diagram parse to the same drawing', sameDrawing,
-  sameDrawing ? undefined : (templateScene === null ? 'the template did not parse' : 'the two drawings differ'));
+const drawingInventory = (s) => JSON.stringify({
+  nodes: s.nodes.map((n) => n.id + ':' + n.kind).sort(),
+  edges: s.edges.map((e) => e.id).sort(),
+});
+const sameInventory = templateScene !== null && scene !== null
+  && drawingInventory(templateScene) === drawingInventory(scene);
+check('the template and the live case diagram are the same drawing, hand edits aside', sameInventory,
+  sameInventory ? undefined : (templateScene === null ? 'the template did not parse' : 'the two drawings differ'));
 
 if (scene) {
   // the parser must keep what a tooltip needs
@@ -730,6 +783,106 @@ if (scene) {
     branchTip.split('\n')[0]);
   check('both tooltip builders survive a missing record',
     api.busTooltip(null) === 'Bus info' && api.branchTooltip(null) === 'Branch info');
+  // 0.6.30: the flow loadings. The base case comes from the branch table the row came from, the
+  // contingency from the caller (only the Diagram tab reads the CA table), and neither line appears
+  // when the value is not there -- "when available" is the whole rule.
+  const loadedRow = xfRow2.slice();
+  loadedRow[24] = '58.94';
+  const loadedTip = api.branchTooltip(loadedRow, { contingencyLoading: 70 });
+  check('the branch tooltip shows both loadings, in percent, one decimal at most',
+    loadedTip.indexOf('Basecase Loading(%): 58.9%') > 0
+    && loadedTip.indexOf('Contingency Loading(%): 70%') > 0
+    && loadedTip.indexOf('58.94') < 0,
+    loadedTip.split('\n').slice(-3).join(' | '));
+  check('a whole number loses its pointless decimal',
+    api.loadingText('59.0') === '59%' && api.loadingText(70) === '70%' && api.loadingText('118.25') === '118.3%'
+    && api.loadingText('') === null && api.loadingText('n/a') === null && api.loadingText(undefined) === null);
+  check('the base-case line shows without any contingency data, and vice versa',
+    api.branchTooltip(loadedRow).indexOf('Basecase Loading(%): 58.9%') > 0
+    && api.branchTooltip(loadedRow).indexOf('Contingency') < 0
+    && api.branchTooltip(xfRow2, { contingencyLoading: 91 }).indexOf('Contingency Loading(%): 91%') > 0);
+  check('neither line appears when the row carries no loading column',
+    (function () {
+      const bare = xfRow2.slice(0, 24);
+      const tip = api.branchTooltip(bare);
+      return tip.indexOf('Loading') < 0 && tip.indexOf('Power From->To') > 0;
+    })());
+  check('the diagram passes all three loadings; the connection diagram still passes none',
+    slice.indexOf("showTip(branchTooltip(branches[0]), e)") >= 0
+    && slice.indexOf('contingencyLoading: contingency, optAdjLoading: optAdj, optAdjN1Loading: optAdjN1,') >= 0);
+  // 0.7.6: the two OptAdj loadings. Each sits under the plain loading of its own mode, each comes
+  // from the two OptAdj result tables the case folder declares, and each is optional on its own --
+  // a case with no OptAdj run (or a branch the scan never tracked) simply has no such line.
+  const optAdjTip = api.branchTooltip(loadedRow, { contingencyLoading: 70, optAdjLoading: 41.25, optAdjN1Loading: 88 });
+  check('the branch tooltip shows both OptAdj loadings, each under its own mode',
+    optAdjTip.indexOf('Basecase Loading(%): 58.9%') > 0
+    && optAdjTip.indexOf('Basecase Loading(%): 58.9%') < optAdjTip.indexOf('Basecase OptAdj Loading(%): 41.3%')
+    && optAdjTip.indexOf('Basecase OptAdj Loading(%): 41.3%') < optAdjTip.indexOf('Contingency Loading(%): 70%')
+    && optAdjTip.indexOf('Contingency Loading(%): 70%') < optAdjTip.indexOf('Contingency OptAdj Loading(%): 88%'),
+    optAdjTip.split('\n').slice(-4).join(' | '));
+  check('an OptAdj line is optional, and the plain tooltip is unchanged without one',
+    api.branchTooltip(loadedRow, { optAdjLoading: 30 }).indexOf('Basecase OptAdj Loading(%): 30%') > 0
+    && api.branchTooltip(loadedRow, { optAdjLoading: 30 }).indexOf('Contingency') < 0
+    && api.branchTooltip(loadedRow).indexOf('OptAdj') < 0
+    && api.branchTooltip(xfRow2, { optAdjN1Loading: 'n/a' }).indexOf('OptAdj') < 0);
+  // The OptAdj table's own columns: `loadingAfterPct` is the number (never `loadingBeforePct`, which
+  // is the scan's pre-redispatch loading), the pair is the `branchId` head, and the worst row wins --
+  // the N-1 table holds one row per outage.
+  const OPT_HEADER = 'branchId,outageBranchId,limitMW,baseFlowMW,loadingBeforePct,shiftedFlowMWAfter,loadingAfterPct';
+  const OPT_ROWS = [
+    'Bus1->Bus2(1),Bus3->Bus4(1),600,1,99.0,0.0,41.5',
+    'Bus1->Bus2(1),Bus5->Bus6(1),600,1,98.0,0.0,88.25',
+    'Bus7->Bus8(1),,800,1,55.0,0.0,12.0',
+    'not-a-branch,,600,1,90.0,0.0,99.0',
+  ];
+  const optFlags = api.drawioOptAdjLoads(OPT_HEADER, OPT_ROWS);
+  check('OptAdj loadings come from loadingAfterPct, keyed by the branchId pair, worst row first',
+    optFlags['bus1|bus2'] === 88.25 && optFlags['bus7|bus8'] === 12
+    && Object.keys(optFlags).length === 2 && optFlags['bus3|bus4'] === undefined,
+    JSON.stringify(optFlags));
+  // Both Hosts must list both tables in `checkResult`, exactly like the CA table: that list is the
+  // only way the tab discovers them, so a missing entry means the lines can never appear.
+  check('both hosts list both OptAdj branch results in checkResult',
+    ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) => {
+      const s = readFileSync(join(ROOT, p), 'utf8');
+      return s.indexOf("stem + '_DF_optadj_branch.csv'") >= 0
+        && s.indexOf("stem + '_DF_optadj_N1_branch.csv'") >= 0;
+    }),
+    'checkResult files');
+  // Listing a file in `checkResult` is only half the discovery: `readCsv` gates every result path
+  // with its own family allow-list, and a family the client looks up but that pattern does not name
+  // comes back `Invalid result path` -- which the client treats as "no data", so the table is simply
+  // never there. 0.7.6 shipped these tooltip lines against a list that lacked both OptAdj families,
+  // and nothing failed loudly. The shipped pattern is extracted from each half and RUN here, so a
+  // new family cannot be added on one side only.
+  const HOST_HALVES = ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js',
+    'interpss-dynamic/index.js'];
+  const readCsvPattern = (path) => {
+    const m = /!?(\/\^[^\n]*?\$\/)\.test\(path\)/.exec(rd(join(ROOT, path)));
+    if (m === null) return null;
+    try { return new Function('return ' + m[1])(); } catch (e) { return null; }
+  };
+  const RESULT_TABLES = ['bus', 'branch', 'gen', 'load', 'contingency', 'optadj_branch', 'optadj_N1_branch',
+    'optadj_gen', 'optadj_N1_gen'];
+  check('every result family the tab reads passes the Host\'s readCsv allow-list',
+    HOST_HALVES.every((p) => {
+      const rx = readCsvPattern(p);
+      return rx !== null
+        && RESULT_TABLES.every((f) => rx.test('data/ieee/ieee39/result/ieee39_DF_' + f + '.csv'))
+        && !rx.test('data/ieee/ieee39/result/ieee39_DF_secret.csv')
+        && !rx.test('data/ieee/ieee39/result/../../etc/passwd_DF_branch.csv');
+    }),
+    HOST_HALVES.map((p) => (readCsvPattern(p) === null ? 'no pattern' : String(readCsvPattern(p)))).join(' || '));
+  // Discovery must name the same families the reader allows, or a card can find nothing to ask for
+  // (or ask for something the gate then rejects). The OptAdj *gen* tables are the ones a card's
+  // "Gen adjustments" button reads, and they were missing from both the pattern and this list.
+  check('every Host half lists every OptAdj table it lets the client read',
+    HOST_HALVES.every((p) => {
+      const src = rd(join(ROOT, p));
+      return RESULT_TABLES.filter((f) => f.indexOf('optadj') === 0)
+        .every((f) => src.indexOf("stem + '_DF_" + f + ".csv'") >= 0);
+    }),
+    RESULT_TABLES.filter((f) => f.indexOf('optadj') === 0).join(', '));
 }
 
 // --- 12. the Diagram tab (a second conversation view, order 2) --------------
@@ -835,8 +988,23 @@ check('rendering an open diagram does not throw', drawnFlat.indexOf('THREW') < 0
 check('the zoom toolbar and readout are present',
   drawnFlat.indexOf('"Fit"') >= 0 && drawnFlat.indexOf('"+"') >= 0
   && drawnFlat.indexOf('"' + String.fromCharCode(0x2212) + '"') >= 0 && drawnFlat.indexOf('"100%"') >= 0);
-// Asked for in 0.6.11: the wheel and the drag are discoverable on their own, so the toolbar
-// ends at Fit.
+// 0.6.21: that readout is a picker, so the render must carry its accessible name and every preset
+// as an option label -- a list that silently lost an entry would still pass a screenshot review.
+check('the readout renders as the zoom picker with its presets',
+  drawnFlat.indexOf('"Zoom level"') >= 0
+  && api.DRAWIO_ZOOM_PRESETS.every((p) => drawnFlat.indexOf('"' + p + '%"') >= 0),
+  JSON.stringify(api.DRAWIO_ZOOM_PRESETS));
+// The picker sets a width from a percentage; `drawioZoomPercent` reads it back. The two must agree
+// for every preset, or picking a level would land on a different one than it showed.
+check('every preset percent round-trips through the zoom rect width',
+  api.DRAWIO_ZOOM_PRESETS.every((p) => api.drawioZoomPercent(
+    { viewBox: { x: 0, y: 0, w: 1000, h: 800 } },
+    { x: 0, y: 0, w: 1000 * 100 / p, h: 800 * 100 / p }) === p));
+check('the preset list is the documented 25 to 400 percent',
+  JSON.stringify(api.DRAWIO_ZOOM_PRESETS) === JSON.stringify([25, 50, 75, 100, 125, 150, 200, 300, 400]),
+  JSON.stringify(api.DRAWIO_ZOOM_PRESETS));
+// Asked for in 0.6.11: the wheel and the drag are discoverable on their own, so the toolbar is
+// just the view toggle, the two step buttons and the picker (which carries Fit since 0.6.22).
 check('the toolbar carries no scroll/drag hint text',
   drawnFlat.indexOf('Scroll to zoom') < 0 && body.indexOf('Scroll to zoom') < 0);
 // The edit button is the one control that leaves the app: the Host launches the local draw.io
@@ -902,12 +1070,378 @@ check('the edit button sits in the tab\'s top row, right-aligned (the upper-righ
 check('the button no longer needs the retired sticky-strip workaround',
   styleOf(editButton).position === undefined && styleOf(editButton).pointerEvents === undefined
   && slice.slice(slice.indexOf('function DiagramView(')).indexOf("position: 'sticky'") < 0);
+// 0.6.34 removed the `R` / `S` view toggle, so the row is located by a control that remains:
+// the Search button. (It used to key on the button labelled `R`.)
 const toolbarRow = findInTree(editTree, (n) => n.type === 'div' && Array.isArray(n.kids)
-  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button' && (k.kids || []).indexOf('Rendered') >= 0));
-check('the toolbar row ends at Fit and no longer carries the draw.io button',
+  && n.kids.some((k) => k !== null && k !== undefined && k.type === 'button'
+    && String(k.props.title || '') === 'Search the diagram'));
+check('the toolbar row ends at the filter button, with no draw.io and no separate Fit button',
   toolbarRow !== null
-  && findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props.title || '').indexOf('draw.io') >= 0) === null
-  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Fit') >= 0) !== null);
+  // the EDIT button's own title — the bare word `draw.io` now also appears in the Source tooltip
+  && findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props.title || '').indexOf('local draw.io app') >= 0) === null
+  // 0.6.22: Fit moved into the picker, so no Fit button survives there
+  && findInTree(toolbarRow, (n) => n.type === 'button' && (n.kids || []).indexOf('Fit') >= 0) === null
+  // and 0.6.23 put the two icon buttons last (counted last, not by length: the file picker and the
+  // status span share this row)
+  && (function () {
+    // the last CONTROL, not the last child: a flags summary span (0.6.26) can follow the buttons
+    const kids = (toolbarRow.kids || []).filter((k) => k !== null && k !== undefined && k.type === 'button');
+    const last = kids[kids.length - 1];
+    return last !== undefined && String(last.props.title) === 'Filter the diagram';
+  })());
+
+// 0.6.34: the `R` / `S` view toggle is gone — the tab always draws the rendered scene — so the
+// row must open with the zoom pair and carry no view control of any spelling. The `Rendered` /
+// `Source` buttons in the *report* view of the InterPSS tab are a different surface and stay.
+const toolbarButtons = toolbarRow === null ? [] : (toolbarRow.kids || [])
+  .filter((k) => k !== null && k !== undefined && k.type === 'button');
+const firstToolbarLabel = toolbarButtons.length === 0 ? null : (toolbarButtons[0].kids || [])[0];
+check('the toolbar carries no view toggle, and starts at the zoom-out control',
+  toolbarRow !== null && firstToolbarLabel === '\u2212'
+  && ['R', 'S', 'Rendered', 'Source'].every((letter) => findInTree(toolbarRow,
+    (n) => n.type === 'button' && (n.kids || []).indexOf(letter) >= 0) === null)
+  && slice.indexOf("const [view, setView]") < 0
+  && slice.indexOf("setView(") < 0
+  && slice.indexOf("view === 'source'") < 0,
+  toolbarRow === null ? 'no toolbar' : String(firstToolbarLabel));
+
+// 0.6.21, the zoom picker, checked structurally: it is a `select` in the toolbar row, it sits
+// exactly between the two step buttons, and its handler exists (the harness's setState is a
+// no-op, so what is proved is that picking a level reaches a handler without throwing).
+const zoomSel = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'select'
+  && String(n.props['aria-label'] || '') === 'Zoom level');
+const zoomOutBtn = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'button' && n.props.title === 'Zoom out');
+const zoomInBtn = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'button' && n.props.title === 'Zoom in');
+const rowKids = toolbarRow === null ? [] : (toolbarRow.kids || []);
+// The options are passed to createElement as one array, which React flattens and this harness
+// keeps nested -- read both shapes, the way partsOf/groupsOf do.
+const optionKids = (sel) => (sel === null || sel.kids === undefined ? []
+  : (Array.isArray(sel.kids[0]) ? sel.kids[0] : sel.kids));
+const zoomOpts = optionKids(zoomSel).map((o) => String((o.kids || [])[0]));
+check('the level readout is a select labelled Zoom level, offering the presets and Fit',
+  zoomSel !== null && zoomSel.props.title === 'Zoom level'
+  // the fixture is fitted (rect === null), so the control must say Fit, not claim a percentage
+  && zoomSel.props.value === 'fit'
+  && JSON.stringify(zoomOpts) === JSON.stringify(api.DRAWIO_ZOOM_PRESETS.map((p) => p + '%').concat(['Fit'])),
+  zoomSel === null ? 'no picker' : zoomSel.props.value + ' / ' + JSON.stringify(zoomOpts));
+check('the picker sits between the - and + buttons',
+  zoomSel !== null && zoomOutBtn !== null && zoomInBtn !== null
+  && rowKids.indexOf(zoomSel) === rowKids.indexOf(zoomOutBtn) + 1
+  && rowKids.indexOf(zoomInBtn) === rowKids.indexOf(zoomSel) + 1,
+  JSON.stringify(rowKids.map((k) => (k === null ? 'null' : k.type + ':' + String(k.props.title || (k.kids || []).join(''))))));
+check('picking a level, and picking Fit, reach a handler without throwing',
+  zoomSel !== null && typeof zoomSel.props.onChange === 'function'
+  && (() => {
+    try {
+      zoomSel.props.onChange({ target: { value: '25' } });
+      zoomSel.props.onChange({ target: { value: 'fit' } });
+      return true;
+    } catch (e) {
+      return false;
+    }
+  })());
+
+// A wheel-zoomed level is not one of the presets (the screenshot that asked for this was at
+// 745%), and the control must still show it -- and offer it back -- instead of rounding to 400.
+const zoomedRect = { x: 0, y: 0, w: scene.viewBox.w * 100 / 745, h: scene.viewBox.h * 100 / 745 };
+const zoomedTab = renderTab(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['rect', zoomedRect],
+]));
+const zoomedSel = findInTree(zoomedTab, (n) => n.type === 'select' && String(n.props['aria-label'] || '') === 'Zoom level');
+const zoomedOpts = optionKids(zoomedSel).map((o) => String((o.kids || [])[0]));
+check('a level the wheel reached is shown and offered back, in order',
+  zoomedSel !== null && zoomedSel.props.value === '745'
+  && JSON.stringify(zoomedOpts) === JSON.stringify(api.DRAWIO_ZOOM_PRESETS.concat([745]).map((p) => p + '%').concat(['Fit'])),
+  zoomedSel === null ? 'no picker' : zoomedSel.props.value + ' / ' + JSON.stringify(zoomedOpts));
+// 0.6.23: the two icon buttons, and the fact that they open the dialogs. The harness's setState is
+// a no-op, so the CLICK cannot be observed in the tree -- the wiring is asserted on the source and
+// the dialogs are rendered directly from state below, which is what actually matters.
+const searchBtn = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props['aria-label'] || '') === 'Search the diagram');
+const filterBtn = toolbarRow === null ? null : findInTree(toolbarRow, (n) => n.type === 'button' && String(n.props['aria-label'] || '') === 'Filter the diagram');
+check('the toolbar carries Search and Filter buttons',
+  searchBtn !== null && filterBtn !== null && String(searchBtn.props.title) === 'Search the diagram'
+  && String(filterBtn.props.title) === 'Filter the diagram',
+  searchBtn === null ? 'no search button' : String(searchBtn.props.title));
+check('the buttons open their dialogs, and neither is a file write',
+  slice.indexOf('onClick: openSearch') >= 0 && slice.indexOf('onClick: openFilter') >= 0
+  && slice.indexOf('setDialog(\'search\')') >= 0 && slice.indexOf('setDialog(\'filter\')') >= 0);
+
+// The dialogs, rendered from the state the buttons set (the harness cannot click, so the fixture
+// supplies it). OK/Cancel, the field each one is for, and that Cancel is a plain close.
+const searchDialog = renderTab(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'search'],
+  ['searchText', '1001'],
+]));
+const searchDialogButtons = ['OK', 'Cancel'].map((label) => findInTree(searchDialog, (n) => n.type === 'button' && (n.kids || []).indexOf(label) >= 0));
+check('the search dialog has a field and OK / Cancel',
+  findInTree(searchDialog, (n) => n.type === 'input' && String(n.props['aria-label'] || '') === 'Search the diagram') !== null
+  && searchDialogButtons[0] !== null && searchDialogButtons[1] !== null
+  && findInTree(searchDialog, (n) => n.props !== undefined && n.props.role === 'dialog') !== null,
+  searchDialogButtons.map((b) => (b === null ? 'missing' : 'ok')).join('/'));
+const searchDialogFlat = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'search'],
+  ['busMeta', { areas: [], zones: [], ofBus: { bus1: { area: '', zone: '', name: 'ODESSA 2 0' } } }],
+]));
+check('the search dialog shows this case\'s help and an arrow placeholder',
+  searchDialogFlat.indexOf('14 buses here (Bus-1 to Bus-14)') > 0
+  && searchDialogFlat.indexOf('Bus-1 -> Bus-2') > 0 && searchDialogFlat.indexOf('ODESSA') > 0
+  && searchDialogFlat.indexOf('1001-1002') < 0,
+  searchDialogFlat.slice(searchDialogFlat.indexOf('14 buses'), searchDialogFlat.indexOf('14 buses') + 70));
+check('the search dialog keeps OK and Cancel wired, and Cancel only closes',
+  (function () {
+    try {
+      searchDialogButtons[0].props.onClick();
+      searchDialogButtons[1].props.onClick();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  })()
+  && slice.indexOf('setDialog(null)') >= 0 && slice.indexOf('applySearch') >= 0);
+
+const filterDialog = renderTab(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'filter'],
+  ['busMeta', { areas: [{ num: '1', name: 'NORTH' }], zones: [{ num: '9', name: 'FAR WEST TEX', area: '1' }], ofBus: {} }],
+  // a band that is deliberately NOT the shipped 0.9-1.1: the label must follow the config (0.6.27)
+  ['netConfig', api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 })],
+  ['branchLoads', { 'bus1|bus2': 91.5, 'bus5|bus6': 45 }],
+  ['conLoads', { 'bus1|bus2': 118 }],
+]));
+const filterDialogButtons = ['OK', 'Cancel'].map((label) => findInTree(filterDialog, (n) => n.type === 'button' && (n.kids || []).indexOf(label) >= 0));
+const areaSelect = findInTree(filterDialog, (n) => n.type === 'select' && String(n.props['aria-label'] || '') === 'Area');
+const zoneSelect = findInTree(filterDialog, (n) => n.type === 'select' && String(n.props['aria-label'] || '') === 'Zone');
+check('the filter dialog offers area, zone, the band checkbox, and OK / Cancel',
+  areaSelect !== null && zoneSelect !== null && filterDialogButtons[0] !== null && filterDialogButtons[1] !== null
+  && findInTree(filterDialog, (n) => n.type === 'input' && n.props.type === 'checkbox') !== null,
+  JSON.stringify([optionKids(areaSelect).map((o) => String((o.kids || [])[0])), optionKids(zoneSelect).map((o) => String((o.kids || [])[0]))]));
+// 0.6.24: the message follows the DIALOG's fields, not the applied filter. This is the bug the
+// screenshot showed -- Area/Zone changed to 7 COAST / 1 BAY CITY while the line still read the
+// previous "area 1, zone 9" because it was computed from the applied value.
+const draftDialog = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'filter'],
+  ['filterArea', '2'],
+  ['filterZone', ''],
+  ['filterApplied', { area: '1', zone: '9', outOfBand: false }],
+  ['busMeta', {
+    areas: [{ num: '1', name: 'NORTH' }, { num: '2', name: 'SOUTH' }],
+    zones: [{ num: '9', name: 'FAR WEST TEX', area: '1' }, { num: '7', name: 'AGGIE', area: '2' }],
+    ofBus: { bus1: { area: '2', zone: '7', name: 'A' }, bus2: { area: '2', zone: '7', name: 'B' }, bus3: { area: '1', zone: '9', name: 'C' } },
+  }],
+]));
+// Only the MESSAGE is asserted here: the toolbar status legitimately still says `area 1` while the
+// dialog is open, because that one shows what is applied to the drawing.
+const draftMessage = draftDialog.slice(draftDialog.indexOf('Showing'), draftDialog.indexOf('Showing') + 80);
+check('the filter message previews the dialog fields, not the applied filter',
+  draftMessage.indexOf('area 2 SOUTH') >= 0 && draftMessage.indexOf('area 1') < 0
+  && draftMessage.indexOf('Showing 2 of 14 buses') >= 0,
+  draftMessage);
+check('the toolbar status keeps the APPLIED filter, so Cancel still cancels',
+  slice.indexOf('filterApplied === null || scene === null') >= 0
+  && slice.indexOf('const draftHits = scene === null') >= 0);
+
+const filterBoxes = ['Only buses outside the voltage band',
+  'Only branches at or above the base-case flow flag',
+  'Only branches at or above the contingency flow flag']
+  .map((label) => findInTree(filterDialog, (n) => n.type === 'input' && n.props.type === 'checkbox'
+    && String(n.props['aria-label'] || '') === label));
+check('the filter dialog offers all three criteria, labelled from the config',
+  filterBoxes.every((b) => b !== null)
+  // the CODE's fallback defaults (80/100), because this fixture sets only the bus band: the user's
+  // own file value is theirs to tune and is not what a fresh profile shows
+  && flatTree(filterDialog).indexOf('Only branches with base-case loading \u2265 80%') > 0
+  && flatTree(filterDialog).indexOf('Only branches with contingency loading \u2265 100%') > 0,
+  filterBoxes.filter((b) => b === null).length + ' missing');
+check('the two flow boxes are offered but not tappable when their table is missing',
+  (function () {
+    const noData = renderFlat(withState([
+      ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+      ['files', tabFiles(2)],
+      ['path', 'wspace/data/c/diagram/d0.drawio'],
+      ['scene', scene],
+      ['dialog', 'filter'],
+      ['busMeta', { areas: [], zones: [], ofBus: {} }],
+      ['branchLoads', null],
+      ['conLoads', null],
+    ]));
+    const box = findInTree(renderTab(withState([
+      ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+      ['files', tabFiles(2)],
+      ['path', 'wspace/data/c/diagram/d0.drawio'],
+      ['scene', scene],
+      ['dialog', 'filter'],
+      ['busMeta', { areas: [], zones: [], ofBus: {} }],
+      ['branchLoads', null],
+      ['conLoads', null],
+    ])), (n) => n.type === 'input' && n.props.type === 'checkbox'
+      && String(n.props['aria-label'] || '') === 'Only branches at or above the base-case flow flag');
+    return noData.indexOf('no branch table yet') > 0 && box !== null && box.props.disabled === true
+      && box.props.checked === false;
+  })());
+
+check('the filter dialog\'s band checkbox reads the config, not a literal',
+  flatTree(filterDialog).indexOf('Only buses with |V| outside 0.95\u20131.05 pu') > 0
+  && flatTree(filterDialog).indexOf('outside 0.9\u20131.1') < 0,
+  api.drawioBandText(api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 })));
+check('the filter dialog offers the case\'s own areas and zones, plus All',
+  JSON.stringify(optionKids(areaSelect).map((o) => String((o.kids || [])[0]))) === JSON.stringify(['All areas', '1  NORTH'])
+  && JSON.stringify(optionKids(zoneSelect).map((o) => String((o.kids || [])[0]))) === JSON.stringify(['All zones', '9  FAR WEST TEX']));
+
+// 0.6.26: the gear. It lives in the header row beside the draw.io button -- NOT in the toolbar, so
+// the toolbar's controls stay the ones the mock specifies -- and it opens the config dialog.
+const gearButton = findInTree(editTree, (n) => n.type === 'button'
+  && String(n.props['aria-label'] || '') === 'One-line diagram config options');
+check('the header row carries the config gear next to the draw.io button',
+  gearButton !== null && String(gearButton.props.title) === 'One-line diagram config options'
+  && topRow !== null && findInTree(topRow, (n) => n.type === 'button' && String(n.props['aria-label'] || '') === 'Edit this diagram in the local draw.io app') !== null,
+  gearButton === null ? 'no gear' : String(gearButton.props.title));
+check('the gear opens the config dialog and the save asks the Host to write the file',
+  slice.indexOf('onClick: openConfig') >= 0 && slice.indexOf("setDialog('config')") >= 0
+  && slice.indexOf("callRemote('saveNetDiagramOptions'") >= 0
+  && slice.indexOf("callRemote('getNetDiagramOptions'") >= 0);
+
+const cfgDialog = renderTab(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['dialog', 'config'],
+  ['cfgForm', api.drawioNetConfig(null)],
+]));
+const cfgInputs = api.DRAWIO_NET_FIELDS.map((f) => findInTree(cfgDialog, (n) => n.type === 'input' && String(n.props['aria-label'] || '') === f.label));
+const cfgButtons = ['OK', 'Cancel'].map((label) => findInTree(cfgDialog, (n) => n.type === 'button' && (n.kids || []).indexOf(label) >= 0));
+const cfgFlat = flatTree(cfgDialog);
+check('the config dialog shows every option, OK and Cancel, and the file it writes',
+  cfgInputs.every((i) => i !== null) && cfgButtons[0] !== null && cfgButtons[1] !== null
+  && cfgFlat.indexOf('config/net_diagram.json') > 0 && cfgFlat.indexOf('Bus flags') > 0
+  && cfgFlat.indexOf('Branch flow flags') > 0,
+  cfgInputs.filter((i) => i === null).length + ' missing fields');
+const cfgCheckbox = findInTree(cfgDialog, (n) => n.type === 'input' && n.props.type === 'checkbox'
+  && String(n.props['aria-label'] || '') === 'Show the birdseye view');
+check('the configuration switch renders as a checkbox, checked by default',
+  cfgCheckbox !== null && cfgCheckbox.props.checked === true
+  && flatTree(cfgDialog).indexOf('View') > 0,
+  cfgCheckbox === null ? 'no checkbox' : String(cfgCheckbox.props.checked));
+check('the config dialog starts at the configured values, and OK / Cancel are wired',
+  cfgInputs[0] !== null && String(cfgInputs[0].props.value) === '1.1'
+  && String(cfgInputs[2].props.value) === 'red'
+  && (function () {
+    try {
+      cfgButtons[0].props.onClick();
+      cfgButtons[1].props.onClick();
+      return true;
+    } catch (e) {
+      return false;
+    }
+  })());
+
+// 0.6.26: the flags summary. It counts each family that actually has data, quoting the thresholds
+// the config set, and it is clickable so the gear is one click from what it is doing.
+const flagsTab = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['busAlerts', { bus5: true, bus9: true }],
+  ['branchLoads', { 'bus1|bus2': 91.5 }],
+  ['netConfig', api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05,
+    Basecase_branch_flow_flag_percent: 80, Contingency_branch_flow_flag_percent: 100 })],
+]));
+check('the flags summary counts each family with its configured threshold',
+  flagsTab.indexOf('flags: 2 buses 0.95') > 0 && flagsTab.indexOf('1 branch \u226580%') > 0
+  && flagsTab.indexOf('contingency') < 0,
+  flagsTab.slice(flagsTab.indexOf('flags:'), flagsTab.indexOf('flags:') + 70));
+const noFlagsTab = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+]));
+check('with nothing flagged there is no summary line at all',
+  noFlagsTab.indexOf('flags:') < 0);
+
+// 0.6.28: the birdseye. It rides on the canvas (which is now a positioning context) and carries the
+// whole drawing as TWO paths plus the viewport frame -- not a second DrawioDiagram, which would
+// double the DOM of a 10k-cell scene.
+const birdseye = api.DrawioBirdseye({ scene: scene, rect: api.drawioFitRect(scene.viewBox),
+  paths: api.drawioBirdseyePaths(scene), onCentre: () => {} });
+const birdseyeRect = birdseye === null ? null : (birdseye.kids || []).filter((k) => k.type === 'rect')[0];
+const birdseyePaths = birdseye === null ? [] : (birdseye.kids || []).filter((k) => k.type === 'path');
+check('the canvas carries a birdseye with the whole scene and the visible rectangle',
+  birdseye !== null && birdseyePaths.length === 2
+  && birdseye.props.viewBox === scene.viewBox.x + ' ' + scene.viewBox.y + ' ' + scene.viewBox.w + ' ' + scene.viewBox.h
+  && birdseyeRect !== undefined && birdseyeRect.props.width === scene.viewBox.w && birdseyeRect.props.height === scene.viewBox.h,
+  birdseye === null ? 'no birdseye' : String(birdseye.props.viewBox));
+// 0.6.36: two accents, deliberately apart. The search highlight turned green; the viewport frame
+// kept the blue, because the frame answers "where am I looking", not "what did I find" -- so it
+// must not follow the match colour when that colour changes again.
+check('the viewport frame wears the frame colour, not the search highlight',
+  birdseyeRect !== undefined && birdseyeRect.props.fill === api.DRAWIO_BIRDSEYE_FRAME
+  && birdseyeRect.props.stroke === api.DRAWIO_BIRDSEYE_FRAME
+  && api.DRAWIO_MATCH_FILL !== api.DRAWIO_BIRDSEYE_FRAME,
+  (birdseyeRect === undefined ? 'no rect' : birdseyeRect.props.fill) + ' vs match ' + api.DRAWIO_MATCH_FILL);
+check('the birdseye sits inside the canvas, which is a positioning context',
+  String(birdseye.props.style.position) === 'absolute'
+  && slice.indexOf("position: 'relative', height: '70vh'") >= 0
+  // and the canvas renders it with the scene, the current window and the prebuilt paths
+  && slice.indexOf('React.createElement(DrawioBirdseye, {') >= 0
+  && slice.indexOf('paths: birdseyePaths') >= 0 && slice.indexOf('rect: currentRect()') >= 0,
+  String(birdseye.props.style.position));
+check('the birdseye is absent when there is no diagram, and its pointer events never pan the canvas',
+  idle.indexOf('Birdseye view') < 0
+  && slice.indexOf('onCentre: centreFromBirdseye') >= 0
+  && slice.indexOf('setRect(drawioBirdseyeRect(scene, currentRect(), fx, fy))') >= 0
+  && slice.indexOf('e.stopPropagation()') >= 0);
+if (birdseye !== null) {
+  const fake = {
+    stopPropagation: () => {}, preventDefault: () => {}, pointerId: 1, clientX: 120, clientY: 90,
+    currentTarget: { setPointerCapture: () => {}, getBoundingClientRect: () => ({ left: 0, top: 0, width: 190, height: 150 }) },
+  };
+  check('clicking and dragging the birdseye is wired and does not throw',
+    (function () {
+      try {
+        birdseye.props.onPointerDown(fake);
+        birdseye.props.onPointerMove(fake);
+        birdseye.props.onPointerUp(fake);
+        return true;
+      } catch (e) {
+        return false;
+      }
+    })());
+}
+
+// 0.6.29: the switch. With the setting off the canvas carries no thumbnail at all.
+const noBirdseye = renderFlat(withState([
+  ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+  ['files', tabFiles(2)],
+  ['path', 'wspace/data/c/diagram/d0.drawio'],
+  ['scene', scene],
+  ['netConfig', api.drawioNetConfig({ Show_birdseye_view: false })],
+]));
+check('turning the birdseye off leaves the canvas without it',
+  noBirdseye.indexOf('Birdseye view') < 0 && noBirdseye.indexOf('THREW') < 0);
+check('the switch gates the overlay in the source, not by hiding it with css',
+  slice.indexOf('netConfig.Show_birdseye_view !== false ? React.createElement(DrawioBirdseye, {') >= 0);
+
 if (editButton !== null) {
   editButton.props.onClick();
   check('the edit button asks the Host to launch draw.io for the open diagram',
@@ -943,15 +1477,18 @@ if (scene) {
     && typeof found[0].props.hover.onBranch === 'function',
     found.length === 1 ? 'view=' + String(found[0].props.view) : '');
 }
-const sourceTab = renderFlat(withState([
+// 0.6.34: there is no Source view to reach any more. The same file must render, and the raw XML
+// must not be dumped anywhere in the tab.
+const noSourceTab = renderFlat(withState([
   ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
   ['files', tabFiles(1)],
   ['filesLoading', false],
   ['path', 'wspace/data/c/diagram/d0.drawio'],
-  ['view', 'source'],
   ['xml', '<mxfile><diagram/></mxfile>'],
 ]));
-check('the Source view shows the raw file', sourceTab.indexOf('<mxfile><diagram/></mxfile>') >= 0, sourceTab.slice(0, 90));
+check('the raw file is never shown: the tab always renders', 
+  noSourceTab.indexOf('<mxfile><diagram/></mxfile>') < 0 && noSourceTab.indexOf('THREW') < 0,
+  noSourceTab.slice(0, 60));
 // The modal that used to live in InterPssView is gone, so `readDrawio` must have exactly
 // one caller left. A second one would mean a preview surface grew back beside this tab.
 check('the preview has exactly one entry point left, and it is this view',
@@ -1111,6 +1648,1474 @@ if (launchApi !== null) {
     && rd(DYN_HOST).indexOf("'/config/ipss_plugin_env.json'") >= 0);
 }
 
+
+// --- 14. render-time voltage annotation ------------------------------------
+console.log('\n14. render-time voltage annotation (red buses outside [0.9, 1.1] pu)');
+// The rule itself: strictly outside the band, and a value that is not a finite number (a blank
+// VoltMag, a placeholder) is simply not annotated rather than flagged.
+check('the band is exclusive at both ends',
+  api.drawioVoltOutsideBand(0.9, [0.9, 1.1]) === false && api.drawioVoltOutsideBand(1.1, [0.9, 1.1]) === false
+  && api.drawioVoltOutsideBand(0.8999, [0.9, 1.1]) === true && api.drawioVoltOutsideBand(1.1001, [0.9, 1.1]) === true);
+check('a blank, missing or non-numeric voltage is never annotated',
+  api.drawioVoltOutsideBand('', [0.9, 1.1]) === false && api.drawioVoltOutsideBand('-', [0.9, 1.1]) === false
+  && api.drawioVoltOutsideBand(undefined, [0.9, 1.1]) === false && api.drawioVoltOutsideBand('n/a', [0.9, 1.1]) === false
+  && api.drawioVoltOutsideBand(NaN, [0.9, 1.1]) === false && api.drawioVoltOutsideBand(0.5, null) === true);
+check('the band defaults to 0.9-1.1 when none is given',
+  api.drawioVoltOutsideBand(0.95, undefined) === false && api.drawioVoltOutsideBand(0.8, undefined) === true);
+
+// The table reader. drawioBusAlerts gets raw CSV lines from readCsv, so the columns MUST come from
+// the file's own header: VoltAng and NomVolt sit beside VoltMag, and a positional read would
+// silently paint the wrong buses.
+const BUS_HEADER = 'ID,Number,Name,AreaName,NomVolt,VoltAng,VoltMag,LoadP';
+const BUS_ROWS = [
+  'Bus1,1,A,1,100000.0,0.100,1.047360469272905,0.0',
+  'Bus2,2,B,1,100000.0,0.200,0.871400000000000,0.0',
+  'Bus3,3,C,1,100000.0,0.300,1.120000000000000,0.0',
+  'Bus4,4,D,1,100000.0,0.400,,0.0',
+  'Bus5,5,E,1,100000.0,0.500,n/a,0.0',
+];
+check('only the out-of-band buses are flagged',
+  JSON.stringify(api.drawioBusAlerts(BUS_HEADER, BUS_ROWS, null, [0.9, 1.1])) === JSON.stringify({ bus2: true, bus3: true }),
+  JSON.stringify(api.drawioBusAlerts(BUS_HEADER, BUS_ROWS, null, [0.9, 1.1])));
+check('the columns are read by header name, not by position',
+  JSON.stringify(api.drawioBusAlerts('VoltMag,ID,Name', ['0.8714,Bus2,B', '1.02,Bus9,X'], null, [0.9, 1.1]))
+    === JSON.stringify({ bus2: true }),
+  JSON.stringify(api.drawioBusAlerts('VoltMag,ID,Name', ['0.8714,Bus2,B', '1.02,Bus9,X'], null, [0.9, 1.1])));
+check('a scene-limited read answers only for the buses it draws',
+  JSON.stringify(api.drawioBusAlerts(BUS_HEADER, BUS_ROWS, { bus3: true }, [0.9, 1.1])) === JSON.stringify({ bus3: true }));
+check('a header without ID or VoltMag yields nothing rather than a wrong guess',
+  JSON.stringify(api.drawioBusAlerts('ID,Name', BUS_ROWS, null, [0.9, 1.1])) === '{}'
+  && JSON.stringify(api.drawioBusAlerts('', BUS_ROWS, null, [0.9, 1.1])) === '{}'
+  && JSON.stringify(api.drawioBusAlerts(BUS_HEADER, null, null, [0.9, 1.1])) === '{}');
+check('ids are lowercased so they match the diagram cells',
+  JSON.stringify(api.drawioBusAlerts('ID,VoltMag', ['BUS2,0.87'], null, [0.9, 1.1])) === JSON.stringify({ bus2: true }));
+
+// The painting. The bar and its label go red; the label's paper box must stay white (it masks the
+// wires under the text), an in-band bus is untouched, and red passes the theme mapping through.
+if (scene) {
+  // Both cells of a flagged bus carry the colour -- the bar and its label -- because the tab's
+  // drawioFlagPaint keys the map by cell id (a label cell is `nm5`, not `bus5`).
+  const alertScene = api.DrawioDiagram({ scene: scene, paint: { bus5: 'red', nm5: 'red' } });
+  const byKey = {};
+  for (const g of groupsOf(alertScene)) byKey[g.props.key] = partsOf(g);
+  const shapeOf = (key) => (byKey[key] || []).filter((part) => part.props.key === 's')[0];
+  const iBar = scene.nodes.findIndex((n) => n.id === 'bus5');
+  const iLabel = scene.nodes.findIndex((n) => (n.lines || []).join('') === 'Bus-5' && n.id !== 'bus5');
+  const bar = shapeOf('n' + iBar);
+  const labelParts = byKey['n' + iLabel] || [];
+  const labelText = labelParts.filter((part) => part.type === 'text')[0];
+  const labelBox = labelParts.filter((part) => part.type === 'rect')[0];
+  check('a flagged bar is painted in the configured colour',
+    bar !== undefined && bar.props.fill === 'red' && bar.props.stroke === 'red',
+    bar === undefined ? 'no bar' : bar.props.fill + ' / ' + bar.props.stroke);
+  check('its Bus-N label text takes the colour too', labelText !== undefined && labelText.props.fill === 'red',
+    labelText === undefined ? 'no label' : String(labelText.props.fill));
+  // The label's mask must stay white while the glyphs take the flag: it is what keeps the wires out
+  // of the text. Two shapes carry it — a `rect` cell with `fillColor` (the regenerated format) and a
+  // `text` cell with `labelBackgroundColor` (the hand-laid files, since 0.6.33) — and the mask is
+  // always painted before the text.
+  const labelNode = scene.nodes[iLabel];
+  check('the label keeps its white mask, painted before the text, whatever the file uses',
+    labelText !== undefined && labelText.props.fill === 'red'
+    && labelBox !== undefined && labelBox.props.fill === 'var(--dsw-alias-bg-layer-1)'
+    && labelParts.indexOf(labelBox) < labelParts.indexOf(labelText),
+    labelNode === undefined ? 'no node' : labelNode.kind + ' / ' + (labelBox === undefined ? 'no box' : String(labelBox.props.fill)));
+  const boxed = api.parseDrawioScene('<mxfile><diagram><mxGraphModel><root>'
+    + '<mxCell id="bus7" value="" vertex="1" parent="1" style="rounded=0;fillColor=#666666;strokeColor=#333333;">'
+    + '<mxGeometry x="0" y="40" width="6" height="52" as="geometry"/></mxCell>'
+    + '<mxCell id="nm7" value="Bus-7" vertex="1" parent="1" style="rounded=0;fillColor=#FFFFFF;strokeColor=none;fontColor=#000000;fontSize=11;">'
+    + '<mxGeometry x="0" y="20" width="52" height="14" as="geometry"/></mxCell>'
+    + '</root></mxGraphModel></diagram></mxfile>');
+  const boxedSvg = api.DrawioDiagram({ scene: boxed, paint: { bus7: 'red', nm7: 'red' } });
+  const boxedByKey = {};
+  for (const g of groupsOf(boxedSvg)) boxedByKey[g.props.key] = partsOf(g);
+  const boxedBar = (boxedByKey['n0'] || []).filter((part) => part.type === 'rect')[0];
+  const boxedParts = boxedByKey['n1'] || [];
+  const boxedBox = boxedParts.filter((part) => part.type === 'rect')[0];
+  const boxedText = boxedParts.filter((part) => part.type === 'text')[0];
+  check('a generated-format label keeps its white box and colours only the text',
+    boxedBar !== undefined && boxedBar.props.fill === 'red'
+    // and `rounded=0` is a VALUE: this bar is square, not a pill (0.6.33)
+    && boxedBar.props.rx === 0
+    && boxedBox !== undefined && boxedBox.props.fill === 'var(--dsw-alias-bg-layer-1)'
+    && boxedText !== undefined && boxedText.props.fill === 'red',
+    (boxedBox === undefined ? 'no box' : String(boxedBox.props.fill)) + ' / ' + (boxedText === undefined ? 'no text' : String(boxedText.props.fill)));
+  const iQuiet = scene.nodes.findIndex((n) => n.id === 'bus1');
+  const quiet = shapeOf('n' + iQuiet);
+  check('an in-band bar keeps the theme tokens',
+    quiet !== undefined && quiet.props.fill === 'var(--dsw-alias-label-secondary)'
+    && quiet.props.stroke === 'var(--dsw-alias-label-secondary)',
+    quiet === undefined ? 'no bar' : String(quiet.props.fill));
+  check('the alert red survives the theme mapping in both themes',
+    api.drawioThemeColor('#CC0000') === '#CC0000' && api.drawioThemeColor('#7F0000') === '#7F0000');
+  check('with no alert the painting is byte-identical to before',
+    JSON.stringify(api.DrawioDiagram({ scene: scene })) === JSON.stringify(api.DrawioDiagram({ scene: scene, alert: null })));
+
+  // The constraint behind this whole design: the annotation is paint-time only. Nothing above may
+  // have written to the scene, and no file write exists anywhere in the client path.
+  const authored = JSON.stringify(scene);
+  api.DrawioDiagram({ scene: scene, paint: { bus5: 'red', nm5: 'red', bus1: 'red', nm1: 'red' } });
+  check('the parsed scene keeps its authored colours after an alerted render',
+    JSON.stringify(scene) === authored
+    && scene.nodes.filter((n) => n.id === 'bus5')[0].fill === '#666666',
+    scene.nodes.filter((n) => n.id === 'bus5')[0].fill);
+}
+check('the diagram path has no write RPC — the .drawio is only ever read',
+  (slice.match(/callRemote\('(?:writeText|writeFile|saveDrawio|writeDrawio|saveFile)'/g) || []).length === 0
+  && slice.indexOf("callRemote('readDrawio'") >= 0);
+check('the tab wires the flags into the renderer from the result tables',
+  slice.indexOf('paint: paintMap') >= 0 && slice.indexOf('drawioFlagPaint(') >= 0
+  && slice.indexOf('drawioBusAlerts(') >= 0 && slice.indexOf('_DF_bus.csv') >= 0
+  && slice.indexOf("'loading%'") >= 0 && slice.indexOf("'loadingpercent'") >= 0);
+
+// --- 15. size limits --------------------------------------------------------
+console.log('\n15. size limits (20000 cells, 4 MiB)');
+// Raising ONE limit would leave the others blocking the same file, so the three move together: the
+// preview's cell cap (client), the Host's read cap (both halves) and the generator's own self-check.
+// A 2000-bus case — Texas 2K, ~10.7k cells and ~3 MB — has to fit all three.
+const GENERATOR = join(ROOT, 'wspace', 'script', 'gen_oneline_diagram.py');
+const generatorSrc = readFileSync(GENERATOR, 'utf8');
+check('the preview cap is 20000 cells', api.DRAWIO_MAX_CELLS === 20000, String(api.DRAWIO_MAX_CELLS));
+check('both hosts read up to 4 MiB of diagram',
+  rd(LIB_HOST).indexOf('MAX_DRAWIO_BYTES = 4 * 1024 * 1024') >= 0
+  && rd(DYN_HOST).indexOf('MAX_DRAWIO_BYTES = 4 * 1024 * 1024') >= 0
+  && rd(LIB_HOST).indexOf('MAX_DRAWIO_BYTES = 2 * 1024 * 1024') < 0);
+check('the generator self-check allows 20000 cells',
+  generatorSrc.indexOf('len(cells) > 20000') >= 0 && generatorSrc.indexOf('more than 2000 cells') < 0);
+
+// The boundary, both sides. The cells are geometry-less on purpose: the cap is counted before any
+// geometry is resolved, so this stays a ~0.5 MB string instead of a 20k-shape model. At the cap the
+// parse gets PAST the size check and then fails for being empty — which is the proof it passed; one
+// cell over, the size check is what fires.
+const manyCells = (n) => '<mxfile><diagram><mxGraphModel><root>'
+  + Array.from({ length: n }, (_, i) => '<mxCell id="c' + i + '"/>').join('')
+  + '</root></mxGraphModel></diagram></mxfile>';
+const capError = (n) => {
+  try {
+    api.parseDrawioScene(manyCells(n));
+    return '';
+  } catch (e) {
+    return String(e && e.message ? e.message : e);
+  }
+};
+const atCap = capError(20000);
+check('a scene of exactly 20000 cells is not rejected for its size', atCap.indexOf('cells (limit') < 0, atCap);
+check('one cell over the cap is rejected and the message quotes the new limit',
+  capError(20001).indexOf('20001 cells (limit 20000)') >= 0, capError(20001));
+
+// --- 16. diagram search and filter ------------------------------------------
+console.log('\n16. diagram search and filter (0.6.23)');
+// Search resolves a query to cells; filter resolves criteria to cells to hide. Both are pure, and
+// both lean on one hard part: an edge through a transformer is TWO stubs (bus -> ring), so the bus
+// pair has to come from the group's sibling ring. Every edge must resolve, or those branches could
+// never be searched or filtered.
+const ringIndex = api.drawioRingIndex(scene.nodes);
+const resolvedPairs = scene.edges.map((e) => api.drawioEdgeBusPair(e, scene.edges, ringIndex));
+check('every edge resolves to a bus pair, transformer stubs included',
+  resolvedPairs.every((p) => p !== null),
+  resolvedPairs.filter((p) => p === null).length + ' of ' + scene.edges.length + ' unresolved');
+check('a transformer branch resolves to the SAME pair as its two stubs',
+  (function () {
+    const stubs = scene.edges.filter((e) => ringIndex.groupOf[e.source] !== undefined || ringIndex.groupOf[e.target] !== undefined);
+    if (stubs.length === 0) return true;
+    for (let i = 0; i < stubs.length; i += 2) {
+      const a = api.drawioEdgeBusPair(stubs[i], scene.edges, ringIndex);
+      const b = api.drawioEdgeBusPair(stubs[i + 1], scene.edges, ringIndex);
+      if (a === null || b === null) return false;
+      if (a.slice().sort().join('|') !== b.slice().sort().join('|')) return false;
+    }
+    return true;
+  })());
+
+const hit = (q, names) => api.drawioSearchHits(q, scene.nodes, scene.edges, names === undefined ? null : names);
+check('a bus number highlights that bus bar AND its label',
+  hit('5').nBus === 1 && hit('5').buses.bus5 === true && hit('5').buses.nm5 === true, JSON.stringify(hit('5').buses));
+check('a bus id highlights the same bus, and Bus-14 reaches the last one',
+  hit('Bus-5').buses.bus5 === true && hit('Bus-14').buses.bus14 === true && hit('14').buses.bus14 === true);
+check('a name from the bus table matches, case-insensitively',
+  hit('odessa', { bus5: 'ODESSA 2 0' }).buses.bus5 === true && hit('ODESSA', { bus5: 'ODESSA 2 0' }).nBus === 1);
+check('a pair highlights the two buses and the branches between them',
+  hit('1-2').buses.bus1 === true && hit('1-2').buses.bus2 === true && hit('1-2').nBranch >= 1,
+  hit('1-2').text);
+// 0.6.25: `->` is how a branch is written now. The dash, the slash and the unicode arrow still mean
+// the same thing, and all four must resolve to the same two buses.
+check('a branch written with an arrow is the documented form',
+  hit('1->2').nBranch >= 1 && hit('1->2').text.indexOf('branch') >= 0, hit('1->2').text);
+check('the arrow spellings are equivalent, and a branch says which one it found',
+  ['1->2', '1-2', '1/2', '1\u21922', '1 -> 2'].every((q) => hit(q).nBranch >= 1
+    && hit(q).buses.bus1 === true && hit(q).buses.bus2 === true),
+  ['1->2', '1-2', '1/2', '1\u21922'].map((q) => q + ':' + hit(q).nBranch).join(' '));
+check('a pair with no branch says so instead of highlighting nothing',
+  hit('1-99').nBus === 0 && hit('1-99').text.indexOf('99') >= 0
+  && hit('Bus-1 -> Bus-99').nBus === 0
+  && hit('Bus-1 -> Bus-99').text.indexOf('No branch between Bus-1 and Bus-99') >= 0,
+  hit('1-99').text + ' | ' + hit('Bus-1 -> Bus-99').text);
+// 0.6.35: a branch may name its ends the way the drawing does -- `Bus-1 -> Bus-2`. The `bus`
+// prefix, its hyphen and any spacing are optional on either end, so every one of these is the
+// same pair, and the reply names the buses as ids whichever spelling was typed.
+const idPairForms = ['Bus-1 -> Bus-2', 'Bus-1->Bus-2', 'bus-1 -> bus-2', 'Bus1->Bus2', 'bus 1 -> bus 2',
+  'Bus-1 - Bus-2', 'Bus-1/2', 'Bus-1\u21922', '1 -> Bus-2', 'Bus-1 -> 2'];
+check('a branch may be written with bus ids, in any case or spacing, on either end',
+  idPairForms.every((q) => hit(q).nBranch >= 1 && hit(q).buses.bus1 === true && hit(q).buses.bus2 === true),
+  idPairForms.map((q) => q + ':' + hit(q).nBranch).join(' '));
+check('an id pair strips the ids down to the same buses, and answers in the drawing\'s spelling',
+  hit('Bus-1 -> Bus-2').nBranch === hit('1->2').nBranch
+  && hit('Bus-1 -> Bus-2').text === hit('1->2').text
+  && hit('Bus-1 -> Bus-2').text.indexOf('between Bus-1 and Bus-2.') > 0,
+  hit('1->2').text + ' | ' + hit('Bus-1 -> Bus-2').text);
+check('an unknown query says nothing matches, and an empty one asks for input',
+  hit('9999').nBus === 0 && hit('9999').text.indexOf('Nothing matches') >= 0 && hit('').text.indexOf('Type a bus number') >= 0);
+check('a bus number that is also a name substring is still one hit per bus',
+  hit('1', { bus1: 'X', bus10: 'Y' }).nBus === 1, 'a bare number is a number, not a substring');
+
+// Filtering: keep what matches, hide the rest, and never leave a branch dangling into a hidden bus.
+const meta = api.drawioBusMeta('ID,Name,AreaNum,AreaName,ZoneNum,ZoneName',
+  ['Bus1,A,1,NORTH,9,FAR WEST TEX', 'Bus2,B,1,NORTH,8,TYLER', 'Bus3,C,2,SOUTH,7,AGGIE'], null);
+check('the bus table folds into area/zone lists and per-bus lookups',
+  JSON.stringify(meta.areas) === JSON.stringify([{ num: '1', name: 'NORTH' }, { num: '2', name: 'SOUTH' }])
+  && JSON.stringify(meta.zones.map((z) => z.num)) === JSON.stringify(['7', '8', '9'])
+  && meta.ofBus.bus1.area === '1' && meta.ofBus.bus1.zone === '9' && meta.ofBus.bus3.area === '2',
+  JSON.stringify(meta.areas) + ' / ' + JSON.stringify(meta.zones));
+check('merging pages keeps the lists and the per-bus lookups',
+  (function () {
+    const first = api.drawioBusMeta('ID,Name,AreaNum,ZoneNum', ['Bus1,A,1,9'], null);
+    const both = api.drawioBusMeta('ID,Name,AreaNum,ZoneNum', ['Bus2,B,2,7'], first);
+    return both.areas.length === 2 && both.ofBus.bus1 !== undefined && both.ofBus.bus2 !== undefined;
+  })());
+check('the band is spelled from the config, in one place',
+  api.drawioBandText(null) === '|V| outside 0.9\u20131.1 pu'
+  && api.drawioBandText(api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 })) === '|V| outside 0.95\u20131.05 pu'
+  && api.drawioBandText('nonsense') === '|V| outside 0.9\u20131.1 pu',
+  api.drawioBandText(null));
+check('the filter\'s own label and count quote the configured band',
+  (function () {
+    const cfg = api.drawioNetConfig({ Bus_flag_lower_limit: 0.95, Bus_flag_upper_limit: 1.05 });
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: true }, scene.nodes, scene.edges, meta, null, cfg);
+    return h.label === '|V| outside 0.95\u20131.05 pu' && h.text.indexOf('0.95\u20131.05 pu') > 0;
+  })());
+check('a filter with no criteria hides nothing',
+  Object.keys(api.drawioFilterHidden(null, scene.nodes, scene.edges, meta, null).ids).length === 0
+  && Object.keys(api.drawioFilterHidden({ area: '', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).ids).length === 0);
+check('filtering by area hides the buses outside it, with their labels',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null);
+    return h.ids.bus1 !== true && h.ids.nm1 !== true && h.nBuses > 0;
+  })());
+check('the band filter keeps exactly the buses the voltage alert flagged',
+  (function () {
+    const alerts = { bus1: true };
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: true }, scene.nodes, scene.edges, meta, alerts);
+    return h.ids.bus1 !== true && h.ids.nm1 !== true && h.ids.bus2 === true;
+  })());
+check('a branch with a hidden end is hidden, and a visible-visible branch is not',
+  (function () {
+    const alerts = { bus1: true, bus2: true };
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: true }, scene.nodes, scene.edges, meta, alerts);
+    const pairs = scene.edges.map((e) => api.drawioEdgeBusPair(e, scene.edges, ringIndex));
+    return pairs.every((p, i) => {
+      if (p === null) return true;
+      const bothKept = alerts[p[0]] === true && alerts[p[1]] === true;
+      return bothKept ? h.ids[scene.edges[i].id] !== true : h.ids[scene.edges[i].id] === true;
+    });
+  })());
+check('a hidden transformer stub hides its rings and their group too',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: true }, scene.nodes, scene.edges, meta, { bus1: true });
+    for (const e of scene.edges) {
+      if (h.ids[e.id] !== true) continue;
+      const ring = api.drawioIsBusCell(e.source) ? e.target : e.source;
+      const group = ringIndex.groupOf[ring];
+      if (group !== undefined && h.ids[group] !== true) return false;
+    }
+    return true;
+  })());
+// The search dialog's help is about the case in front of it (0.6.25): its own bus count and range,
+// a branch example from its own buses (ids since 0.6.35), and a name from its own table -- or a
+// plain statement that there is no table to get names from.
+const helpWithNames = api.drawioSearchHelp(scene, { ofBus: { bus1: { name: 'ODESSA 2 0' }, bus2: { name: 'PRESIDIO' } } });
+check('the search help names this case\'s bus count, range and branch example',
+  helpWithNames.hint.indexOf('14 buses here (Bus-1 to Bus-14)') === 0
+  && helpWithNames.hint.indexOf('1->2 or Bus-1 -> Bus-2 the branches between two') > 0
+  && helpWithNames.hint.indexOf('"ODESSA"') > 0
+  && helpWithNames.placeholder === '1, Bus-1, ODESSA, Bus-1 -> Bus-2',
+  helpWithNames.placeholder + ' | ' + helpWithNames.hint);
+const helpNoNames = api.drawioSearchHelp(scene, null);
+check('without a bus table the help says names cannot be searched',
+  helpNoNames.hint.indexOf('need this case\u2019s ACLF result table') > 0
+  && helpNoNames.placeholder.indexOf('Bus-1') > 0 && helpNoNames.placeholder.indexOf('Bus-1 -> Bus-2') > 0,
+  helpNoNames.placeholder + ' | ' + helpNoNames.hint);
+check('the search help survives having no scene at all',
+  api.drawioSearchHelp(null, null).hint.indexOf('1001->1002 or Bus-1001 -> Bus-1002') > 0
+  && api.drawioSearchHelp({ nodes: [] }, null).placeholder === '1001, Bus-1001, Bus-1001 -> Bus-1002',
+  JSON.stringify([api.drawioSearchHelp(null, null), api.drawioSearchHelp({ nodes: [] }, null)]));
+
+// The paint path itself: `hidden` must remove a cell from the tree entirely (not merely recolour
+// it) and `match` must be the search colour, for a bus bar, its label text and a branch.
+const radiusIndex = scene.nodes.findIndex((n) => n.id === 'bus5');
+const hiddenSvg = api.DrawioDiagram({ scene: scene, hidden: { bus5: true, nm5: true } });
+const hiddenKeys = groupsOf(hiddenSvg).map((g) => String(g.props.key));
+check('a hidden cell is not painted at all',
+  hiddenKeys.indexOf('n' + scene.nodes.findIndex((n) => n.id === 'nm5')) < 0
+  && hiddenKeys.indexOf('n' + radiusIndex) < 0
+  && groupsOf(hiddenSvg).length === groupsOf(api.DrawioDiagram({ scene: scene })).length - 2,
+  hiddenKeys.length + ' groups painted');
+const matchSvg = api.DrawioDiagram({ scene: scene, paint: { bus5: '#1F6FEB', nm5: '#1F6FEB' } });
+const matchByKey = {};
+for (const g of groupsOf(matchSvg)) matchByKey[g.props.key] = partsOf(g);
+const matchBar = (matchByKey['n' + radiusIndex] || []).filter((part) => part.type === 'rect')[0];
+const matchLabel = (matchByKey['n' + scene.nodes.findIndex((n) => n.id === 'nm5')] || []).filter((part) => part.type === 'text')[0];
+check('a matched bar and its label take the search colour',
+  matchBar !== undefined && matchBar.props.fill === '#1F6FEB' && matchBar.props.stroke === '#1F6FEB'
+  && matchLabel !== undefined && matchLabel.props.fill === '#1F6FEB',
+  (matchBar === undefined ? 'no bar' : matchBar.props.fill) + ' / ' + (matchLabel === undefined ? 'no label' : matchLabel.props.fill));
+check('a matched branch is thicker and in the search colour',
+  (function () {
+    const e = scene.edges[0];
+    const svg = api.DrawioDiagram({ scene: scene, paint: { [e.id]: '#1F6FEB' } });
+    const g = groupsOf(svg).filter((x) => String(x.props.key) === 'e0')[0];
+    const line = g === undefined ? undefined : partsOf(g).filter((part) => part.props.key === 'l')[0];
+    return line !== undefined && line.props.stroke === '#1F6FEB'
+      && line.props.strokeWidth > (scene.edges[0].strokeWidth || 1);
+  })());
+// 0.6.36: the highlight is green, not the accent blue it shipped with -- a bus or branch that was
+// *found* should not read as a link. `green` itself would be too dark on the dark canvas, so the
+// mid-luminance `#2EA043` it is, and it stays distinct from the config's own flag colours (the
+// base-case flag's default is plain `green`, which a search must outrank rather than match).
+check('the search highlight is the mid-luminance green, not a flag colour',
+  api.DRAWIO_MATCH_FILL === '#2EA043' && api.DRAWIO_MATCH_FILL !== 'green'
+  && api.DRAWIO_MATCH_FILL !== api.DRAWIO_BIRDSEYE_FRAME,
+  api.DRAWIO_MATCH_FILL + ' (frame ' + api.DRAWIO_BIRDSEYE_FRAME + ')');
+
+// 0.6.37: what a search selects is brought to the middle of the view. The window keeps its SIZE --
+// the zoom stays the one the user chose -- and is centred on the union of the hit boxes, so a pair
+// frames between its two bars and a name that found several buses frames all of them. The numbers
+// below are the fixture's own: Bus-5's bar+label box (120..190, 174..252) centres on 155,213, and
+// the 1->2 pair (48..298, 22..102) on 173,62 -- whose y cannot be honoured, because centring a
+// 200-tall window there would hang it 38 units above the paper, so the clamp pins it to the top.
+const centreProbe = { x: scene.viewBox.x + 100, y: scene.viewBox.y + 80, w: scene.viewBox.w / 4, h: scene.viewBox.h / 4 };
+const centred5 = api.drawioCentreRect(scene, centreProbe, hit('5'));
+const centredPair = api.drawioCentreRect(scene, centreProbe, hit('1->2'));
+check('a search centres the view on the bus it found, keeping the zoom',
+  centred5.w === centreProbe.w && centred5.h === centreProbe.h
+  && centred5.x + centred5.w / 2 === 155 && centred5.y + centred5.h / 2 === 213,
+  JSON.stringify(centred5));
+check('a branch pair frames between its two bars, with the window held on the paper',
+  centredPair.w === centreProbe.w && centredPair.x + centredPair.w / 2 === 173
+  && centredPair.y === scene.viewBox.y,
+  JSON.stringify(centredPair) + ' vs pair centre x 173');
+check('nothing found, no scene, and Fit all leave the view exactly where it was',
+  JSON.stringify(api.drawioCentreRect(scene, centreProbe, hit('9999'))) === JSON.stringify(centreProbe)
+  && api.drawioCentreRect(null, centreProbe, hit('5')) === centreProbe
+  && api.drawioHitBounds(scene, hit('9999')) === null && api.drawioHitBounds(null, hit('5')) === null
+  && JSON.stringify(api.drawioCentreRect(scene, api.drawioFitRect(scene.viewBox), hit('5')))
+    === JSON.stringify(api.drawioFitRect(scene.viewBox)),
+  JSON.stringify(api.drawioCentreRect(scene, api.drawioFitRect(scene.viewBox), hit('5'))));
+// And it is OK / Enter that moves the view, not an effect that would re-centre on every repaint --
+// in an effect, panning away from a hit would be undone by the next render.
+const applySearchBody = slice.slice(slice.indexOf('function applySearch()'), slice.indexOf('function applyFilter()'));
+check('the recentre rides on OK, only when the search found something, and never at Fit',
+  applySearchBody.indexOf('hits.nBus + hits.nBranch > 0') > 0
+  && applySearchBody.indexOf('setRect(drawioCentreRect(scene, rect, hits))') > 0
+  && applySearchBody.indexOf('drawioSearchHits(next, scene.nodes, scene.edges, busNames)') > 0
+  && applySearchBody.indexOf('next !== null && scene !== null && rect !== null') > 0
+  && applySearchBody.indexOf('setDialog(null)') > 0
+  && slice.indexOf('setRect(drawioCentreRect') === slice.lastIndexOf('setRect(drawioCentreRect'),
+  'the recentre appears once, in applySearch');
+
+check('the sentence names the area and zone, the toolbar label stays numeric',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '1', zone: '9', outOfBand: false }, scene.nodes, scene.edges, meta, null);
+    return h.text.indexOf('area 1 NORTH') >= 0 && h.text.indexOf('zone 9 FAR WEST TEX') >= 0
+      && h.label === 'area 1, zone 9' && h.kept === h.total - h.nBuses;
+  })());
+// 0.6.32: the two flow criteria. They choose BRANCHES, so they also narrow the buses to the ends of
+// what survives -- otherwise "only branches >= 70%" would still draw every bus.
+const flowScene = {
+  viewBox: { x: 0, y: 0, w: 400, h: 200 },
+  nodes: [
+    { id: 'bus1', kind: 'rect', x: 0, y: 0, w: 6, h: 40, lines: [] },
+    { id: 'bus2', kind: 'rect', x: 100, y: 0, w: 6, h: 40, lines: [] },
+    { id: 'bus3', kind: 'rect', x: 200, y: 0, w: 6, h: 40, lines: [] },
+    { id: 'bus4', kind: 'rect', x: 300, y: 0, w: 6, h: 40, lines: [] },
+  ],
+  edges: [
+    { id: 'e1', source: 'bus1', target: 'bus2', points: [{ x: 3, y: 20 }, { x: 103, y: 20 }], stroke: '#000', strokeWidth: 1, arrow: null },
+    { id: 'e2', source: 'bus2', target: 'bus3', points: [{ x: 103, y: 20 }, { x: 203, y: 20 }], stroke: '#000', strokeWidth: 1, arrow: null },
+    { id: 'e3', source: 'bus3', target: 'bus4', points: [{ x: 203, y: 20 }, { x: 303, y: 20 }], stroke: '#000', strokeWidth: 1, arrow: null },
+  ],
+};
+const flowCfg = api.drawioNetConfig({ Basecase_branch_flow_flag_percent: 70, Contingency_branch_flow_flag_percent: 100 });
+const flowLoads = { 'bus1|bus2': 91.5, 'bus2|bus3': 45, 'bus3|bus4': 120 };
+const flowCons = { 'bus3|bus4': 118 };
+const flowMeta = { ofBus: { bus1: { area: '1', zone: '9' }, bus2: { area: '9', zone: '9' },
+  bus3: { area: '9', zone: '9' }, bus4: { area: '1', zone: '9' } }, areas: [], zones: [] };
+const onlyBase = api.drawioFilterHidden({ area: '', zone: '', outOfBand: false, basecaseLoading: true },
+  flowScene.nodes, flowScene.edges, null, null, flowCfg, flowLoads, flowCons);
+check('a base-case loading filter keeps the branches at or above it, and their buses',
+  // e2 is the only branch below 70%, so it goes; every bus is an end of a branch that stays
+  onlyBase.ids.e1 !== true && onlyBase.ids.e2 === true && onlyBase.ids.e3 !== true
+  && JSON.stringify(Object.keys(onlyBase.ids)) === '["e2"]',
+  JSON.stringify(Object.keys(onlyBase.ids)));
+check('it reports in branches, because that is what it chose',
+  onlyBase.keptBranches === 2 && onlyBase.totalBranches === 3
+  && onlyBase.text === 'Showing 2 of 3 branches (base-case loading \u2265 70%).'
+  && onlyBase.label === 'base-case loading \u2265 70%',
+  onlyBase.text);
+check('the contingency criterion uses the contingency table and its own threshold',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: false, contingencyLoading: true },
+      flowScene.nodes, flowScene.edges, null, null, flowCfg, flowLoads, flowCons);
+    // the two buses with no branch that stays are hidden too, and the sentence says so
+    return h.ids.e3 !== true && h.ids.e1 === true && h.ids.e2 === true
+      && h.ids.bus1 === true && h.ids.bus2 === true && h.ids.bus3 !== true && h.ids.bus4 !== true
+      && h.text === 'Showing 2 of 4 buses and 1 of 3 branches (contingency loading \u2265 100%).';
+  })());
+check('both flow criteria together are an AND, and a bus criterion narrows them further',
+  (function () {
+    const both = api.drawioFilterHidden({ area: '', zone: '', outOfBand: false, basecaseLoading: true, contingencyLoading: true },
+      flowScene.nodes, flowScene.edges, null, null, flowCfg, flowLoads, flowCons);
+    const inArea = api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false, basecaseLoading: true },
+      flowScene.nodes, flowScene.edges, flowMeta, null, flowCfg, flowLoads, flowCons);
+    return both.keptBranches === 1 && both.ids.e3 !== true && both.ids.e1 === true
+      && inArea.keptBranches === 0 && inArea.ids.e1 === true;
+  })());
+check('a bus criterion on its own still reports buses, and keeps the network between them',
+  (function () {
+    // bus1 and bus2 are area 1: their branch stays, everything else in the area's network goes
+    const meta1 = { ofBus: { bus1: { area: '1' }, bus2: { area: '1' }, bus3: { area: '9' }, bus4: { area: '9' } }, areas: [], zones: [] };
+    const h = api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, flowScene.nodes, flowScene.edges,
+      meta1, null, flowCfg, flowLoads, flowCons);
+    return h.text === 'Showing 2 of 4 buses (area 1).' && h.ids.bus3 === true && h.ids.bus4 === true
+      && h.ids.e1 !== true && h.ids.e2 === true && h.ids.e3 === true;
+  })());
+check('with no loading data a flow criterion keeps nothing, and says so',
+  (function () {
+    const h = api.drawioFilterHidden({ area: '', zone: '', outOfBand: false, basecaseLoading: true },
+      flowScene.nodes, flowScene.edges, null, null, flowCfg, null, null);
+    return h.keptBranches === 0 && h.totalBranches === 3
+      && h.text.indexOf('Showing 0 of 4 buses and 0 of 3 branches') === 0;
+  })());
+
+check('the filter reports what it kept, in words',
+  api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).text.indexOf('Showing') === 0
+  && api.drawioFilterHidden({ area: '1', zone: '', outOfBand: false }, scene.nodes, scene.edges, meta, null).label === 'area 1');
+
+// --- 17. the one-line diagram config ---------------------------------------
+console.log('\n17. one-line diagram config (config/net_diagram.json)');
+// The shipped file and the code must agree: the client's defaults are what the diagram paints with
+// before the Host answers, and the Host writes from its own copy, so a drift here would show as
+// "the dialog saved it but the drawing looks different".
+const shippedCfg = JSON.parse(readFileSync(join(ROOT, 'config', 'net_diagram.json'), 'utf8'));
+const cfgKeys = api.DRAWIO_NET_FIELDS.map((f) => f.key);
+check('the shipped config carries exactly the editable keys',
+  cfgKeys.every((k) => Object.prototype.hasOwnProperty.call(shippedCfg, k))
+  && Object.keys(shippedCfg).length === cfgKeys.length,
+  Object.keys(shippedCfg).join(','));
+// The file is the user's to tune (`config/net_diagram.json` is a live, hand-editable setting), so
+// this asserts what must hold rather than equality: the code's fallback carries the same seven keys
+// as the file, and the file as written is already valid -- the sanitizer leaves it untouched.
+check('the fallback defaults carry the same keys as the file',
+  cfgKeys.length === 8 && JSON.stringify(Object.keys(api.DRAWIO_NET_DEFAULTS).sort()) === JSON.stringify(cfgKeys.slice().sort()),
+  Object.keys(api.DRAWIO_NET_DEFAULTS).join(','));
+check('the shipped config is valid as written: the sanitizer changes nothing',
+  JSON.stringify(api.drawioNetConfig(shippedCfg)) === JSON.stringify(shippedCfg)
+  && JSON.stringify(api.drawioNetConfig(api.DRAWIO_NET_DEFAULTS)) === JSON.stringify(api.DRAWIO_NET_DEFAULTS),
+  JSON.stringify(api.drawioNetConfig(shippedCfg)));
+check('both hosts carry the same defaults and the same seven keys',
+  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) => {
+    const src = readFileSync(join(ROOT, p), 'utf8');
+    return src.indexOf('const DEFAULT_NET_DIAGRAM_CONFIG = {') >= 0
+      && cfgKeys.every((k) => src.indexOf(k + ':') >= 0)
+      && src.indexOf("'getNetDiagramOptions'") >= 0 && src.indexOf("'saveNetDiagramOptions'") >= 0;
+  }));
+
+// The sanitizer: what the Host will keep, and what the client paints with before it answers.
+check('a missing or broken config becomes the shipped defaults',
+  JSON.stringify(api.drawioNetConfig(null)) === JSON.stringify(api.DRAWIO_NET_DEFAULTS)
+  && JSON.stringify(api.drawioNetConfig('nonsense')) === JSON.stringify(api.DRAWIO_NET_DEFAULTS)
+  && JSON.stringify(api.drawioNetConfig([1, 2])) === JSON.stringify(api.DRAWIO_NET_DEFAULTS));
+check('a partial config keeps its values and fills the rest',
+  (function () {
+    const c = api.drawioNetConfig({ Bus_flag_color: 'orange' });
+    return c.Bus_flag_color === 'orange' && c.Bus_flag_lower_limit === 0.9 && c.Basecase_branch_flow_flag_percent === 80;
+  })());
+check('an inverted bus band falls back rather than painting nonsense',
+  (function () {
+    const c = api.drawioNetConfig({ Bus_flag_lower_limit: 1.2, Bus_flag_upper_limit: 0.8 });
+    return c.Bus_flag_lower_limit === 0.9 && c.Bus_flag_upper_limit === 1.1;
+  })());
+check('the birdseye switch is on unless it was turned off, and the file\'s spelling counts',
+  api.drawioNetConfig(null).Show_birdseye_view === true
+  && api.drawioNetConfig({ Show_birdseye_view: false }).Show_birdseye_view === false
+  && api.drawioNetConfig({ Show_birdseye_view: 'false' }).Show_birdseye_view === false
+  && api.drawioNetConfig({ Show_birdseye_view: 0 }).Show_birdseye_view === false
+  && api.drawioNetConfig({ Show_birdseye_view: 'true' }).Show_birdseye_view === true
+  && api.drawioNetConfig({ Show_birdseye_view: 'yes' }).Show_birdseye_view === true);
+check('a switch is never a validation error, whatever the form holds',
+  api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Show_birdseye_view: false })).Show_birdseye_view === undefined);
+check('unknown keys survive a round trip, so hand edits are not destroyed',
+  api.drawioNetConfig({ something_else: 7 }).something_else === 7);
+check('the sanitizer bounds numbers and rejects unusable colours',
+  (function () {
+    const c = api.drawioNetConfig({ Basecase_branch_flow_flag_percent: 99999, Bus_flag_color: 'not a colour' });
+    return c.Basecase_branch_flow_flag_percent === 1000 && c.Bus_flag_color === 'red';
+  })());
+
+// The form's own validation: it must say WHY rather than clamp silently behind the user's back.
+check('a valid form has no errors', Object.keys(api.drawioNetConfigErrors(api.drawioNetConfig(null))).length === 0);
+check('the form reports a missing number, a bad range, a bad colour and an inverted band',
+  Object.keys(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Basecase_branch_flow_flag_percent: '' }))).length === 1
+  && Object.keys(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Contingency_branch_flow_flag_percent: '-5' }))).length === 1
+  && Object.keys(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Bus_flag_color: 'x y z' }))).length === 1
+  && api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Bus_flag_lower_limit: '1.5' })).Bus_flag_upper_limit !== undefined,
+  JSON.stringify(api.drawioNetConfigErrors(Object.assign(api.drawioNetConfig(null), { Bus_flag_color: 'x y z' }))));
+
+// The flow readers: columns by NAME (a reordered table must not flag the wrong branches) and the
+// max across parallel circuits. They keep EVERY row -- the thresholds are applied by the paint and
+// the status counts -- because the tooltip quotes what the tables hold (0.6.31). Reading the
+// contingency table at all depends on the Host listing it, so that is pinned here too.
+const BR_HEADER = 'ID,Name,Circuit,FromBusID,FromBusNumber,ToBusID,ToBusNumber,Loading%';
+const BR_ROWS = [
+  'Bus1->Bus2(1),L1,1,Bus1,1,Bus2,2,91.5',
+  'Bus1->Bus2(2),L1,2,Bus1,1,Bus2,2,72.0',
+  'Bus2->Bus3(1),L2,1,Bus2,2,Bus3,3,45.0',
+  'Bus3->Bus4(1),L3,1,Bus3,3,Bus4,4,120.0',
+];
+const baseFlags = api.drawioBranchLoads(BR_HEADER, BR_ROWS);
+check('the load map keeps every pair, with the highest circuit loading',
+  baseFlags['bus1|bus2'] === 91.5 && baseFlags['bus3|bus4'] === 120 && baseFlags['bus2|bus3'] === 45,
+  JSON.stringify(baseFlags));
+check('the flow columns are read by header name, not by position',
+  (function () {
+    const shuffled = api.drawioBranchLoads('Loading%,Status,FromBusID,ToBusID', ['95.0,true,Bus8,Bus9', '10.0,true,Bus1,Bus2']);
+    return shuffled['bus8|bus9'] === 95 && shuffled['bus1|bus2'] === 10;
+  })());
+// 0.6.31: both Hosts must list the contingency result in `checkResult`, because that list is the only
+// way the tab discovers it -- a missing entry means the contingency family can never appear.
+check('both hosts list the contingency result in checkResult',
+  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) =>
+    readFileSync(join(ROOT, p), 'utf8').indexOf("stem + '_DF_contingency.csv'") >= 0),
+  'checkResult files');
+check('a threshold the config raises stops PAINTING what it used to',
+  (function () {
+    const edges = (cfg) => Object.keys(api.drawioFlagPaint(scene.nodes, scene.edges, cfg, null, baseFlags, null))
+      .filter((id) => id.charAt(0) === 'e').length;
+    const wide = edges(api.drawioNetConfig({ Basecase_branch_flow_flag_percent: 40 }));
+    const narrow = edges(api.drawioNetConfig({ Basecase_branch_flow_flag_percent: 100 }));
+    return wide > narrow && narrow >= 0 && baseFlags['bus2|bus3'] === 45;
+  })());
+const CON_HEADER = 'BranchID,BranchName,IsXfmr,ContingencyName,LoadingPercent';
+const CON_ROWS = ['Bus1->Bus2(1),L1,false,C1,118.0', 'Bus2->Bus3(1),L2,false,C1,60.0', 'Bus7->Bus8(1),L3,true,C2,150.5'];
+const conFlags = api.drawioContingencyLoads(CON_HEADER, CON_ROWS);
+check('contingency loadings come from the CA table, keyed by the BranchID pair',
+  conFlags['bus1|bus2'] === 118 && conFlags['bus7|bus8'] === 150.5 && conFlags['bus2|bus3'] === 60,
+  JSON.stringify(conFlags));
+// The bug this release exists for: with a 100% contingency FLAG and a 70% value in the table, the
+// tooltip must still have the value while the paint leaves the branch alone.
+check('a contingency below the flag threshold is available to the tooltip but not painted',
+  (function () {
+    const th = api.drawioNetConfig({ Contingency_branch_flow_flag_percent: 100, Basecase_branch_flow_flag_percent: 1000 });
+    const painted = Object.keys(api.drawioFlagPaint(scene.nodes, scene.edges, th, null, null, { 'bus1|bus2': 70 }))
+      .filter((id) => id.charAt(0) === 'e');
+    const painted100 = Object.keys(api.drawioFlagPaint(scene.nodes, scene.edges,
+      api.drawioNetConfig({ Contingency_branch_flow_flag_percent: 100 }), null, null, { 'bus1|bus2': 118 }))
+      .filter((id) => id.charAt(0) === 'e');
+    return conFlags['bus2|bus3'] < 100 && painted.length === 0 && painted100.length > 0;
+  })());
+
+// The paint map: buses cover their bar and label, branches resolve through a transformer group, and
+// a contingency flag outranks a base-case one on the same branch.
+const cfgPaint = api.drawioNetConfig(null);
+const flagPaint = api.drawioFlagPaint(scene.nodes, scene.edges, cfgPaint, { bus5: true },
+  { 'bus1|bus2': 91.5 }, { 'bus1|bus2': 118 });
+check('a flagged bus paints its bar and its label; a flagged branch paints its edges',
+  flagPaint.bus5 === 'red' && flagPaint.nm5 === 'red'
+  && Object.keys(flagPaint).some((id) => id.charAt(0) === 'e' && flagPaint[id] === 'blue'),
+  JSON.stringify(Object.keys(flagPaint).slice(0, 6)));
+check('a contingency flag outranks the base-case flag on the same branch',
+  Object.keys(flagPaint).filter((id) => id.charAt(0) === 'e').every((id) => flagPaint[id] === 'blue')
+  && !Object.keys(flagPaint).some((id) => flagPaint[id] === 'green'));
+check('with no flags data the map is empty, and the renderer paints as it always did',
+  Object.keys(api.drawioFlagPaint(scene.nodes, scene.edges, cfgPaint, null, null, null)).length === 0);
+check('the search colour goes over the flags, because a search is the deliberate act',
+  (function () {
+    const merged = api.drawioMergedPaint({ bus5: 'red', nm5: 'red' }, { buses: { bus5: true }, edges: { e1: true } }, '#1F6FEB');
+    return merged.bus5 === '#1F6FEB' && merged.nm5 === 'red' && merged.e1 === '#1F6FEB'
+      && api.drawioMergedPaint(null, null, '#1F6FEB') === null;
+  })());
+
+// --- 18. the birdseye view --------------------------------------------------
+console.log('\n18. birdseye view (0.6.28)');
+const birdPaths = api.drawioBirdseyePaths(scene);
+const subpaths = (d) => (String(d).match(/M/g) || []).length;
+check('the birdseye carries one subpath per bar and per branch, as two paths',
+  subpaths(birdPaths.bars) === scene.nodes.filter((n) => api.drawioIsBusId(n.id) && n.kind === 'rect').length
+  && subpaths(birdPaths.edges) === scene.edges.length,
+  subpaths(birdPaths.bars) + ' bars / ' + subpaths(birdPaths.edges) + ' edges');
+check('every bar subpath is a closed rectangle at the bar itself',
+  birdPaths.bars.indexOf('M') === 0 && (birdPaths.bars.match(/z/g) || []).length === subpaths(birdPaths.bars));
+check('the branch paths follow their polylines, so a hop shows in the thumbnail too',
+  (function () {
+    const withHop = scene.edges.filter((e) => e.points.length > 2)[0];
+    if (withHop === undefined) return true;
+    return birdPaths.edges.split('M').some((seg) => (seg.match(/L/g) || []).length === withHop.points.length - 1);
+  })());
+check('an empty or missing scene gives empty paths rather than a throw',
+  api.drawioBirdseyePaths(null).bars === '' && api.drawioBirdseyePaths(null).edges === ''
+  && api.drawioBirdseyePaths({ nodes: [], edges: [] }).bars === '');
+
+// Where a click lands: the same-size window, centred, and held inside the drawing.
+const fit = api.drawioFitRect(scene.viewBox);
+const half = { x: fit.x, y: fit.y, w: fit.w / 2, h: fit.h / 2 };
+check('a click at the middle centres the window on the middle of the drawing',
+  (function () {
+    const r = api.drawioBirdseyeRect(scene, half, 0.5, 0.5);
+    const cx = r.x + r.w / 2;
+    const cy = r.y + r.h / 2;
+    return Math.abs(cx - (fit.x + fit.w / 2)) < 0.001 && Math.abs(cy - (fit.y + fit.h / 2)) < 0.001
+      && r.w === half.w && r.h === half.h;
+  })());
+check('a click in a corner is held inside the drawing instead of showing empty paper',
+  (function () {
+    const tl = api.drawioBirdseyeRect(scene, half, 0, 0);
+    const br = api.drawioBirdseyeRect(scene, half, 1, 1);
+    return tl.x === fit.x && tl.y === fit.y
+      && br.x + br.w <= fit.x + fit.w + 0.001 && br.y + br.h <= fit.y + fit.h + 0.001;
+  })());
+check('a window as large as the drawing cannot be moved, and fraction drift is clamped',
+  (function () {
+    const whole = api.drawioBirdseyeRect(scene, fit, 0.9, 0.9);
+    const wild = api.drawioBirdseyeRect(scene, half, 5, -5);
+    // fx clamps to 1 (the right edge), fy to 0 (the top)
+    return whole.x === fit.x && whole.y === fit.y && whole.w === fit.w
+      && wild.x === fit.x + fit.w - half.w && wild.y === fit.y;
+  })());
+check('a missing scene or rect passes through unchanged',
+  api.drawioBirdseyeRect(null, half, 0.5, 0.5) === half && api.drawioBirdseyeRect(scene, null, 0.5, 0.5) === null);
+
+// --- 19. preview fidelity: the style keys the workspace's diagrams use ---------
+console.log('\n19. preview fidelity (what draw.io shows, the preview shows)');
+// 0.6.33. Three keys were misread: `rounded` (a value, not a presence), `align`/`verticalAlign`
+// (a label's place in its box, with `spacing`), and `labelBackgroundColor` (the mask behind a
+// `text` cell's glyphs). One fixture exercises them next to the keys that were already honoured, so
+// a future regression shows up as a failing cell rather than as a screenshot nobody compared.
+const fid = api.parseDrawioScene('<mxfile><diagram><mxGraphModel><root>'
+  + '<mxCell id="r0" value="" vertex="1" parent="1" style="rounded=0;fillColor=#666666;strokeColor=#333333;">'
+  + '<mxGeometry x="0" y="0" width="6" height="52" as="geometry"/></mxCell>'
+  + '<mxCell id="r1" value="" vertex="1" parent="1" style="rounded=1;arcSize=30;fillColor=#666666;strokeColor=none;">'
+  + '<mxGeometry x="100" y="0" width="40" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="r2" value="" vertex="1" parent="1" style="rounded;fillColor=#666666;strokeColor=none;">'
+  + '<mxGeometry x="200" y="0" width="40" height="20" as="geometry"/></mxCell>'
+  + '<mxCell id="tL" value="Left" vertex="1" parent="1" style="text;html=1;align=left;verticalAlign=middle;fontSize=11;spacing=5;fontColor=#000000;">'
+  + '<mxGeometry x="300" y="0" width="100" height="20" as="geometry"/></mxCell>'
+  + '<mxCell id="tC" value="Top" vertex="1" parent="1" style="text;html=1;align=center;verticalAlign=top;fontSize=20;fontColor=#000000;">'
+  + '<mxGeometry x="0" y="100" width="120" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="tR" value="Bottom" vertex="1" parent="1" style="text;html=1;align=right;verticalAlign=bottom;fontSize=10;fontColor=#000000;">'
+  + '<mxGeometry x="200" y="100" width="120" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="tB" value="Masked" vertex="1" parent="1" style="text;html=1;labelBackgroundColor=#FFFFFF;align=center;verticalAlign=middle;fontSize=11;fontColor=#000000;">'
+  + '<mxGeometry x="0" y="200" width="80" height="18" as="geometry"/></mxCell>'
+  + '<mxCell id="tN" value="Bare" vertex="1" parent="1" style="text;html=1;align=center;verticalAlign=middle;fontSize=11;fontColor=#000000;">'
+  + '<mxGeometry x="200" y="200" width="80" height="18" as="geometry"/></mxCell>'
+  // a numeric newline: valid XML, decoded by a real parser, and `labelLines` maps `&#10;` itself
+  + '<mxCell id="tM" value="A&#10;B" vertex="1" parent="1" style="text;html=1;align=left;verticalAlign=top;fontSize=12;spacing=6;">'
+  + '<mxGeometry x="400" y="200" width="90" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="el0" value="" vertex="1" parent="1" style="ellipse;fillColor=none;strokeColor=#CCCCCC;strokeWidth=1.5;">'
+  + '<mxGeometry x="500" y="0" width="16" height="16" as="geometry"/></mxCell>'
+  + '<mxCell id="g0" value="" vertex="1" parent="1" style="group;">'
+  + '<mxGeometry x="600" y="0" width="40" height="40" as="geometry"/></mxCell>'
+  + '<mxCell id="g0a" value="" vertex="1" parent="g0" style="ellipse;fillColor=none;strokeColor=#333333;">'
+  + '<mxGeometry x="0" y="0" width="16" height="16" as="geometry"/></mxCell>'
+  + '<mxCell id="e0" value="" edge="1" parent="1" source="r0" target="r1" style="endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=1.5;exitX=0.5;exitY=0.5;entryX=0;entryY=0.5;">'
+  + '<mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="60" y="26"/><mxPoint x="80" y="26"/></Array></mxGeometry></mxCell>'
+  + '<mxCell id="e1" value="" edge="1" parent="1" source="r1" target="el0" style="html=1;strokeColor=#FF0000;dashed=1;endArrow=classic;">'
+  + '<mxGeometry relative="1" as="geometry"/></mxCell>'
+  + '</root></mxGraphModel></diagram></mxfile>');
+const fidNode = (id) => fid.nodes.filter((n) => n.id === id)[0];
+const fidEdge = (id) => fid.edges.filter((e) => e.id === id)[0];
+check('rounded is read as a value: 0 is square, 1 rounds, a bare key rounds',
+  fidNode('r0').rounded === false && fidNode('r1').rounded === true && fidNode('r2').rounded === true
+  && fidNode('el0').rounded === false,
+  [fidNode('r0').rounded, fidNode('r1').rounded, fidNode('r2').rounded].join(','));
+check('arcSize is read, defaulting to draw.io\'s 15 per cent',
+  fidNode('r1').arcSize === 0.3 && fidNode('r0').arcSize === 0.15,
+  fidNode('r1').arcSize + ' / ' + fidNode('r0').arcSize);
+check('the label layout keys are read, with draw.io\'s defaults when absent',
+  fidNode('tL').align === 'left' && fidNode('tL').spacing === 5
+  && fidNode('tC').vAlign === 'top' && fidNode('tC').spacing === 2
+  && fidNode('tR').align === 'right' && fidNode('tR').vAlign === 'bottom'
+  && fidNode('tN').align === 'center' && fidNode('tN').vAlign === 'middle');
+check('labelBackgroundColor is read, and its absence is null',
+  fidNode('tB').labelBg === '#FFFFFF' && fidNode('tN').labelBg === null && fidNode('tC').labelBg === null);
+check('the group cell is still not a shape, but its children are',
+  fidNode('g0') === undefined && fidNode('g0a') !== undefined && fidNode('g0a').x === 600 && fidNode('g0a').y === 0);
+check('the already-honoured keys are unchanged in the same fixture',
+  fidNode('el0').kind === 'ellipse' && fidNode('el0').fill === 'none'
+  && fidEdge('e0').points.length === 4 && fidEdge('e0').arrow === null
+  && fidEdge('e1').dashed === true && fidEdge('e1').arrow !== null
+  && fidEdge('e1').stroke === '#FF0000');
+
+const fidSvg = api.DrawioDiagram({ scene: fid });
+const fidByKey = {};
+const fidOrder = {};
+for (const g of groupsOf(fidSvg)) {
+  fidByKey[g.props.key] = partsOf(g);
+  fidOrder[g.props.key] = groupsOf(fidSvg).map((x) => x.props.key).indexOf(g.props.key);
+}
+const fidIndexOf = (id) => fid.nodes.map((n) => n.id).indexOf(id);
+const fidParts = (id) => fidByKey['n' + fidIndexOf(id)] || [];
+const fidRect = (id) => fidParts(id).filter((part) => part.type === 'rect')[0];
+const fidText = (id) => fidParts(id).filter((part) => part.type === 'text')[0];
+// a <text>'s children are its tspans, wrapped once (see partsOf)
+const fidSpans = (id) => (Array.isArray(fidText(id).kids[0]) ? fidText(id).kids[0] : fidText(id).kids);
+check('a rounded=0 bar renders square and a rounded=1 bar rounds by arcSize',
+  fidRect('r0').props.rx === 0 && fidRect('r1').props.rx === 12 && fidRect('r2').props.rx === 3,
+  [fidRect('r0').props.rx, fidRect('r1').props.rx, fidRect('r2').props.rx].join(','));
+check('align picks the anchor and the edge, inset by spacing',
+  fidText('tL').props.textAnchor === 'start' && fidText('tL').props.x === 305
+  && fidText('tR').props.textAnchor === 'end' && fidText('tR').props.x === 318
+  && fidText('tC').props.textAnchor === 'middle' && fidText('tC').props.x === 60,
+  [fidText('tL').props.x, fidText('tC').props.x, fidText('tR').props.x].join(','));
+check('verticalAlign anchors the first baseline to the box, keeping the 1.2em line step',
+  fidText('tC').props.y === 100 + 2 + 20 * 0.8
+  && fidSpans('tC')[0].props.dy === '0'
+  && fidText('tR').props.y === 100 + 40 - 2 - 10 * 0.2
+  && fidText('tL').props.y === 10
+  && fidText('tB').props.y === 209,
+  [fidText('tC').props.y, fidText('tL').props.y, fidText('tR').props.y].join(','));
+check('a two-line top-aligned label starts at the box top and steps 1.2em',
+  fidSpans('tM').length === 2 && fidSpans('tM')[0].props.dy === '0'
+  && fidSpans('tM')[1].props.dy === '1.2em'
+  && fidText('tM').props.y === 200 + 6 + 12 * 0.8,
+  String(fidText('tM').props.y));
+check('labelBackgroundColor paints the mask, and only where the file asks for it',
+  (function () {
+    const mask = fidParts('tB').filter((part) => part.props.key === 'bg')[0];
+    const bare = fidParts('tN').filter((part) => part.props.key === 'bg');
+    return mask !== undefined && mask.props.fill === 'var(--dsw-alias-bg-layer-1)'
+      && mask.props.width === 80 && mask.props.height === 18
+      && fidParts('tB').indexOf(mask) < fidParts('tB').indexOf(fidText('tB'))
+      && bare.length === 0;
+  })());
+
+// Reference files: the tracked diagrams carry the shapes the workspace really uses -- `text` labels
+// masked by labelBackgroundColor, square bars, and a left-aligned header -- so they are asserted
+// directly rather than only through a fixture.
+const refScene = (rel) => api.parseDrawioScene(readFileSync(join(ROOT, rel), 'utf8'));
+const ref14 = refScene('wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio');
+const ref14Labels = ref14.nodes.filter((n) => /^nm\d+$/.test(n.id));
+const ref14Bars = ref14.nodes.filter((n) => api.drawioIsBusId(n.id));
+check('the reference diagram\'s labels are masked text cells, and its bars are square',
+  ref14Labels.length === 14 && ref14Bars.length === 14
+  && ref14Labels.every((n) => n.kind === 'text' && n.labelBg === '#FFFFFF' && n.align === 'center' && n.vAlign === 'middle')
+  && ref14Bars.every((n) => n.rounded === false && n.arcSize === 0.15),
+  ref14Labels.length + ' labels / ' + ref14Bars.length + ' bars');
+const ref14Legend = ref14.nodes.filter((n) => n.id === 'legend')[0];
+const ref14Svg = api.DrawioDiagram({ scene: ref14 });
+const ref14LegendText = (function () {
+  const idx = ref14.nodes.map((n) => n.id).indexOf('legend');
+  for (const g of groupsOf(ref14Svg)) {
+    if (g.props.key !== 'n' + idx) continue;
+    return partsOf(g).filter((part) => part.type === 'text')[0];
+  }
+  return undefined;
+})();
+check('the reference diagram\'s legend text is anchored to its top-left, as draw.io draws it',
+  ref14Legend !== undefined && ref14Legend.align === 'left' && ref14Legend.vAlign === 'top'
+  && ref14LegendText !== undefined && ref14LegendText.props.textAnchor === 'start'
+  && ref14LegendText.props.x === ref14Legend.x + ref14Legend.spacing,
+  ref14Legend === undefined ? 'no legend' : ref14LegendText.props.x + ' of ' + ref14Legend.w);
+const ref39Title = refScene('wspace/data/ieee/ieee39/diagram/ieee39-oneline.drawio')
+  .nodes.filter((n) => n.id === 'title')[0];
+check('the other reference diagram\'s title is left-aligned with a wide box, so centring would show',
+  ref39Title !== undefined && ref39Title.align === 'left' && ref39Title.vAlign === 'middle'
+  && ref39Title.w > 400,
+  ref39Title === undefined ? 'no title' : ref39Title.w + ' wide');
+
+// --- 20. the case file types the picker offers (0.7.1) ---------------------
+console.log('\n20. the case file types the picker offers (BPA Dat, 0.7.1)');
+// The Simu Case row offers IEEE CDF / PSS/E RAW / BPA Dat. One table drives the select, the
+// picker's badge and empty text and the path placeholder, and the values must be the ones the
+// Host's CASE_PATH_RE and the bridge's NetworkLoader dispatch on: a label-only change would
+// list the BPA files and then refuse to load them.
+check('the picker offers exactly three case types, in dropdown order',
+  api.CASE_FORMATS.length === 3
+  && api.CASE_FORMATS.map((f) => f.format).join(',') === 'ieee,psse,bpa'
+  && api.CASE_FORMATS[2].label === 'BPA Dat' && api.CASE_FORMATS[2].badge === 'BPA',
+  api.CASE_FORMATS.map((f) => f.label).join(' / '));
+check('every type names its own extension and a workspace example of that type',
+  api.CASE_FORMATS.every((f) => typeof f.ext === 'string' && f.ext.charAt(0) === '.'
+    && typeof f.example === 'string' && f.example.indexOf('data/') === 0
+    && f.example.slice(-f.ext.length).toLowerCase() === f.ext),
+  api.CASE_FORMATS.map((f) => f.ext + ' -> ' + f.example).join('; '));
+check('a .dat path is a BPA case, .raw is PSS/E and anything else is IEEE CDF',
+  api.caseFormatOfPath('data/bpa/ieee9/IEEE9.dat') === 'bpa'
+  && api.caseFormatOfPath('data/bpa/IEEE90/IEEE90.DAT') === 'bpa'
+  && api.caseFormatOfPath('data/psse/Texas2K/x.RAW') === 'psse'
+  && api.caseFormatOfPath('data/ieee/Ieee14Bus/ieee14.ieee') === 'ieee'
+  && api.caseFormatOfPath('') === 'ieee' && api.caseFormatOfPath(null) === 'ieee');
+check('an unknown format reads as the IEEE row rather than blank',
+  api.caseFormatEntry('bpa').label === 'BPA Dat'
+  && api.caseFormatEntry('nope').format === 'ieee');
+check('the empty picker names the selected type and its extension',
+  api.casePickerEmptyText('bpa') === 'No BPA Dat (.dat) files found under wspace/data.'
+  && api.casePickerEmptyText('ieee') === 'No IEEE CDF (.ieee) files found under wspace/data.'
+  && api.casePickerEmptyText('psse') === 'No PSS/E RAW (.raw) files found under wspace/data.');
+// The result files carry the stem, and the Java side strips any extension (ProjectPaths.stem),
+// so `.dat` must go or the tab would look for `IEEE9.dat_network_info.txt` and report "no prior
+// results" on a case whose run wrote `IEEE9_network_info.txt`.
+check('a case stem drops the extension whichever type it is',
+  api.caseStem('IEEE9.dat') === 'IEEE9' && api.caseStem('IEEE90.DAT') === 'IEEE90'
+  && api.caseStem('ieee14.ieee') === 'ieee14' && api.caseStem('x.RAW') === 'x'
+  && api.caseStem('noextension') === 'noextension');
+check('a BPA case loaded by a tool lands on the BPA Dat row of the picker',
+  (function () {
+    const s = api.bridgeCaseSelection('data/bpa/IEEE30/ieee30.dat');
+    const p = api.bridgeCaseSelection('data/ieee/Ieee14Bus/ieee14.ieee');
+    return s.mode === 'custom' && s.customFormat === 'bpa' && s.customInput === 'data/bpa/IEEE30/ieee30.dat'
+      && p.mode === '1' && p.customFormat === 'ieee';
+  })());
+// The select itself is rendered from the table, so a type cannot be added to the Host and
+// forgotten in the UI (or the other way round). Overrides are addressed by InterPssView's own
+// useState order, the way §12 renders the Diagram tab, and a throw is a failed check rather
+// than a crashed suite because a throw in this view blanks the tab.
+const ipssNames = [...slice.slice(slice.indexOf('function InterPssView('))
+  .matchAll(/const \[([A-Za-z0-9_]+), set[A-Za-z0-9_]+\] = React\.useState/g)].map((m) => m[1]);
+const ipssIdx = (n) => ipssNames.indexOf(n);
+check('the tab state list parsed by name, so an override cannot retarget',
+  ipssNames.length >= 15 && ipssNames.every((n, i) => ipssNames.indexOf(n) === i)
+  && ipssIdx('activated') === 0 && ipssIdx('mode') > 0 && ipssIdx('customFormat') > 0,
+  ipssNames.length + ' states');
+const renderIpss = (over) => {
+  try { return build(over).InterPssView(props); } catch (e) { return { type: 'threw', message: e.constructor.name + ': ' + e.message }; }
+};
+const bpaTab = renderIpss({ 0: true, [ipssIdx('mode')]: 'custom', [ipssIdx('customFormat')]: 'bpa' });
+const ieeeTab = renderIpss({ 0: true, [ipssIdx('mode')]: 'custom', [ipssIdx('customFormat')]: 'ieee' });
+check('the custom row renders for both a BPA and an IEEE selection',
+  bpaTab.type !== 'threw' && ieeeTab.type !== 'threw',
+  bpaTab.type === 'threw' ? bpaTab.message : (ieeeTab.type === 'threw' ? ieeeTab.message : 'ok'));
+// createElement(...kids) wraps an array of children in one more array, so flatten one level
+// before looking for the options; the Simu Case select carries options too, so the format
+// select is the one holding a `bpa` option.
+const flatKids = (n) => (n.kids || []).reduce((a, k) => a.concat(Array.isArray(k) ? k : [k]), []);
+const fmtSelect = findInTree(bpaTab, (n) => n.type === 'select'
+  && flatKids(n).some((k) => k && k.type === 'option' && k.props.value === 'bpa'));
+const fmtOptions = (fmtSelect === null ? [] : flatKids(fmtSelect)).filter((k) => k && k.type === 'option');
+check('the format select renders the table: IEEE CDF / PSS/E RAW / BPA Dat',
+  fmtOptions.length === 3
+  && fmtOptions.map((o) => o.props.value).join(',') === 'ieee,psse,bpa'
+  && fmtOptions.map((o) => (o.kids || []).join('')).join('|') === 'IEEE CDF|PSS/E RAW|BPA Dat',
+  fmtOptions.map((o) => o.props.value).join(','));
+const bpaPlaceholder = findInTree(bpaTab, (n) => n.type === 'input' && typeof n.props.placeholder === 'string');
+const ieeePlaceholder = findInTree(ieeeTab, (n) => n.type === 'input' && typeof n.props.placeholder === 'string');
+check('the path placeholder follows the selected type',
+  bpaPlaceholder !== null && bpaPlaceholder.props.placeholder === 'data/bpa/ieee9/IEEE9.dat'
+  && ieeePlaceholder !== null && ieeePlaceholder.props.placeholder === 'data/ieee/Ieee118Bus/ieee118.ieee',
+  bpaPlaceholder === null ? 'no input' : bpaPlaceholder.props.placeholder);
+// Both halves of every artifact must know the third type. The Host gate is what lets a `.dat`
+// reach the bridge at all — a Client-only change would list the file, pick it, and then answer
+// "Invalid case path" — and the sync script keeps the two client copies identical.
+check('every host half accepts a .dat path and maps it to the bpa format',
+  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js', 'interpss-dynamic/index.js'].every((p) => {
+    const src = readFileSync(join(ROOT, p), 'utf8');
+    return src.indexOf('/^data\\/[A-Za-z0-9_.\\/-]+\\.(ieee|raw|dat)$/i') >= 0
+      && src.indexOf("if (/\\.dat$/i.test(casePath)) return 'bpa'") >= 0
+      && src.indexOf("else if (/\\.dat$/i.test(entry.name)) out.push({ path: rel, format: 'bpa' })") >= 0
+      && src.indexOf('function normalizeCaseFormat(') >= 0;
+  }));
+check('both client copies carry the BPA Dat row and the path->format rule',
+  [DYN_BODYP, LIB_CLIENT].every((p) => {
+    const src = rd(p);
+    return src.indexOf("{ format: 'bpa', label: 'BPA Dat', badge: 'BPA', ext: '.dat'") >= 0
+      && src.indexOf('function caseFormatOfPath(') >= 0
+      && src.indexOf("CASE_FORMATS.map((f) => React.createElement('option'") >= 0;
+  }));
+
+// --- 21. the CA dialog's solver knobs (0.7.2) ------------------------------
+console.log('\n21. the CA solver knobs (ContingencyRunner\'s DclfContingencyConfig, 0.7.2)');
+// The runner builds ipss.core.lib's `DclfContingencyConfig` from the run config, and the plugin
+// has to name the same keys with the same defaults in three places: the Java `CaRunConfig`, the
+// Host's DEFAULT_CA_CONFIG and the client's field table. A key renamed on one side and not the
+// others is a knob the dialog writes and the solver never sees.
+// 0.7.3: the record moved from `org.interpss.agent.util` to `org.interpss.agent.runner.config`, so
+// it is found by name rather than by a hard-coded path — a package move is then reported by the
+// first check below, instead of crashing this file with ENOENT before it can say why.
+const JAVA_SRC = join(ROOT, 'src', 'main', 'java');
+const findJava = (name) => {
+  const found = [];
+  const walk = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name === name) found.push(full);
+    }
+  };
+  walk(JAVA_SRC);
+  return found;
+};
+const CA_JAVA_FOUND = findJava('CaRunConfig.java');
+const caJavaPath = CA_JAVA_FOUND.length === 1 ? CA_JAVA_FOUND[0] : null;
+const caJava = caJavaPath === null ? '' : rd(caJavaPath);
+check('the Java run config is the runner-config record the plugin mirrors',
+  caJavaPath === join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'config', 'CaRunConfig.java')
+  && caJava.indexOf('package org.interpss.agent.runner.config;') >= 0,
+  CA_JAVA_FOUND.length + ' CaRunConfig.java under src/main/java: '
+  + (caJavaPath === null ? 'none or ambiguous' : caJavaPath.slice(ROOT.length + 1)));
+const hostCaDefaults = (path) => {
+  const src = rd(path);
+  const start = src.indexOf('const DEFAULT_CA_CONFIG = {');
+  if (start < 0) return null;
+  const rest = src.slice(start);
+  // The config is flat, so its own closing brace ends the block — matched at any indentation,
+  // because the persistent host keeps it at column 0 and the dynamic halves indent it by four.
+  const end = rest.search(/\n[ \t]*\}/);
+  const body = rest.slice(0, end < 0 ? rest.length : end);
+  const out = {};
+  for (const m of body.matchAll(/^\s+([A-Za-z_]\w*): (.+?),?$/gm)) out[m[1]] = m[2].trim();
+  return out;
+};
+const libDefaults = hostCaDefaults(LIB_HOST);
+const dynDefaults = hostCaDefaults(DYN_HOSTB);
+const clientKeys = api.CA_SOLVER_FIELDS.map((f) => f.key);
+check('the CA config has the five case-input keys plus the fifteen solver knobs',
+  libDefaults !== null && Object.keys(libDefaults).length === 20
+  && clientKeys.length === 15 && Object.keys(clientKeys.reduce((a, k) => (a[k] = 1, a), {})).length === 15,
+  libDefaults === null ? 'no DEFAULT_CA_CONFIG' : Object.keys(libDefaults).length + ' host keys / ' + clientKeys.length + ' client fields');
+check('every client solver field is a host key, and both hosts agree',
+  clientKeys.every((k) => Object.prototype.hasOwnProperty.call(libDefaults, k))
+  && dynDefaults !== null
+  && clientKeys.concat(['contingencyMode', 'contingencyFile', 'monitorMode', 'monitoredBranchFile', 'overloadThreshold'])
+    .every((k) => Object.prototype.hasOwnProperty.call(dynDefaults, k)),
+  JSON.stringify(Object.keys(libDefaults)));
+check('the client field defaults are the host defaults',
+  api.CA_SOLVER_FIELDS.every((f) => String(f.def) === String(libDefaults[f.key]).replace(/^'|'$/g, '')),
+  api.CA_SOLVER_FIELDS.map((f) => f.key + '=' + f.def).join(', '));
+// The Java side is the third copy of those defaults, and the enum lists are the Java enums'
+// constant names: they are what the runner will accept.
+check('the Java CaRunConfig carries the same solver defaults',
+  caJava.indexOf('DEFAULT_DCLF_INCL_LOSS = true') >= 0
+  && caJava.indexOf('DEFAULT_DCLF_SCREENING = false') >= 0
+  && caJava.indexOf('DEFAULT_DC_LOADING_CUTOFF = 100.0') >= 0
+  && caJava.indexOf('DEFAULT_DC_FLOW_CHANGE_CUTOFF = 200.0') >= 0
+  && caJava.indexOf('DEFAULT_HIGH_IMPEDANCE_REACTANCE_PU = 10000.0') >= 0
+  && caJava.indexOf('DEFAULT_RATING_PROVIDER = "default"') >= 0
+  && caJava.indexOf('DEFAULT_THREADS = 0') >= 0
+  && caJava.indexOf('DEFAULT_TURN_OFF_ISLAND_BUS = true') >= 0
+  && caJava.indexOf('DEFAULT_AUTO_TURN_LINE2XFR = true') >= 0);
+check('the enum lists name the Java enum constants in both languages',
+  caJava.indexOf('List.of("SparseEqnSolve", "WoodburyMatrixUpdate")') >= 0
+  && caJava.indexOf('List.of("SKIP", "ANCHORED_COMPENSATE_ONE_BUS", "FULL_DCLF_REPLAY")') >= 0
+  && caJava.indexOf('List.of("EXACT_TOPOLOGY", "HIGH_IMPEDANCE")') >= 0
+  && caJava.indexOf('List.of(DEFAULT_RATING_PROVIDER, "RATING_A", "RATING_B")') >= 0
+  && api.CA_SOLVER_FIELDS.filter((f) => f.kind === 'select').every((f) =>
+    rd(LIB_HOST).indexOf("['" + f.key + "', CA_") >= 0)
+  && rd(LIB_HOST).indexOf("const CA_SOLUTION_METHODS = ['SparseEqnSolve', 'WoodburyMatrixUpdate']") >= 0
+  && rd(LIB_HOST).indexOf("const CA_ISLANDING_TREATMENTS = ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY']") >= 0);
+check('the client\'s select options are the host\'s lists',
+  (function () {
+    const host = rd(LIB_HOST);
+    const byKey = (k) => {
+      const f = api.CA_SOLVER_FIELDS.filter((x) => x.key === k)[0];
+      return f === undefined ? null : f.options.join(',');
+    };
+    return byKey('solutionMethod') === 'SparseEqnSolve,WoodburyMatrixUpdate'
+      && byKey('islandingTreatment') === 'SKIP,ANCHORED_COMPENSATE_ONE_BUS,FULL_DCLF_REPLAY'
+      && byKey('multiOutageReplayMode') === 'EXACT_TOPOLOGY,HIGH_IMPEDANCE'
+      && byKey('ratingProvider') === 'default,RATING_A,RATING_B'
+      && host.indexOf("'SparseEqnSolve', 'WoodburyMatrixUpdate'") >= 0
+      && host.indexOf("'SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY'") >= 0
+      && host.indexOf("'EXACT_TOPOLOGY', 'HIGH_IMPEDANCE'") >= 0
+      && host.indexOf("'default', 'RATING_A', 'RATING_B'") >= 0;
+  })());
+// The form's own behaviour: defaults from an empty config, a string form for the numbers, and a
+// rejection for every kind of unusable value — the Host and the Java runner reject them too.
+const caDefaultForm = {};
+for (const f of api.CA_SOLVER_FIELDS) caDefaultForm[f.key] = api.caSolverFieldValue(f, {});
+check('an empty answer seeds the form with the defaults',
+  caDefaultForm.dclfInclLoss === true && caDefaultForm.dclfScreening === false
+  && caDefaultForm.dcLoadingCutoff === '100' && caDefaultForm.dcFlowChangeCutoff === '200'
+  && caDefaultForm.solutionMethod === 'SparseEqnSolve'
+  && caDefaultForm.islandingTreatment === 'ANCHORED_COMPENSATE_ONE_BUS'
+  && caDefaultForm.multiOutageReplayMode === 'EXACT_TOPOLOGY'
+  && caDefaultForm.ratingProvider === 'default' && caDefaultForm.threads === '0',
+  JSON.stringify(caDefaultForm));
+check('a valid form has no solver error and its payload is all numbers and booleans',
+  api.caSolverError(caDefaultForm) === null
+  && (function () {
+    const p = api.caSolverPayload(caDefaultForm);
+    return p.dcLoadingCutoff === 100 && p.threads === 0 && p.dclfInclLoss === true
+      && p.ratingProvider === 'default' && Object.keys(p).length === 15;
+  })());
+check('an unusable solver value is reported, not defaulted',
+  api.caSolverError({ ...caDefaultForm, dcLoadingCutoff: '-1' }) !== null
+  && api.caSolverError({ ...caDefaultForm, dcLoadingCutoff: 'x' }) !== null
+  && api.caSolverError({ ...caDefaultForm, threads: '-1' }) !== null
+  && api.caSolverError({ ...caDefaultForm, threads: '2.5' }) !== null
+  && api.caSolverError({ ...caDefaultForm, solutionMethod: 'Nope' }) !== null
+  && api.caSolverError({ ...caDefaultForm, ratingProvider: 'RATING_C' }) !== null
+  && api.caSolverError({ ...caDefaultForm, highImpedanceReactancePu: '0' }) !== null,
+  api.caSolverError({ ...caDefaultForm, solutionMethod: 'Nope' }));
+
+// --- 22. the generator-redispatch tool (OptAdj, 0.7.4) ---------------------
+console.log('\n22. the generator-redispatch tool (OptAdj, `interpss_case_optadj`)');
+// OptAdj spans four layers that must agree on three things: the config file's keys and defaults
+// (Java `OptAdjRunConfig` ↔ all three Host halves), the mode tokens, and the two result CSV names
+// (Java runner ↔ Host presentationMeta ↔ the client's explorer kinds). Each is a silent failure if
+// it drifts — a knob the tool writes and the runner ignores, or a card that pages a file that does
+// not exist — so each is pinned here.
+const OPTADJ_JAVA_FOUND = findJava('OptAdjRunConfig.java');
+const optAdjJavaPath = OPTADJ_JAVA_FOUND.length === 1 ? OPTADJ_JAVA_FOUND[0] : null;
+const optAdjJava = optAdjJavaPath === null ? '' : rd(optAdjJavaPath);
+check('the Java OptAdj record is the runner-config record the plugin mirrors',
+  optAdjJavaPath === join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'config', 'OptAdjRunConfig.java')
+  && optAdjJava.indexOf('package org.interpss.agent.runner.config;') >= 0,
+  OPTADJ_JAVA_FOUND.length + ' OptAdjRunConfig.java under src/main/java: '
+  + (optAdjJavaPath === null ? 'none or ambiguous' : optAdjJavaPath.slice(ROOT.length + 1)));
+
+// The Host's seven-key config block, parsed out of each half (see `hostCaDefaults` for the rules).
+const hostOptAdjDefaults = (path) => {
+  const src = rd(path);
+  const start = src.indexOf('const DEFAULT_OPTADJ_CONFIG = {');
+  if (start < 0) return null;
+  const rest = src.slice(start);
+  const end = rest.search(/\n[ \t]*\}/);
+  const body = rest.slice(0, end < 0 ? rest.length : end);
+  const out = {};
+  for (const m of body.matchAll(/^\s+([A-Za-z_]\w*): (.+?),?$/gm)) out[m[1]] = m[2].trim();
+  return out;
+};
+const optAdjLibDefaults = hostOptAdjDefaults(LIB_HOST);
+const optAdjDynDefaults = hostOptAdjDefaults(DYN_HOSTB);
+check('the six OptAdj file keys are the same in all three host halves',
+  optAdjLibDefaults !== null && Object.keys(optAdjLibDefaults).length === 6
+  && !Object.prototype.hasOwnProperty.call(optAdjLibDefaults, 'optAdjType')
+  && optAdjDynDefaults !== null
+  && Object.keys(optAdjLibDefaults).every((k) => Object.prototype.hasOwnProperty.call(optAdjDynDefaults, k)),
+  optAdjLibDefaults === null ? 'no DEFAULT_OPTADJ_CONFIG' : Object.keys(optAdjLibDefaults).join(', '));
+check('the Java OptAdj defaults and mode tokens are the Host\'s',
+  optAdjJava.indexOf('GEN_ADJ_BASE_CASE = "genAdjBaseCase"') >= 0
+  && optAdjJava.indexOf('GEN_ADJ_CA_N1 = "genAdjCA_N-1"') >= 0
+  && optAdjJava.indexOf('List.of(GEN_ADJ_BASE_CASE, GEN_ADJ_CA_N1)') >= 0
+  && optAdjJava.indexOf('DEFAULT_SCAN_BASE_CASE = 50.0') >= 0
+  && optAdjJava.indexOf('DEFAULT_SCAN_CA_N1 = 90.0') >= 0
+  && optAdjJava.indexOf('DEFAULT_OPT_ADJ_THRESHOLD = 100.0') >= 0
+  && optAdjJava.indexOf('DEFAULT_SPARSE_SEN_MATRIX = true') >= 0
+  && optAdjJava.indexOf('DEFAULT_THREADS = 0') >= 0
+  && optAdjJava.indexOf('sparseSenMatrixOrDefault()') >= 0
+  && optAdjJava.indexOf('parseType(') >= 0
+  && optAdjJava.indexOf('scanLoadingThresholdOrDefault(String') >= 0
+  && String(optAdjLibDefaults.optAdjLoadingThreshold) === '100'
+  && String(optAdjLibDefaults.threads) === '0'
+  && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
+    const s = rd(p);
+    return s.indexOf("const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']") >= 0
+      && s.indexOf("const OPTADJ_DEFAULT_TYPE = 'genAdjBaseCase'") >= 0
+      && s.indexOf('function resolveOptAdjType(') >= 0
+      && s.indexOf("const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }") >= 0;
+  }));
+// The sparse/dense knob is one field per half plus the Java record, and the runner must actually
+// hand it to both optimizers; a half that dropped the key, or a runner that kept the old literal
+// `true`, would silently run the other sensitivity setting.
+check('the sparse-sensitivity knob reaches both Java optimizers from every host half',
+  optAdjJava.indexOf('Boolean sparseSenMatrix, Integer threads') >= 0
+  && optAdjJava.indexOf('DEFAULT_SPARSE_SEN_MATRIX = true') >= 0
+  && optAdjJava.indexOf('sparseSenMatrixOrDefault()') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('new AclfNetContigencyOptimizer(sparseSenMatrix)') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('new AclfNetLoadFlowOptimizer(sparseSenMatrix)') >= 0
+  && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => /sparseSenMatrix: true/.test(rd(p)))
+  && rd(LIB_HOST).indexOf('sparseSenMatrix must be true or false') >= 0
+  && rd(DYN_HOST).indexOf('sparseSenMatrix must be true or false') >= 0
+  && String(optAdjLibDefaults.sparseSenMatrix) === 'true'
+  && String(optAdjDynDefaults.sparseSenMatrix) === 'true');
+// The tool, its RPC and its card: a registered tool without the RPC (or without the card) is a
+// row that fails the moment it is called, or one that renders nothing.
+check('the tool, its RPC and its card are all registered',
+  rd(LIB_HOST).indexOf('name: \'interpss_case_optadj\'') >= 0
+  && rd(LIB_HOST).indexOf('caseOptAdjTool(ctx)') >= 0
+  && rd(LIB_HOST).indexOf("'runOptAdj'") >= 0
+  && rd(LIB_CLIENT).indexOf("key: 'interpss_case_optadj'") >= 0);
+// The two result files are named in three places; the client's explorer resolves a kind by the
+// `_DF_<kind>.csv` suffix, so a renamed column file would leave an empty card with no error. The
+// OptAdj N-1 mode carries an `N1` infix in front of the last segment (0.7.5), which is exactly the
+// shape a bare suffix match misses: the runner writes `_DF_optadj_N1_gen.csv`, the explorer looks
+// for `_DF_optadj_gen.csv`, and the card renders nothing.
+const OPTADJ_RUNNER_JAVA = join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java');
+check('the Java OptAdj runner names its two CSVs from the run mode',
+  rd(OPTADJ_RUNNER_JAVA).indexOf('String suffix = caN1 ? "_DF_optadj_N1" : "_DF_optadj"') >= 0
+  && rd(OPTADJ_RUNNER_JAVA).indexOf('String genCsv = stem + suffix + "_gen.csv"') >= 0
+  && rd(OPTADJ_RUNNER_JAVA).indexOf('String branchCsv = stem + suffix + "_branch.csv"') >= 0,
+  rd(OPTADJ_RUNNER_JAVA).indexOf('"_DF_optadj_N1"') >= 0 ? 'N1 infix on the mode' : 'no mode-dependent suffix');
+// The Host mirrors that rule for the two paths that have no bridge reply to read; running the
+// extracted helper is what proves the mirror produces the runner's names (both modes) rather than
+// only containing the right-looking text.
+const optAdjNamesBody = (path) => {
+  const m = /function optAdjResultNames\(stem, optAdjType\) \{([\s\S]*?)\n[ \t]*\}/.exec(rd(path));
+  return m === null ? null : m[1];
+};
+// The name rule now reads the mode through each half's own `canonicalOptAdjType`, so the harness
+// composes that half's real canonicalizer with its real tables: evaluating the pair together is what
+// proves a legacy spelling lands on the same N-1 pair as the canonical token.
+const optAdjLiteral = (path, re) => {
+  const m = re.exec(rd(path));
+  if (m === null) return null;
+  try { return new Function('return ' + m[1])(); } catch (e) { return null; }
+};
+// Brace-matched function-body extraction: a non-greedy regex stops at the first nested `}`, which
+// truncates a body that contains a loop or an `if` block (optAdjConfigPayload has a `for`).
+const optAdjFnBody = (src, name) => {
+  const head = 'function ' + name + '(';
+  const start = src.indexOf(head);
+  if (start < 0) return null;
+  const argsEnd = src.indexOf(')', start + head.length);
+  if (argsEnd < 0) return null;
+  const open = src.indexOf('{', argsEnd);
+  if (open < 0) return null;
+  let depth = 0;
+  let quote = '';
+  for (let i = open; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quote !== '') {
+      if (ch === '\\') { i += 1; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i);
+      if (nl < 0) return null;
+      i = nl;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return { args: src.slice(start + head.length, argsEnd), body: src.slice(open + 1, i) };
+      }
+    }
+  }
+  return null;
+};
+const optAdjBody = (path, name) => optAdjFnBody(rd(path), name);
+const optAdjScopeFn = (path) => {
+  const canon = optAdjBody(path, 'canonicalOptAdjType');
+  const resolve = optAdjBody(path, 'resolveOptAdjType');
+  const names = optAdjBody(path, 'optAdjResultNames');
+  const payload = optAdjBody(path, 'optAdjConfigPayload');
+  const types = optAdjLiteral(path, /const OPTADJ_TYPES = (\[[^\]]*\])/);
+  const legacy = optAdjLiteral(path, /const OPTADJ_LEGACY_TYPES = (\{[^}]*\})/);
+  const defaults = optAdjLiteral(path, /const DEFAULT_OPTADJ_CONFIG = (\{[\s\S]*?\n[ \t]*\})/);
+  if (canon === null || resolve === null || names === null || payload === null || types === null
+      || legacy === null || defaults === null) return null;
+  // Each captured slice is a function BODY, so the composed source re-declares every name around it.
+  const src = 'function canonicalOptAdjType(' + canon.args + ') {' + canon.body + '\n}\n'
+    + 'function resolveOptAdjType(' + resolve.args + ') {' + resolve.body + '\n}\n'
+    + 'function optAdjResultNames(' + names.args + ') {' + names.body + '\n}\n'
+    + 'function optAdjConfigPayload(' + payload.args + ') {' + payload.body + '\n}\n'
+    + 'return { optAdjResultNames, optAdjConfigPayload, resolveOptAdjType }';
+  try {
+    return new Function('OPTADJ_TYPES', 'OPTADJ_LEGACY_TYPES', 'DEFAULT_OPTADJ_CONFIG',
+      'OPTADJ_SCAN_DEFAULTS', 'OPTADJ_CONFIG_KEYS', 'OPTADJ_DEFAULT_TYPE', src)(
+      types, legacy, defaults, { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 },
+      Object.keys(defaults), 'genAdjBaseCase');
+  } catch (e) { return null; }
+};
+const optAdjScopes = [LIB_HOST, DYN_HOSTB, DYN_HOST].map(optAdjScopeFn);
+const optAdjHostFns = optAdjScopes.map((scope) => (scope === null ? null : scope.optAdjResultNames));
+const optAdjNamesOf = (fn, type) => {
+  try { return fn === null ? null : fn('ieee39', type); } catch (e) { return null; }
+};
+const optAdjPair = (fn, type) => {
+  const names = optAdjNamesOf(fn, type);
+  return names === null ? null : names.genFile + '|' + names.branchFile;
+};
+check('the Host mirrors the runner\'s names for both modes, retired spelling included',
+  optAdjHostFns.every((fn) => optAdjPair(fn, 'genAdjBaseCase') === 'ieee39_DF_optadj_gen.csv|ieee39_DF_optadj_branch.csv'
+    && optAdjPair(fn, 'genAdjCA_N-1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'
+    && optAdjPair(fn, 'genAdjCaN_1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'
+    && optAdjPair(fn, 'genAdjN2') === 'ieee39_DF_optadj_gen.csv|ieee39_DF_optadj_branch.csv'),
+  optAdjHostFns.map((fn) => optAdjPair(fn, 'genAdjCA_N-1')).join(' / '));
+// The alias lives in the Host, never in the bridge: the Java record rejects the retired token (its
+// own test pins that), so every half's resolveOptAdjType maps it before the mode reaches the
+// bridge — and the tool schema still advertises the canonical token only. The mode is a call
+// argument, not a config-file key.
+check('every host half normalises the retired mode token before the bridge sees it',
+  [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
+    const s = rd(p);
+    return s.indexOf('function resolveOptAdjType(') >= 0
+      && s.indexOf('const OPTADJ_LEGACY_TYPES = { genAdjCaN_1:') >= 0;
+  })
+  && rd(LIB_HOST).indexOf('enum: OPTADJ_TYPES') >= 0
+  && rd(LIB_HOST).indexOf('is still accepted on this argument') >= 0
+  && rd(LIB_HOST).indexOf('is not one of the six keys the Java record reads') >= 0,
+  rd(LIB_HOST).indexOf('OPTADJ_LEGACY_TYPES') >= 0 ? 'legacy map present' : 'no legacy map');
+// 0.7.11 — the mode left the Java record: the runner/bridge take it as a call argument, a leftover
+// `optAdjType` in a file is ignored by Java, and the Host is the one that keeps honoring it.
+const OPTADJ_BRIDGE_JAVA = join(JAVA_SRC, 'org', 'interpss', 'agent', 'bridge', 'IpssAgentBridge.java');
+check('the Java mode is a call argument, not a record field',
+  optAdjJava.indexOf('public record OptAdjRunConfig(Double scanLoadingThreshold') >= 0
+  && optAdjJava.indexOf('Boolean sparseSenMatrix, Integer threads)') >= 0
+  && optAdjJava.indexOf('public static String parseType(') >= 0
+  && optAdjJava.indexOf('public static boolean isCaN1(String optAdjType)') >= 0
+  && optAdjJava.indexOf('public double scanLoadingThresholdOrDefault(String optAdjType)') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('String optAdjType, OptAdjRunConfig config') >= 0
+  && rd(OPTADJ_BRIDGE_JAVA).indexOf('String optAdjType, String optAdjConfigJson') >= 0,
+  optAdjJava.indexOf('public record OptAdjRunConfig(') >= 0 ? 'record found' : 'no record');
+// The payload is exactly the six file keys the Java record reads, and the mode rides beside it as its
+// own bridge argument: a half that kept the mode in the JSON would have Java ignore it (the record no
+// longer reads the key), silently running the basecase.
+const optAdjPayloadOf = (scope, config, type) => {
+  try { return scope === null ? null : scope.optAdjConfigPayload(config, type); } catch (e) { return null; }
+};
+check('every host half sends the six Java file keys and no mode',
+  optAdjScopes.every((scope) => {
+    const payload = optAdjPayloadOf(scope, { scanLoadingThreshold: null, contingencyFile: null }, 'genAdjCA_N-1');
+    if (payload === null) return false;
+    const keys = Object.keys(payload).sort().join(',');
+    return keys === 'contingencyFile,contingencyMode,optAdjLoadingThreshold,scanLoadingThreshold,sparseSenMatrix,threads'
+      && payload.optAdjType === undefined
+      && payload.scanLoadingThreshold === 90
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjCaN_1').scanLoadingThreshold === 90
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjBaseCase').scanLoadingThreshold === 50
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: 77 }, 'genAdjBaseCase').scanLoadingThreshold === 77;
+  }),
+  optAdjScopes.map((scope) => {
+    const p = optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjCA_N-1');
+    return p === null ? 'null' : Object.keys(p).join(',');
+  }).join(' / '));
+check('every host half passes the mode beside the payload and reads it back from a file or object',
+  [LIB_HOST, DYN_HOST, DYN_HOSTB].every((p) => {
+    const s = rd(p);
+    return s.indexOf('optAdjType, JSON.stringify(optAdjConfigPayload(') >= 0
+      || s.indexOf('reload === true, optAdjType, optAdjConfigJson') >= 0;
+  })
+  && rd(LIB_HOST).indexOf('reload === true, optAdjType, optAdjConfigJson') >= 0
+  && [LIB_HOST, DYN_HOST, DYN_HOSTB].every((p) => rd(p).indexOf('const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])') >= 0
+    && rd(p).indexOf('const rawType = value[OPTADJ_MODE_KEY]') >= 0)
+  && rd(LIB_HOST).indexOf('config[OPTADJ_MODE_KEY]') >= 0,
+  rd(LIB_HOST).indexOf('OPTADJ_INPUT_KEYS') >= 0 ? 'mode accepted as an input key' : 'no mode input key');
+// The client's kind lookup, run for the same reason: `optadj_gen` must find both the basecase and
+// the N-1 generator file, and must not pick up the other kind's N-1 file.
+const kindSuffixBody = (() => {
+  const m = /function kindFileSuffixes\(kind\) \{([\s\S]*?)\n[ \t]*\}/.exec(rd(LIB_CLIENT));
+  return m === null ? null : m[1];
+})();
+const kindSuffixes = (() => {
+  if (kindSuffixBody === null) return null;
+  try { return new Function('kind', kindSuffixBody); } catch (e) { return null; }
+})();
+const kindMatches = (kind, file) => {
+  if (kindSuffixes === null) return false;
+  try { return kindSuffixes(kind).some((s) => file.indexOf(s) !== -1); } catch (e) { return false; }
+};
+check('the client\'s kind lookup accepts the N-1 pair and tells the two kinds apart',
+  kindMatches('optadj_gen', 'ieee39_DF_optadj_gen.csv')
+  && kindMatches('optadj_gen', 'ieee39_DF_optadj_N1_gen.csv')
+  && kindMatches('optadj_branch', 'ieee39_DF_optadj_branch.csv')
+  && kindMatches('optadj_branch', 'ieee39_DF_optadj_N1_branch.csv')
+  && !kindMatches('optadj_gen', 'ieee39_DF_optadj_N1_branch.csv')
+  && !kindMatches('optadj_branch', 'ieee39_DF_optadj_N1_gen.csv')
+  && kindMatches('bus', 'ieee39_DF_bus.csv')
+  && !kindMatches('bus', 'ieee39_DF_optadj_N1_gen.csv')
+  && rd(LIB_HOST).indexOf('optadjGenCsv: String(value.genFile') >= 0
+  && rd(LIB_HOST).indexOf('optadjBranchCsv: String(value.branchFile') >= 0
+  && rd(LIB_CLIENT).indexOf("kind: 'optadj_gen'") >= 0
+  && rd(LIB_CLIENT).indexOf("kind: 'optadj_branch'") >= 0
+  && rd(LIB_CLIENT).indexOf('meta.optadjGenCsv') >= 0
+  && rd(LIB_CLIENT).indexOf('meta.optadjBranchCsv') >= 0,
+  kindSuffixes === null ? 'no kindFileSuffixes' : String(kindSuffixes('optadj_gen')));
+check('the OptAdj runner, bridge entry point and config path exist',
+  rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('public static OptAdjSummary runOnNet(') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('public static ValidatedOptAdjInputs resolveInputs(') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'bridge', 'IpssAgentBridge.java'))
+    .indexOf('public synchronized String runOptAdjWithConfig(') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'util', 'ProjectPaths.java'))
+    .indexOf('caseOptAdjRunConfig(') >= 0);
+
+// --- 23. click selection and its highlight (0.7.13) -------------------------
+// Selecting a bus or branch is a paint-time mark exactly like the flags and the search: it
+// names cells that are ALREADY drawn and outlines them, so the .drawio, the parsed scene and the
+// desktop app never learn about it. These checks pin the two halves that can regress silently —
+// which cells a selection resolves to, and that the renderer adds only an outline (never a
+// replacement fill) when asked.
+console.log('\n23. diagram selection highlight (0.7.13)');
+if (scene) {
+  const selPairs = api.drawioBranchPairs(scene);
+  const label5 = scene.nodes.find((n) => n.kind === 'text' && n.lines.join('') === 'Bus-5');
+  const bar5 = scene.nodes.find((n) => n.id === 'bus5');
+  const busMarks = api.drawioSelectionMarks(scene, selPairs, { kind: 'bus', id: 'bus5' });
+  check('a bus selection marks its bar and its Bus-N label',
+    bar5 !== undefined && label5 !== undefined
+      && busMarks.nodes.indexOf('bus5') >= 0 && busMarks.nodes.indexOf(label5.id) >= 0
+      && busMarks.edges.length === 0,
+    JSON.stringify(busMarks.nodes));
+  const labelTarget = label5 === undefined ? null : api.drawioHoverTarget(label5, selPairs);
+  check('clicking the label selects the same bus cell the mark uses',
+    labelTarget !== null && labelTarget.kind === 'bus' && labelTarget.id === 'bus5',
+    JSON.stringify(labelTarget));
+
+  const xfMarks = api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus4|bus7' });
+  check('a transformer branch marks both stubs and both rings',
+    ['e8a', 'e8b'].every((id) => xfMarks.edges.indexOf(id) >= 0)
+      && ['xf8', 'xf8b'].every((id) => xfMarks.nodes.indexOf(id) >= 0),
+    JSON.stringify(xfMarks));
+  check('an unknown bus, an unknown pair or no target marks nothing',
+    api.drawioSelectionMarks(scene, selPairs, { kind: 'bus', id: 'bus999' }).nodes.length === 0
+      && api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus1|bus999' }).edges.length === 0
+      && api.drawioSelectionMarks(scene, selPairs, null).nodes.length === 0
+      && api.drawioSelectionMarks(null, selPairs, { kind: 'bus', id: 'bus5' }).nodes.length === 0);
+
+  const snapshot = () => JSON.stringify({
+    nodes: scene.nodes.map((n) => [n.id, n.x, n.y, n.w, n.h, n.fill, n.stroke]),
+    edges: scene.edges.map((e) => [e.id, e.source, e.target]),
+    pairs: selPairs,
+  });
+  const beforeMark = snapshot();
+  api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus4|bus7' });
+  check('the mark helper only reads the scene and the pairs', beforeMark === snapshot());
+
+  // The renderer: with no target it must emit exactly the tree it always did.
+  const plainSvg = api.DrawioDiagram({ scene: scene });
+  const plainGroups = groupsOf(plainSvg);
+  check('with no selection or hover there is no mark group',
+    plainGroups.every((g) => String(g.props.key) !== 'sel' && String(g.props.key) !== 'hov')
+      && plainGroups.length === scene.nodes.length + scene.edges.length,
+    plainGroups.length + ' groups');
+
+  const selSvg = api.DrawioDiagram({ scene: scene, selected: { kind: 'bus', id: 'bus5' } });
+  const selGroups = groupsOf(selSvg);
+  const selGroup = selGroups.filter((g) => String(g.props.key) === 'sel')[0];
+  check('a selected bus adds one mark group over the drawing',
+    selGroup !== undefined && selGroups[selGroups.length - 1] === selGroup
+      && selGroup.props.pointerEvents === 'none');
+  const selOutlines = selGroup === undefined ? [] : partsOf(selGroup)
+    .filter((p) => p.type === 'rect' && String(p.props.key).indexOf('mn') === 0);
+  check('the selection outlines the bar and its label in the selection blue',
+    selOutlines.length === 2 && selOutlines.every((p) => p.props.stroke === api.DRAWIO_SELECT_STROKE
+      && p.props.strokeDasharray === '5 3'),
+    selOutlines.length + ' outlines');
+  check('the selection blue is the birdseye frame colour, not the search green',
+    api.DRAWIO_SELECT_STROKE === api.DRAWIO_BIRDSEYE_FRAME && api.DRAWIO_SELECT_STROKE !== api.DRAWIO_MATCH_FILL,
+    api.DRAWIO_SELECT_STROKE);
+
+  // A flagged bus keeps its flag colour underneath the outline.
+  const bus5Index = scene.nodes.findIndex((n) => n.id === 'bus5');
+  const flagSvg = api.DrawioDiagram({ scene: scene, paint: { bus5: '#C0392B' }, selected: { kind: 'bus', id: 'bus5' } });
+  const flagBar = (groupsOf(flagSvg).filter((g) => String(g.props.key) === 'n' + bus5Index)[0] || { kids: [] });
+  const flagShape = partsOf(flagBar).filter((p) => p.props.key === 's')[0];
+  check('the outline leaves a flagged bus its own fill and stroke',
+    flagShape !== undefined && flagShape.props.fill === '#C0392B' && flagShape.props.stroke === '#C0392B',
+    flagShape && flagShape.props.fill);
+
+  const xfSvg = api.DrawioDiagram({ scene: scene, pairs: selPairs, selected: { kind: 'branch', key: 'bus4|bus7' } });
+  const xfGroup = groupsOf(xfSvg).filter((g) => String(g.props.key) === 'sel')[0];
+  const xfParts = xfGroup === undefined ? [] : partsOf(xfGroup);
+  const halos = xfParts.filter((p) => p.type === 'polyline' && String(p.props.key).indexOf('mh') === 0);
+  const cores = xfParts.filter((p) => p.type === 'polyline' && String(p.props.key).indexOf('md') === 0);
+  const ringOutlines = xfParts.filter((p) => p.type === 'ellipse');
+  check('a selected transformer branch draws a halo and a dashed core on both stubs',
+    halos.length === 2 && cores.length === 2
+      && cores.every((p) => p.props.strokeDasharray === '6 3'),
+    halos.length + ' halos / ' + cores.length + ' cores');
+  check('and outlines both transformer rings', ringOutlines.length === 2, ringOutlines.length + ' rings');
+
+  const hovSvg = api.DrawioDiagram({ scene: scene, hovered: { kind: 'bus', id: 'bus5' } });
+  const hovGroup = groupsOf(hovSvg).filter((g) => String(g.props.key) === 'hov')[0];
+  const hovParts = hovGroup === undefined ? [] : partsOf(hovGroup);
+  check('a hovered element gets the lighter mark and no dashed core',
+    hovGroup !== undefined && hovParts.length === 2
+      && hovParts.every((p) => String(p.props.key).indexOf('md') !== 0)
+      && hovParts.every((p) => p.props.strokeDasharray !== '5 3'));
+
+  const sameSvg = api.DrawioDiagram({
+    scene: scene,
+    selected: { kind: 'bus', id: 'bus5' },
+    hovered: { kind: 'bus', id: 'bus5' },
+  });
+  check('an identical hover is not painted twice',
+    groupsOf(sameSvg).filter((g) => String(g.props.key) === 'sel' || String(g.props.key) === 'hov').length === 1);
+
+  const hiddenSelSvg = api.DrawioDiagram({
+    scene: scene,
+    hidden: { bus5: true, [label5.id]: true },
+    selected: { kind: 'bus', id: 'bus5' },
+  });
+  check('a filtered-out selection leaves no outline behind',
+    groupsOf(hiddenSelSvg).every((g) => String(g.props.key) !== 'sel'));
+
+  // The click wiring: the hit areas report the same targets the marks resolve, and pass the
+  // event through so the canvas's clear-on-click can be stopped.
+  const picked = [];
+  const forwarded = [];
+  const clickHover = {
+    pairs: selPairs,
+    onBus: () => {}, onBranch: () => {}, onMove: () => {}, onLeave: () => {},
+    onPick: (target, event) => { picked.push(target); forwarded.push(event) },
+  };
+  const clickSvg = api.DrawioDiagram({ scene: scene, hover: clickHover });
+  const clickParts = {};
+  for (const g of groupsOf(clickSvg)) clickParts[String(g.props.key)] = partsOf(g);
+  const busHit = (clickParts['n' + bus5Index] || []).filter((p) => p.props.key === 'h')[0];
+  const busEvent = { clientX: 1, clientY: 2 };
+  busHit.props.onClick(busEvent);
+  const e8aIndex = scene.edges.findIndex((e) => e.id === 'e8a');
+  const edgeHit = (clickParts['e' + e8aIndex] || []).filter((p) => p.props.key === 'h')[0];
+  const edgeEvent = { clientX: 3, clientY: 4 };
+  edgeHit.props.onClick(edgeEvent);
+  check('a click reports the bus cell and the resolved branch pair',
+    picked.length === 2 && picked[0].kind === 'bus' && picked[0].id === 'bus5'
+      && picked[1].kind === 'branch' && picked[1].key === 'bus4|bus7',
+    JSON.stringify(picked));
+  check('the hit areas pass their event through to the picker',
+    forwarded[0] === busEvent && forwarded[1] === edgeEvent);
+  check('the picker stops the event so the canvas cannot clear what it just selected',
+    /function pickTarget\(target, event\)[\s\S]{0,200}?event\.stopPropagation\(\)/.test(body));
+
+  // The view wires the renderer, guards the drag and clears the selection in all three ways.
+  check('the renderer receives the selection, the hover mark and the click handler',
+    body.indexOf('selected: selection') >= 0 && body.indexOf('hovered: hoverMark') >= 0
+      && body.indexOf('onPick: pickTarget') >= 0);
+  check('the canvas clears on a click and on Escape',
+    body.indexOf('onClick: canvasClick') >= 0 && body.indexOf('onKeyDown: canvasKeyDown') >= 0
+      && /function canvasClick\(\)[\s\S]{0,120}?clearSelection\(\)/.test(body)
+      && /function canvasKeyDown\(e\)[\s\S]{0,80}?Escape[\s\S]{0,40}?clearSelection\(\)/.test(body));
+  check('a drag is never a selection',
+    /pickRef\.current = \{ moved: false/.test(body)
+      && /Math\.abs\(e\.clientX - pick\.x\) > 4/.test(body)
+      && /if \(pickRef\.current\.moved\) return/.test(body));
+  check('the pinned tip is addressed by its selection key so a late answer cannot retarget it',
+    /setPinnedTip\(\(t\) => \(t === null \|\| t\.key !== key \? t : \{ key: key, text: text/.test(body));
+  check('a click on the birdseye does not reach the canvas clear',
+    /onPointerLeave: \(e\) => \{ e\.stopPropagation\(\); if \(grab\) setGrab\(false\) \},[\s\S]{0,200}?onClick: \(e\) => e\.stopPropagation\(\)/.test(body));
+
+  // The pinned tooltip outlives the hover tip; the hover tip wins while the cursor is on an
+  // element. Both are plain render states, so this is a render check like the rest of §12.
+  const openState = [
+    ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+    ['files', tabFiles(2)],
+    ['filesLoading', false],
+    ['path', 'wspace/data/c/diagram/d0.drawio'],
+    ['scene', scene],
+    ['loading', false],
+    ['error', null],
+  ];
+  const pinnedFlat = renderFlat(withState(openState.concat([
+    ['tip', null],
+    ['pinnedTip', { key: 'bus5', text: 'Bus Name: Bus5\nPinned selection', x: 10, y: 20 }],
+  ])));
+  check('a pinned selection tooltip renders after the hover tip is gone',
+    pinnedFlat.indexOf('THREW') < 0 && pinnedFlat.indexOf('Pinned selection') >= 0, pinnedFlat.slice(0, 120));
+  const bothFlat = renderFlat(withState(openState.concat([
+    ['tip', { text: 'HOVER TIP', x: 10, y: 20 }],
+    ['pinnedTip', { key: 'bus5', text: 'PINNED TIP', x: 10, y: 20 }],
+  ])));
+  check('the hover tip outranks the pinned one while the cursor is on an element',
+    bothFlat.indexOf('HOVER TIP') >= 0 && bothFlat.indexOf('PINNED TIP') < 0);
+}
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

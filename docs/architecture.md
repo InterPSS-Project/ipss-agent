@@ -100,7 +100,7 @@ ipss-agent/
 `org.interpss.agent.IpssCmd` is the CLI main class packaged in the uber JAR. It dispatches two command families:
 
 ```
-java -jar …/ipss-agent-cmd-1.0.0-uber.jar <aclf|ca> <ieee|psse> <input> [cont_file monitor_file]
+java -jar …/ipss-agent-cmd-1.0.0-uber.jar <aclf|ca> <ieee|psse|bpa> <input> [cont_file monitor_file]
 java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" <result_dir> [csv_prefix]
 ```
 
@@ -110,10 +110,12 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 | `CliArgs`, `ReportCliArgs` | `cli` | Argument parsing and usage text |
 | `ProjectPaths` | `util` | Resolve `wspace/`, result dirs, ACLF config lookup |
 | `NetworkLoader` | `input` | Route to format-specific adapters |
-| `IeeeFileAdapter`, `PsseFileAdapter` | `input` | Import `.ieee` / `.raw` via `IpssAdapter` |
+| `IeeeFileAdapter`, `PsseFileAdapter`, `BpaFileAdapter` | `input` | Import `.ieee` / `.raw` / BPA `.dat` via `IpssAdapter` |
 | `AclfRunner` | `runner` | Newton–Raphson AC load flow → CSV + network info |
 | `GvyScriptRunner` | `runner` | Evaluate a Groovy `.gvy` script against a live `AclfNetwork` (`aclfnet` binding) → mutation digest |
 | `ContingencyRunner` | `runner` | DC N-1 contingency → contingency CSV |
+| `OptAdjRunner` | `runner` | Generator redispatch for thermal limits (SSA scan → LP → re-scan) → gen + branch CSVs |
+| `CaRunConfig`, `OptAdjRunConfig` | `runner/config` | Per-case run configuration records: CA (`config/ca_run.json`, 20 keys) and OptAdj (`config/opt_adj_run.json`, 6 keys: both thresholds, contingency input, sparse flag, worker count; mode is a runner/bridge argument) |
 | `ReportRunner` | `report` | Orchestrate Markdown report generation |
 | `IpssAgentBridge` | `bridge` | In-process JSON facade for DSH `java-bridge` |
 | `SimuModelRepository` | `model` | Cache one base-case `AclfNetwork` in memory |
@@ -123,6 +125,7 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 ```
 IpssCmd / IpssAgentBridge
     → runner (AclfRunner, ContingencyRunner)
+    → runner/config (CaRunConfig, OptAdjRunConfig)
     → report (ReportRunner, *Generator, *Analyzer)
     → input (NetworkLoader, *Adapter)
     → util (ProjectPaths, IpssNetworkInfo)
@@ -139,12 +142,12 @@ Agent code does **not** reimplement power-flow math. It orchestrates InterPSS pl
 
 ```
 .ieee / .raw  →  NetworkLoader.loadNetwork(format, path)
-              →  IeeeFileAdapter | PsseFileAdapter
+              →  IeeeFileAdapter | PsseFileAdapter | BpaFileAdapter
               →  IpssAdapter.importAclfNet()
               →  AclfNetwork
 ```
 
-Supported formats: `ieee` (IEEE Common Format / CDF) and `psse` (PSS/E RAW).
+Supported formats: `ieee` (IEEE Common Format / CDF), `psse` (PSS/E RAW), and `bpa` (BPA IPF).
 
 ### Step 2 — AC load flow (ACLF)
 
@@ -174,9 +177,30 @@ GvyScriptRunner.runOnNet(net, <case dir>/scripts/<name>.gvy)
 ContingencyRunner.run(paths, cli, net, resultsDir, stem)
   1. resolveInputs(): explicit CLI args → case ca_run.json → built-in defaults
   2. Load contingency + monitored-branch JSON (ContingencyFileUtil)
-  3. ParallelDclfContingencyAnalyzer
-  4. DclfContingencyDFrameAdapter → stem_DF_contingency.csv
+  3. dclfConfig(CaRunConfig) → DclfContingencyConfig (ipss.core.lib 1.4.0)
+  4. ParallelDclfContingencyAnalyzer.executeContingencyAnalysis(net, conts, monitored, config, threads)
+  5. DclfContingencyDFrameAdapter → stem_DF_contingency.csv
 ```
+
+The analyzer and its config live in `com.interpss.core.algo.dclf` (the
+`org.interpss.plugin.contingency` copies are thin shims now), and the runner hands the
+analyzer a **complete** config: `CaRunConfig` carries `overloadThreshold` plus the fifteen
+solver knobs — `dclfInclLoss`, `dclfScreening`, `dcLoadingCutoff`, `dcFlowChangeCutoff`,
+`solutionMethod`, `kluEndpointRhsBatchSize`, `cacheViolationCombinedShiftFactors`,
+`islandingTreatment`, `n1IslandingReplayEnabled`, `multiOutageReplayMode`,
+`highImpedanceReactancePu`, `turnOffIslandBus`, `autoTurnLine2Xfr`, `ratingProvider` and
+`threads` (0 = one per available processor). Each defaults to the value the runner used
+before the knobs were selectable, so a `ca_run.json` that names none of them reproduces the
+old behaviour exactly; an unusable value is rejected with the key and its allowed values
+rather than silently defaulted. The tab's CA dialog edits them (its **Advanced solver
+settings** panel), `interpss_run_ca` takes them as `caConfig`, and the in-process bridge
+passes the whole payload to `runContingencyWithConfig(...)`.
+
+**Overload detection is a rating comparison** (`BranchRatingProvider`): `RATING_A` is the
+branch's rating MVA 1 (`getRatingMvaA()`), and `RATING_B` — the library's own default, which
+`ratingProvider: 'default'` leaves in place — is rating MVA 2 (`getRatingMvaB()`), falling back
+per branch type to rating MVA 1 × 1.15 for a line and × 1.35 for a transformer when MVA 2 is
+zero. A case whose branch tables carry no ratings reports no overloads at any threshold.
 
 Both JSON companion files are optional: omitting them means N-1 outages for every
 branch and every branch monitored.
@@ -193,7 +217,42 @@ InterPSS tab's CA dialog writes the same `ca_run.json`, so the GUI and the CLI
 agree. The agent skill auto-discovers the files in directory mode by filename
 patterns (`*contingency*`, `*monitor*`).
 
-### Step 4 — Report generation
+### Step 4 — Generator redispatch (OptAdj, optional)
+
+```
+IpssCmd optadj <format> <input> [<cont_file>]
+  1. resolveInputs(): explicit CLI cont file → case config/opt_adj_run.json → defaults
+  2. createContingencyAnalysisAlgorithm(net, SenNotCached, true) + calculateDclf(INC_LOSS)
+  3. AclfNetSsaHelper(threads).baseCaseScan(scan %) | contingencyScan(contList, scan %)
+  4. AclfNetLoadFlowOptimizer(true) | AclfNetContigencyOptimizer(true).optimize(algo, result, optAdj %)
+  5. calculateDclf + re-scan the SAME monitored set
+  6. two DataFrames → stem_DF_optadj_gen.csv, stem_DF_optadj_branch.csv
+     (the N-1 mode writes the same pair as stem_DF_optadj_N1_gen.csv / _N1_branch.csv)
+```
+
+`OptAdjRunner` serves the CLI, the bridge (`IpssAgentBridge.runOptAdjWithConfig`) and the chat tool
+`interpss_case_optadj`, and it **mutates the network it is given**: the optimizer overwrites the
+DCLF model's generator P (the bridge's `reload` argument re-parses the case first, exactly like the
+Groovy adapter's). Loading is measured against each branch's `ratingMva1`, so `ratingProvider` — a
+CA knob — does not apply here. Two preconditions are refused before the LP rather than surfacing as
+a null dereference or an infinite loading: every active generator needs a P gen limit and every
+branch a rating MVA 1. An empty scan (nothing above the scan threshold) skips the optimizer and
+still writes both CSVs. Method, prerequisites and anchors:
+[gen_opt_adjustment.md](gen_opt_adjustment.md).
+
+**OptAdj config resolution** (`OptAdjRunner.resolveInputs`, printed as `Using opt_adj_run.json: …`):
+an explicit CLI contingency file pins the `custom` contingency mode to it; else the case-specific
+`wspace/<input_parent>/config/opt_adj_run.json`; else the built-in defaults (50 % scan / 100 %
+enforcement for basecase, all N-1 outages, sparse sensitivities, one SSA worker per processor). The
+OptAdj **mode** is not a file key: the CLI infers `genAdjCA_N-1` when a contingency path is present
+and otherwise runs `genAdjBaseCase`; the bridge / chat tool pass `optAdjType` as a separate argument.
+Only `genAdjCA_N-1` reads a contingency file — a basecase run rejects one. The chat tool layers its
+scalar file-key arguments and its `optAdjConfig` object over the same file, and resolves the mode as
+the tool argument → an `optAdjType` named in that object or the file → the CLI's inference (a
+contingency path means N-1) → basecase; the retired `genAdjCaN_1` spelling is folded onto
+`genAdjCA_N-1` wherever the mode is read, before the bridge sees it.
+
+### Step 5 — Report generation
 
 Reports are **CSV-driven** — generators analyze exported DataFrame CSVs; they do not re-run load flow.
 
@@ -235,8 +294,14 @@ Analyzers (`VoltageAnalyzer`, `BranchLoadingAnalyzer`, `GeneratorQAnalyzer`, `Co
 | `<stem>_DF_gen.csv` | ACLF |
 | `<stem>_DF_load.csv` | ACLF |
 | `<stem>_DF_contingency.csv` | CA |
+| `<stem>_DF_optadj_gen.csv` / `<stem>_DF_optadj_branch.csv` | OptAdj basecase (`genAdjBaseCase`) |
+| `<stem>_DF_optadj_N1_gen.csv` / `<stem>_DF_optadj_N1_branch.csv` | OptAdj N-1 (`genAdjCA_N-1`, 0.7.5+) |
 | `AC_Loadflow_Report.md` | `report aclf` |
 | `NERC_TPL_001_5_Report.md` | `report nerc` |
+
+The Diagram tab (plugin **0.7.7+**) reads the two OptAdj **branch** tables for post-redispatch
+tooltip loadings (`loadingAfterPct`); Host `readCsv` must allow those families or the lines stay
+empty — see [oneline-diagram-process.md](oneline-diagram-process.md).
 
 Legacy layout `wspace/result/<subdir>/` is still supported by `ReportCaseResolver` for older workflows.
 
@@ -251,6 +316,8 @@ Legacy layout `wspace/result/<subdir>/` is still supported by `ReportCaseResolve
 | `loadCase(format, absCasePath)` | Load network into `SimuModelRepository` |
 | `runAclf(format, absCasePath, absConfigPath, absResultsDir, stem)` | Reuse cached net when path matches; call `AclfRunner.runOnNet()` |
 | `runGvy(format, absCasePath, absScriptPath, reload)` | `.gvy` under `<case dir>/scripts/` only; reuse the cached net unless `reload`; evaluate via `GvyScriptRunner` (mutates in place) |
+| `runContingencyWithConfig(format, absCasePath, absContPath, absMonitorPath, absResultsDir, stem, caConfigJson)` | Whole `ca_run.json` payload → `ContingencyRunner.runOnNet` |
+| `runOptAdjWithConfig(format, absCasePath, absContPath, absResultsDir, stem, reload, optAdjType, optAdjConfigJson)` | Mode + `opt_adj_run.json` payload → `OptAdjRunner.runOnNet`; **mutates the cached net's generator P**, so `reload` re-parses first |
 | `summarize(scope, sortRule, numRec)` | In-memory result summary via `AclfResultAdapter` |
 | `getNetworkInfo()` | Text network summary |
 | `runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)` | Delegate to `ReportRunner` |
@@ -284,7 +351,7 @@ Four-step workflow:
 Invocation modes:
 
 - **Directory mode** — auto-discover case + JSON companions
-- **Single-file mode** — explicit paths; optional `[in ieee|psse]`
+- **Single-file mode** — explicit paths; optional `[in ieee|psse|bpa]`
 - **ACLF-only shortcut** — skip CA and NERC sections
 
 ### Post-report skills
@@ -405,10 +472,11 @@ Loaded by `ReportConfig` for Markdown report analyzers:
 
 Build pipeline (`pom.xml`):
 
-1. `maven-dependency-plugin` — copy runtime deps to `lib/deps/`
-2. `maven-antrun-plugin` — unzip `ipss_runnable.jar`, deps, and compiled classes into `target/uber-classes/`
-3. `maven-assembly-plugin` + `src/assembly/uber.xml` — produce self-contained uber JAR
-4. `jacoco-maven-plugin` — coverage on `./mvnw test`
+1. `maven-antrun-plugin` (`clean-deps-dir`) — wipe `lib/deps/*.jar` so stale versions do not accumulate
+2. `maven-dependency-plugin` — copy the current runtime tree to `lib/deps/` (excludes `ipss-runnable`, which lives at `lib/ipss_runnable.jar`)
+3. `maven-antrun-plugin` (`unpack-runtime-libs`) — unzip `ipss_runnable.jar`, deps, and compiled classes into `target/uber-classes/`
+4. `maven-assembly-plugin` + `src/assembly/uber.xml` — produce self-contained uber JAR
+5. `jacoco-maven-plugin` — coverage on `./mvnw test`
 
 ```bash
 ./mvnw -q clean package    # build uber JAR
@@ -424,9 +492,9 @@ JUnit 5 + AssertJ; fixtures under `src/test/resources/`.
 | Test area | Key classes |
 |-----------|-------------|
 | End-to-end CLI | `IpssCmdTest`, `ReportCliTest` |
-| Runners | `AclfRunnerTest`, `ContingencyRunnerTest` |
+| Runners | `AclfRunnerTest`, `ContingencyRunnerTest`, `OptAdjRunnerTest`, `OptAdjRunConfigTest` |
 | Bridge | `IpssAgentBridgeTest`, `SimuModelRepositoryTest` |
-| Input adapters | `IeeeFileAdapterTest`, `PsseFileAdapterTest`, `NetworkLoaderTest` |
+| Input adapters | `IeeeFileAdapterTest`, `PsseFileAdapterTest`, `BpaFileAdapterTest`, `NetworkLoaderTest` |
 | Report analyzers | `AnalyzerTest` |
 | Golden Markdown | `ReportGoldenTest` (compares against `report-golden/*.md`) |
 | Utilities | `ProjectPathsTest`, `CliArgsTest` |
@@ -437,14 +505,12 @@ JUnit 5 + AssertJ; fixtures under `src/test/resources/`.
 
 ## External Dependencies
 
-### InterPSS / IEEE ODM (from `lib/m2-repo`)
+### InterPSS (from `lib/m2-repo`)
 
 | Artifact | Version | Role |
 |----------|---------|------|
-| `com.interpss:ipss-runnable` | 1.0 | Runnable InterPSS bundle |
-| `com.interpss:ipss.core.lib` | 1.0.16 | Core engine: `AclfNetwork`, algorithms |
-| `org.ieee.odm:ieee.odm.schema` | 1.0.1 | IEEE Open Data Model schema |
-| `org.ieee.odm:ieee.odm_pss` | 1.0.1 | PSS/E data exchange types |
+| `com.interpss:ipss-runnable` | 1.0 | Runnable bundle (`ipss.plugin.core` 1.4.2) |
+| `com.interpss:ipss.core.lib` | 1.4.0 | Core engine: `AclfNetwork`, algorithms |
 
 ### ipss-plugin classes (inside `ipss_runnable.jar`)
 
@@ -465,7 +531,7 @@ Used at runtime by agent code:
 | `org.apache.groovy:groovy` (4.0.x) | Runtime for `org.interpss.script.gvy` — the Groovy scenario-script adapter `GvyScriptRunner` drives |
 | `org.eclipse.emf.*` | EMF model (ipss-core transitive) |
 | Sparse solvers (JKLU, CSPARSEJ, etc.) | Linear algebra |
-| `org.slf4j:slf4j-simple` | Logging |
+| `org.slf4j:slf4j-api` + `org.apache.logging.log4j:*` | Logging — SLF4J facade with the log4j2 backend (binding `log4j-slf4j-impl`), configured by `config/log4j2.xml` |
 
 ---
 

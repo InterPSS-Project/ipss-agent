@@ -8,11 +8,12 @@ import org.interpss.agent.cli.ReportCliArgs;
 import org.interpss.agent.report.ReportRunner;
 import org.interpss.agent.runner.AclfRunner;
 import org.interpss.agent.runner.ContingencyRunner;
+import org.interpss.agent.runner.OptAdjRunner;
 import org.interpss.agent.util.ProjectPaths;
 
 /**
- * InterPSS command-line tool: AC load flow and DC contingency analysis.
- * Native Java entry point for ACLF and DC contingency analysis.
+ * InterPSS command-line tool: AC load flow, DC contingency analysis and generator redispatch.
+ * Native Java entry point for ACLF, DC contingency analysis and OptAdj.
  */
 public final class IpssCmd {
 
@@ -54,6 +55,15 @@ public final class IpssCmd {
             case "ca" -> {
                 try {
                     System.out.println(ContingencyRunner.run(paths, cli, caseFilePath, resultsDir, stem));
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    System.err.println(e.getMessage());
+                    CliArgs.printUsage();
+                    System.exit(1);
+                }
+            }
+            case "optadj" -> {
+                try {
+                    System.out.println(OptAdjRunner.run(paths, cli, caseFilePath, resultsDir, stem));
                 } catch (IllegalArgumentException | IllegalStateException e) {
                     System.err.println(e.getMessage());
                     CliArgs.printUsage();

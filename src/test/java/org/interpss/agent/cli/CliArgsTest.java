@@ -35,6 +35,34 @@ class CliArgsTest {
     }
 
     @Test
+    void parseValidated_acceptsOptadjWithAnOptionalContingencyFile() {
+        CliArgs basecase =
+                CliArgs.parseValidated(new String[] {"optadj", "ieee", "data/ieee/ieee39/ieee39.ieee"});
+        assertThat(basecase.simutype()).isEqualTo("optadj");
+        assertThat(basecase.contFile()).isNull();
+        assertThat(basecase.monitorFile()).isNull();
+
+        CliArgs n1 = CliArgs.parseValidated(new String[] {
+                "optadj", "psse", "data/psse/case.raw", "data/psse/cont.json"});
+        assertThat(n1.contFile()).isEqualTo("data/psse/cont.json");
+        assertThat(n1.monitorFile()).isNull();
+    }
+
+    /** OptAdj has no monitored-branch list: the SSA scan is the monitored set. */
+    @Test
+    void parseValidated_rejectsAMonitorFileForOptadj() {
+        assertThatThrownBy(() -> CliArgs.parseValidated(new String[] {
+                "optadj",
+                "psse",
+                "data/psse/case.raw",
+                "data/psse/cont.json",
+                "data/psse/monitor.json"
+        }))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("at most one file argument");
+    }
+
+    @Test
     void parseValidated_rejectsTooFewArgs() {
         assertThatThrownBy(() -> CliArgs.parseValidated(new String[] {"aclf", "ieee"}))
                 .isInstanceOf(IllegalArgumentException.class)

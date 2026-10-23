@@ -55,9 +55,9 @@ than reinventing.
 
 | Step | Detail |
 |------|--------|
-| Layout | all-pairs hop distances from the branch list -> stress majorization (SMACOF); a scale search with neighbour attraction and footprint collision repair compacts it; the drawing is reshaped towards a page-friendly aspect, oriented so the case's first bus sits at the upper-left corner, and snapped to a 10 px grid |
-| Footprint | one bus = bar 6x52 with its `Bus-N` label above; the repair keeps footprints from overlapping, so no two bars or labels collide |
-| Branches | straight black lines with staggered taps per bar side; a short local hop around a bar only when a straight line would cut through one |
+| Layout | **up to 250 buses** (`--layout force`, the default for small cases): all-pairs hop distances from the branch list -> stress majorization (SMACOF); a scale search with neighbour attraction and footprint collision repair compacts it; the drawing is reshaped towards a page-friendly aspect, oriented so the case's first bus sits at the upper-left corner, and snapped to a 10 px grid. **Above 250 buses** (`--layout lattice`, and `auto` above the threshold): the graph is partitioned into connected clusters of at most 48 buses, each cluster is laid out with that same pipeline at a size it is proven at, the clusters' blocks are shelf-packed (adjacency-ordered, tall blocks first, one cell of gutter), and every bus then takes its own 90 x 110 px lattice cell -- so separation, the page bound and the top-left anchor hold by construction rather than by a repair loop that can give up. Two cells are 1.73 x 1.53 footprints apart, which is why no two buses can overlap |
+| Footprint | one bus = bar 6x52 with its `Bus-N` label above; footprints never overlap (the repair enforces it on the force path, the lattice makes it structural on the lattice path), and the self-check now fails on an overlap instead of only printing the count |
+| Branches | straight black lines with staggered taps per bar side; on the force path a short local hop around a bar when a straight line would cut through one, and on the lattice path the branches are emitted **before** the bars so the bars mask the wires (no hop search over 3000 long lines) |
 | Transformers | `IsXfmr` branches -> two interlocking 16x16 rings inside **one** `style=group` cell, placed on the branch trunk -- along it first, then stepped aside -- so the pair stays inline and clear of every bar and label, chained by two stub edges |
 | Annotations | none: no bus data, no branch P/Q, no voltage colours |
 | Outputs | `<case>/diagram/<stem>-oneline.drawio` and `<stem>-oneline-preview.png` (a Pillow re-render of the same geometry) |
@@ -153,7 +153,7 @@ bus/branch tooltips resolve against.
 
 | Rule | Detail |
 |------|--------|
-| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus, whatever its voltage |
+| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus **in the file**, whatever its voltage. The Diagram tab paints an out-of-band bus red *while it renders* (0.6.18, see "Diagram tab — SVG viewer ↔ selected case data") — that colour is never written to the `.drawio` |
 | Labels | `Bus-N` only (no name, no data), centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
 | Branches | thin black (`strokeWidth 1.5`), **undirected** (`endArrow=none`), no edge text, staggered taps so parallel lines leave a bar at different heights |
 | Transformers | two interlocking 16 x 16 rings (`fillColor=none`, centres 8 px apart) inside one `style=group` cell, sitting inline on the branch |
@@ -162,26 +162,119 @@ bus/branch tooltips resolve against.
 | Page | white background rect over the page, title and subtitle top-left, legend box top-right listing only the symbols |
 | Voltage | not drawn. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix when present (`V1` 345 kV, `V2` 138 kV, `V3` 161 kV), else the bus table's `NomVolt` when that is a real voltage (`132000` -> 132 kV), else no voltage text at all |
 
-## How the app reads a diagram
+## Diagram tab — SVG viewer ↔ selected case data
+
+The **Diagram** tab (plugin 0.6.8+; the only preview surface since 0.6.9) is not a free-standing
+file browser. Its inline SVG viewer is keyed to **whichever simulation case the InterPSS tab has
+selected** (or that Chat last loaded into the bridge). Geometry comes from that case's
+`diagram/*.drawio`; voltages, flows, tooltips, search/filter and flag colours come from the same
+case's `result/` tables and from workspace `config/net_diagram.json`. The `.drawio` itself stays
+topology-only — one grey per bar, no baked-in alert colours.
+
+Practical how-to: [oneline_diagram_user_guide.md](user_guide/oneline_diagram_user_guide.md).
+Implementation notes: [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md).
+
+### Case selection (what the tab follows)
+
+| Source | How it reaches the Diagram tab |
+|--------|--------------------------------|
+| InterPSS tab **Simu Case** picker | `onCaseChanged(input)` writes the module-level `selectedCaseInput`; the Diagram view seeds from it on mount |
+| Chat tool load (`interpss_case_load` / `$ipss-case-load`) | One-shot `getBridgeCase` on Diagram mount adopts the bridge's held case into the same `selectedCaseInput` |
+| Tab switch | Conversation views mount one at a time, so a remount always re-reads the shared selection — no poll, no second clock |
+
+The Diagram tab never owns its own case picker. Changing the InterPSS selection (or loading from
+Chat) clears the previous diagram, result indexes and tooltips, bumps a `diagramSeq` so a late RPC
+for the old case is dropped, and reloads everything for the new path. A case with no
+`diagram/*.drawio` yet renders "no diagram" rather than an error.
+
+### Data the SVG viewer binds per case
+
+| Layer | Path / RPC | Role in the SVG |
+|-------|------------|-----------------|
+| Drawing | `<case>/diagram/*.drawio` via `listDrawioFiles` → `readDrawio` | Geometry: bus bars, labels, branches, transformer groups. Parsed once (`parseDrawioScene` → `drawioBranchPairs`); painted as inline SVG by `DrawioDiagram` |
+| Result dir | `checkResult` → `resultDir` + file list | Locates the ACLF / CA / OptAdj CSVs that annotate the open scene |
+| Bus results | `result/<stem>_DF_bus.csv` via paged `readCsv` | Out-of-band `|V|` flags (`VoltMag` by **header name**); area/zone/name for Search/Filter (`busMeta`, loaded on demand) |
+| Branch results | `result/<stem>_DF_branch.csv` via paged `readCsv` | Branch tooltips; base-case `Loading%` flow flags; canonical `BusN` spellings for id matching |
+| Contingency results | `result/<stem>_DF_contingency.csv` via paged `readCsv` (when present) | Contingency loading line on branch tooltips; contingency flow flags / filter |
+| OptAdj results (basecase) | `result/<stem>_DF_optadj_branch.csv` via paged `readCsv` (when present, **0.7.7**) | `Basecase OptAdj Loading(%): …` tooltip line — `loadingAfterPct`, worst per bus pair |
+| OptAdj results (N-1) | `result/<stem>_DF_optadj_N1_branch.csv` via paged `readCsv` (when present, **0.7.7**) | `Contingency OptAdj Loading(%): …` tooltip line — `loadingAfterPct`, worst outage per bus pair |
+| Live bus detail | `busConnections` on hover (cached with neighbours) | Full bus tooltip — same wording as the InterPSS connection diagram |
+| Flag config | `config/net_diagram.json` via `getNetDiagramOptions` / gear → `saveNetDiagramOptions` | Bus voltage band/colour, base-case and contingency flow %/colours, birdseye on/off |
+
+Without ACLF CSVs the drawing still opens; tooltips say `no result data — run ACLF`, and no red /
+flow colours appear. Without a CA table, contingency lines and contingency filters stay off. Without
+an OptAdj table the two OptAdj lines stay off: a table exists only after an OptAdj run, and it lists
+that run's scan candidates (50 % basecase / 90 % N-1 by default), so a branch below the scan
+threshold has no OptAdj line.
+
+### Load → paint pipeline
+
+```
+InterPSS / Chat selects case
+        │
+        ▼
+selectedCaseInput ──► listDrawioFiles(case)
+        │                 │
+        │                 ├─ 0 files → "no diagram yet"
+        │                 ├─ 1 file  → open it
+        │                 └─ N files → picker (remembers diagramChoice)
+        │
+        ├─► checkResult(case) ──► resultDir, *_DF_bus / *_DF_branch / *_DF_contingency /
+        │                          *_DF_optadj_branch / *_DF_optadj_N1_branch
+        │         │
+        │         ├─► readCsv(branch) ──► pair index + Loading% map
+        │         ├─► readCsv(bus)    ──► busAlerts (|V| band) + busMeta (on dialog open)
+        │         ├─► readCsv(contingency) ──► contingency LoadingPercent map
+        │         └─► readCsv(optadj) / readCsv(optadj N-1) ──► loadingAfterPct map per mode
+        │
+        └─► readDrawio(path) ──► diagramXmlFrom ──► parseDrawioScene
+                                      │
+                                      ▼
+                              DrawioDiagram(scene, alert, match, hidden, flow colours…)
+                                      │
+                                      ▼
+                              inline SVG (theme tokens + paint-time overlays)
+```
+
+Caps: **20000 cells** / **4 MiB** per file (0.6.20). Theme remaps near-greys to CSS tokens; saturated
+flag and search colours pass through unchanged. Search hits paint **green** (`#2EA043`, 0.6.36+);
+filters hide non-matching buses **and** their branches/transformer symbols. None of those overlays
+are written back to the `.drawio`.
+
+### How geometry resolves to simulation rows
 
 - **Bus cells** are `busN` (lowercase) and their labels read `Bus-N`; either resolves to the bus, and
-  the host matches the id against the result tables' spelling (`bus118` -> `Bus118`).
+  the host matches the id against the result tables' spelling (`bus118` -> `Bus118`). The number
+  behind both comes from the bus **ID**'s trailing digits (`Bus30` -> `bus30` -> `Bus-30`), with the
+  table's `Number` column as the fallback and the next free index after that: a **BPA** case leaves
+  `Number` at `0` for every bus (the DirectParser assigns no bus numbers), so keying on the column
+  alone collapsed every bar onto `bus0` and every branch onto that one cell.
 - **A branch** is one edge between two bus cells, or two stub edges chained through the transformer's
   `group` cell — the group is what pairs both rings *and* both stubs with the same branch, so
-  hovering any part of a transformer gives one tooltip.
+  hovering any part of a transformer gives one tooltip. The branch CSV is indexed once per case as
+  sorted `busa|busb` keys; contingency rows use the head of `BranchID` (`Bus1001->Bus1064(1)`).
 - **Hit areas**: the drawn geometry is far too thin to hover (a 6 px bar, a 1.5 px line), so the
   preview adds a padded transparent rect or a wide invisible stroke twin per interactive cell.
-- **Preview** (the **Diagram** tab, plugin 0.6.8+; 0.6.1–0.6.8 also had a **Diagram** button
-  on the InterPSS tab that opened the same preview in a modal — 0.6.9 removed button and modal,
-  so the tab is the only surface): lists the selected case's `diagram/*.drawio`, renders inline
-  SVG with a **Source** toggle, pans/zooms/fits, follows the app theme (near-grey colours are
-  re-expressed as theme tokens; a deliberately coloured element keeps its colour), and
-  shows bus/branch tooltips built from the case's result tables. It renders the subset these
-  diagrams use — rounded rects, ellipses, text, groups, polylines through waypoints — and
-  caps a scene at 2000 cells. The **Diagram** tab (order 2, beside InterPSS) draws it full-size
-  and follows whichever case
-  the InterPSS tab has selected. Implementation notes:
-  [persistent-plugin-rebuild.md](persistent-plugin-rebuild.md).
+- **Paint-time only**: `DrawioDiagram` takes optional `alert` / `match` / `hidden` / flow-colour maps
+  built from the CSVs and config. The parsed scene keeps authored greys; desktop draw.io and the
+  generator PNG never see the overlays. Voltage band defaults to **0.9–1.1 pu** (strict; endpoints
+  in band) until the gear dialog changes `config/net_diagram.json`.
+- **Renderer subset**: square rects (`rounded=0`, 0.6.33+), ellipses, text with
+  `align`/`verticalAlign`/`spacing`/`labelBackgroundColor`, groups, polylines through waypoints.
+  Always the rendered scene (the `R`/`S` Source toggle was removed in 0.6.34).
+
+### Host RPCs the tab uses
+
+| RPC | Used for |
+|-----|----------|
+| `getBridgeCase` | Adopt a Chat-loaded case on mount |
+| `listDrawioFiles` | List `<case>/diagram/*.drawio` (empty list if none — not an error) |
+| `readDrawio` | Fetch one workspace-relative `.drawio` (≤ 4 MiB) |
+| `checkResult` | Discover `resultDir` and which `*_DF_*.csv` files exist |
+| `readCsv` | Page bus / branch / contingency / OptAdj branch tables (columns by header name; OptAdj families allowed since **0.7.7**) |
+| `busConnections` | Lazy bus tooltip payload on hover |
+| `getNetDiagramOptions` / `saveNetDiagramOptions` | Read/write flag config |
+| `openDrawio` | Launch the desktop editor for the open file (`config/ipss_plugin_env.json`) |
 
 ## Issues found and fixed
 
@@ -198,7 +291,7 @@ bus/branch tooltips resolve against.
 | Collision repair left pairs exactly at the threshold, so grid snapping broke them again | Split the comfort target used by the relaxation from the hard no-overlap test used for snapping and validation |
 | Force-directed spreading flattened the topology into a hairball | Layout is stress majorization on hop distances; force spreading is only used to compact it |
 | Transformer symbols floated up to ~160 px off their branch | Each symbol is placed on the branch trunk and slid along that line when the spot is taken; both stubs stay straight and collinear |
-| Voltage colours (tried, then removed on request) | Every bar uses the template grey; the name suffix only feeds the subtitle |
+| Voltage colours (tried in the generator, then removed on request) | The file keeps one grey per bar and the `Vn` suffix feeds only the subtitle. Since 0.6.18 the **Diagram tab** overlays the one colour that earns its keep — a bus whose solved `|V|` is outside **0.9–1.1 pu** is red at render time (bar, outline and `Bus-N`), with the violation spelled out in its tooltip. Nothing is baked into the `.drawio`, so the desktop app and the PNG preview stay as generated |
 | Legend collapsed to one long line in draw.io | The legend used a literal newline in an `html=1` label; draw.io treats that as a space, so the two lines merged. The break is now an escaped `<br>`, which both draw.io and the plugin preview render as a line break |
 | Legend painted over the title, page widened by 441 units | On the 600-unit pages the legend sat at `page_w - 370` and the title/subtitle cells were a fixed 800/1000 wide, so they ran under the legend and past the page edge; the exporter then widened the page to fit. Header cells are now measured against the page and the legend stacks under the subtitle when the title column would be under 340 units |
 | Transformer symbol clipped by a bus label | Labels paint last, so a symbol that overlapped one lost part of a ring (the Bus-7 cluster in the 14-bus cases). Placement now searches outward from the branch trunk -- along it, then stepping aside, avoiding bars **and** labels -- and the self-check fails on any overlap that remains |
@@ -217,6 +310,18 @@ bus/branch tooltips resolve against.
   two buses drawn side by side are a few branches apart, not a few miles.
 - **Wires still cross.** 186 branches over 118 bars cannot be crossing-free; the *geometry* is
   collision-free (bars, labels, transformer symbols), the routes are not.
+- **The force pipeline is proven to ~118 buses** (465 cells); past a few hundred footprints its
+  scale search finds no clean separation and the failure used to be silent. Measured on Texas 2K
+  (2000 buses / 3220 branches / 861 transformers) before the lattice path existed:
+  `wrote … (4000x4.9073e+06, … 2193 overlapping footprints)`, 127 self-check failures (the Bus-1
+  corner rule plus 126 transformer/bar-label overlaps — `xfg1` alone overlapped 18 buses), ~8
+  minutes.
+- **The lattice path places 2000 buses**: Texas 2K now reports `placed 2000 buses with the lattice
+  strategy in ~17s`, a **8000 x 6000** page (43% full, 87 x 53 cells), **0 overlapping footprints**,
+  0 transformer overlaps, all 861 symbols in reserved gaps, and a self-check `PASS` in ~18 s — with
+  10 671 cells / 2.95 MiB, inside the preview caps of 20000 cells / 4 MiB. Branch grid distance:
+  median 4 cells, p95 71 (the long tail is the tie lines between the case's many small islands,
+  which no placement can shorten).
 - **The preview is approximate.** No orthogonal auto-routing, no arrowheads, single font size; open
   the file in draw.io when exact geometry matters. A fitted 1900 x 1700 drawing makes 11 px labels
   small until you zoom in.

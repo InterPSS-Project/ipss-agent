@@ -107,4 +107,18 @@ public final class ProjectPaths {
         }
         return wspaceDir.resolve(parent).resolve("config").resolve("ca_run.json");
     }
+
+    /**
+     * Case {@code config/opt_adj_run.json} for the generator-redispatch (OptAdj)
+     * run settings (may not exist). Like CA there is no project-level fallback:
+     * the mode, thresholds and contingency input are case-specific, so callers
+     * check {@link Files#isRegularFile}.
+     */
+    public Path caseOptAdjRunConfig(String inputRelative) {
+        String parent = inputParentRelative(inputRelative);
+        if (parent.isEmpty()) {
+            return wspaceDir.resolve("config").resolve("opt_adj_run.json");
+        }
+        return wspaceDir.resolve(parent).resolve("config").resolve("opt_adj_run.json");
+    }
 }

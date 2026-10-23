@@ -7,7 +7,7 @@ metadata:
 
 # InterPSS Load-Q Voltage Adjustment
 
-Bring a bus voltage into a target band (for example **[0.89, 0.90]** pu) by changing reactive load,
+Bring a bus voltage into a target band (for example **[0.90, 0.91]** pu) by changing reactive load,
 sized from a `dV/dQ` sensitivity and confirmed with a real AC load flow. The linearised (B″)
 sensitivity is a **first cut only** — on a stressed case the value that governs the operating
 point must come from AC solves.
@@ -62,30 +62,30 @@ Write this read-only script to the case folder's `scripts/` (an existing copy ma
 then run it:
 
 ```
-interpss_run_gvy({ case: '<case>', script: 'ieee14_dvdq_Bus14.gvy' })
+interpss_run_gvy({ case: '<case>', script: 'ieee14_dvdq_Bus14_0p90to0p91.gvy' })
 ```
 
 ```groovy
 busId = "Bus14"; loadId = "Bus14-L1";
-vLow = 0.89; vHigh = 0.90;                       // target band, pu
+vLow = 0.90; vHigh = 0.91;                       // target band, pu
 
 bus  = aclfnet.getBus(busId);
 load = bus.getContributeLoad(loadId);
 v0 = bus.voltageMag; q0 = load.loadCP.imaginary; // pu on the 100 MVA base
 
 dVdQ = senAlgo.calBusSensitivity(SenAnalysisType.QVOLTAGE, busId, busId)
-qForHigh = q0 - (vHigh - v0) / dVdQ;   // load Q at the 0.90 edge (smaller Q)
-qForLow  = q0 - (vLow  - v0) / dVdQ;   // load Q at the 0.89 edge (larger Q)
+qForHigh = q0 - (vHigh - v0) / dVdQ;   // load Q at the 0.91 edge (smaller Q)
+qForLow  = q0 - (vLow  - v0) / dVdQ;   // load Q at the 0.90 edge (larger Q)
 println "dV/dQ=" + dVdQ + "  first-cut Q window " + (qForLow*100) + " .. " + (qForHigh*100) + " MVAr"
 ```
 
-Measured on the IEEE14 large-Q case:
+Measured on the IEEE14 large-Q case (shipped **[0.90, 0.91]** band):
 
 | Quantity | Value |
 | --- | --- |
 | Base | 14.9 MW + j50.0 MVAr, V = 0.871352 pu |
 | `dV(Bus14)/dQ(Bus14)` (B″) | **0.4437 pu/pu** |
-| B″-implied window for [0.89, 0.90] | 43.54 … 45.80 MVAr (midpoint 44.67) |
+| B″-implied window for [0.90, 0.91] | 41.3 … 43.5 MVAr (midpoint ≈ 42.4) |
 
 ### Step 3 — re-measure on AC before committing
 
@@ -98,21 +98,21 @@ AC dV/dQ ≈ (V(Q+eps) − V(Q)) / eps        eps ≈ 1 MVAr, then restore Q
 ```
 
 Each probe needs a **fresh reparse** (`reload: true`) before the solve, or the held model drifts
-(see caveats). On this case the AC window is ≈ **45.1 … 46.9 MVAr** — materially different from the
-B″ window.
+(see caveats). On this case the AC window for **[0.90, 0.91]** is ≈ **43.1 … 45.1 MVAr** —
+materially different from the B″ window.
 
 ### Step 4 — apply the edit
 
 Write the mutating script next to the read-only one and run it with `reload: true`:
 
 ```
-interpss_run_gvy({ case: '<case>', script: 'ieee14_adjBus14Q_0p89to0p90.gvy', reload: true })
+interpss_run_gvy({ case: '<case>', script: 'ieee14_adjBus14Q_0p90to0p91.gvy', reload: true })
 ```
 
 ```groovy
 busId = "Bus14"; loadId = "Bus14-L1";
 loadP = 0.149;   // 14.9 MW — untouched
-loadQ = 0.460;   // 46.0 MVAr — midpoint of the AC window
+loadQ = 0.441;   // 44.1 MVAr — midpoint of the AC window
 
 bus  = aclfnet.getBus(busId);
 load = bus.getContributeLoad(loadId);
@@ -135,22 +135,19 @@ Read `result/<stem>_DF_bus.csv` (`VoltMag` column) and check the band. Verify:
 - no bus dropped **below** the lower edge,
 - the case converged.
 
-Verified outcome for the reference case: Q 50.0 → **46.0 MVAr**, **V(Bus14) = 0.895243 pu**, no bus
-below 0.89 (next lowest Bus13 = 0.9794).
+Verified outcome for the reference case: Q 50.0 → **44.1 MVAr**, **V(Bus14) ≈ 0.905 pu**, no bus
+below 0.90 (next lowest Bus13 ≈ 0.985).
 
-## Sizing table (worked example)
+## Sizing table (worked example, [0.90, 0.91])
 
 | Q (MVAr) | V(Bus14) pu | How |
 | --- | --- | --- |
 | 50.00 | 0.871352 | base |
-| 49.00 | 0.877732 | finite-difference probe |
-| 45.51 | 0.897791 | AC secant — in band |
-| 45.13 | 0.899754 | AC secant — top edge |
-| 45.00 | 0.900423 | over-corrected |
-| **46.00** | **0.895243** | **applied** — AC-window midpoint |
+| 45.00 | 0.900423 | AC probe — 0.90 edge just below |
+| 43.20 | 0.909548 | AC probe — 0.91 edge just above |
+| **44.10** | **0.905016** | **applied** — AC-window midpoint |
 
-Aim at the **band midpoint**, not an edge: requesting exactly 0.90 pu landed at 0.900423, outside
-the band.
+Aim at the **band midpoint**, not an edge: requesting exactly a band edge overshoots.
 
 ## Two coupled buses
 
@@ -163,8 +160,9 @@ a damped Newton step with a line search:
 dQload = inv(J) @ (V_measured − V_target)     [pu on system MVA base]
 ```
 
-Example B (Bus13 + Bus14) reached Q13 = 45.505, Q14 = 21.320 MVAr → V13 = 0.899, V14 = 0.891 pu in
-7 passes, targeting the band corner inset by 1e-3 pu (maximise load, not midpoint). See
+Example B′ (Bus13 + Bus14, shipped **[0.90, 0.91]**) reached Q13 ≈ 47.33, Q14 ≈ 17.51 MVAr →
+V13 ≈ V14 ≈ 0.905 pu in 8 passes (`ieee14_qv_adjust_0p90to0p91.gvy` /
+`ieee14_adjBus1314Q_0p90to0p91.gvy`). See
 [docs/load-q-adjustment.md](../../../docs/load-q-adjustment.md).
 
 ## Caveats

@@ -4,7 +4,7 @@
 
 The InterPSS DSH Plugin adds an **InterPSS** tab to the DeepSeek Harness GUI. Use it to:
 
-- Load IEEE CDF (`.ieee`) or PSS/E RAW (`.raw` / `.RAW`) cases
+- Load IEEE CDF (`.ieee`), PSS/E RAW (`.raw` / `.RAW`) or BPA Dat (`.dat` / `.DAT`) cases
 - Run AC load flow (ACLF) and DC contingency analysis (CA)
 - Explore bus / branch / gen / load / contingency result CSVs
 - Inspect bus connection relationships (diagram and tables)
@@ -59,13 +59,28 @@ You can then run the power system simulation workflow or chat following the proc
 
 ---
 
+
+
 ### Open the Diagram tab
 
 The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
 one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
-folder). Hover buses/branches for tooltips, zoom/pan with the toolbar, and use the **draw.io**
-button (0.6.12+; the desktop-app path is configurable per OS via `config/ipss_plugin_env.json`,
-0.6.16+) to edit in the desktop app. If the case has no diagram yet, generate one with
+folder). Plugin **0.7.7** is the recommended install (Diagram line through 0.6.37; BPA Dat
+0.7.1+; CA solver knobs 0.7.2+; OptAdj chat tool 0.7.4+; OptAdj Diagram tooltip loadings
+0.7.7+).
+
+On the tab you can:
+
+- **Zoom / pan** with the toolbar (**− · [level ▾] · +**; **Fit** is the picker’s last entry)
+- **Search** (🔍) for a bus number, `Bus-N`, part of a name, or a branch as `A->B` / `Bus-A -> Bus-B` — matches paint **green** and **OK** centres the view (not at Fit)
+- **Filter** (▼) by area / zone / |V| band / base-case or contingency loading
+- **Gear** (⚙) to edit flag colours and thresholds in `config/net_diagram.json` (and the birdseye switch)
+- Open the file in the local **draw.io** desktop app (0.6.12+; path from `config/ipss_plugin_env.json`, 0.6.16+)
+
+There is no Rendered / Source toggle on this tab (removed in 0.6.34) — the drawing is always the
+rendered scene. Hover buses/branches for tooltips (base-case and contingency loadings when those
+CSVs exist; after an OptAdj run, **Basecase / Contingency OptAdj Loading(%)** from the
+`*_DF_optadj*_branch.csv` tables — 0.7.7+). If the case has no diagram yet, generate one with
 `$ipss-case-diagram` after ACLF.
 
 Full how-to (generate, edit, troubleshoot): [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
@@ -84,9 +99,9 @@ InterPSS DSH Plugin uses an In-Memory Computing (IMC) approach. When a simulatio
   - **Texas 2K-bus** — PSS/E RAW under `data/psse/Texas2K/`
   - **Select…** — custom case
 2. For a custom case:
-  - Set format to **IEEE CDF** or **PSS/E RAW**.
-  - Enter a path relative to the workspace (for example `data/ieee/Ieee118Bus/ieee118.ieee`), or click the search icon to open the case picker.
-  - The picker lists matching files under `wspace/data`, filtered by the selected format.
+  - Set format to **IEEE CDF**, **PSS/E RAW** or **BPA Dat** (0.7.1+; the path placeholder follows the choice).
+  - Enter a path relative to the workspace (for example `data/ieee/Ieee118Bus/ieee118.ieee`, or `data/bpa/ieee9/IEEE9.dat` for a BPA case), or click the search icon to open the case picker.
+  - The picker lists matching files under `wspace/data`, filtered by the selected format — each row is tagged `IEEE` / `PSSE` / `BPA`, so a BPA Dat selection lists the `.dat` cases (`data/bpa/…`).
 3. Click **Load**.
   - Success: `✓ Loaded: N buses, M branches`, plus a **Network info** panel.
   - Failure: `⚠` with an error message.
@@ -257,11 +272,51 @@ For a custom pick:
 
 An out-of-range threshold blocks **OK** with `over loading threshold must be a percentage between 0 and 1000`.
 
+**Advanced solver settings (0.7.2+).** Below the threshold, the dialog has a **▸ Advanced solver
+settings** disclosure with the DC contingency solver's own knobs — they are the fields of the
+engine's `DclfContingencyConfig` (plus the worker count) and are copied onto the solver by the
+runner. Every one defaults to the value the runner used before the panel existed, so leaving the
+panel closed changes nothing.
 
-| Button         | Effect                                                                                                                                         |
-| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| **OK**         | Saves `wspace/<case-parent>/config/ca_run.json` — the over loading threshold and both section choices (0.4.7+), closes the dialog, and runs CA |
-| **Cancel** / ✕ | Closes without writing or running                                                                                                              |
+
+| Field                           | Default                       | Meaning                                                                                                                                                                                                                                         |
+| ------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Include losses (INC_LOSS)       | `true`                        | Whether the DC model includes losses                                                                                                                                                                                                            |
+| Screening pass                  | `false`                       | The engine's pre-screening pass (uses the two cutoffs below)                                                                                                                                                                                    |
+| DC loading cutoff (%)           | `100`                         | Screening cutoff; `0` means no cutoff                                                                                                                                                                                                           |
+| DC flow change cutoff (%)       | `200`                         | Screening cutoff on the flow change                                                                                                                                                                                                             |
+| Solution method                 | `SparseEqnSolve`              | `SparseEqnSolve` or `WoodburyMatrixUpdate`                                                                                                                                                                                                      |
+| KLU RHS batch size (0 = off)    | `0`                           | Batch size for the KLU right-hand-side solves                                                                                                                                                                                                   |
+| Cache violation shift factors   | `false`                       | Reuse violated-pair shift factors between contingencies                                                                                                                                                                                         |
+| Islanding treatment             | `ANCHORED_COMPENSATE_ONE_BUS` | `SKIP`, `ANCHORED_COMPENSATE_ONE_BUS` or `FULL_DCLF_REPLAY`                                                                                                                                                                                     |
+| N-1 islanding replay            | `false`                       | Replay an islanding N-1 case with a full DCLF solve                                                                                                                                                                                             |
+| Multi-outage replay             | `EXACT_TOPOLOGY`              | `EXACT_TOPOLOGY` or `HIGH_IMPEDANCE`                                                                                                                                                                                                            |
+| High impedance X (pu)           | `10000`                       | The reactance a `HIGH_IMPEDANCE` replay applies                                                                                                                                                                                                 |
+| Turn off island buses           | `true`                        | Drop buses that island after an outage                                                                                                                                                                                                          |
+| Auto turn line into transformer | `true`                        | Treat a line that cannot island as a transformer                                                                                                                                                                                                |
+| Rating provider                 | `default`                     | Which branch rating the overload check uses: `default` keeps the engine's own (`RATING_B`: rating MVA 2, falling back to rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when MVA 2 is zero), `RATING_A` (rating MVA 1) or `RATING_B` |
+| Threads (0 = all cores)         | `0`                           | Worker count for the parallel scan                                                                                                                                                                                                              |
+
+
+An unusable value blocks **OK** with the field's own message (for example `Solution method must be SparseEqnSolve | WoodburyMatrixUpdate`); **OK** writes all twenty keys to `config/ca_run.json`.
+
+> **Overload detection needs branch ratings.** The check compares each post-contingency flow with a
+> branch rating (`LimMvaA`/`LimMvaB`/`LimMvaC`). A case whose branch table carries none — the
+> `ieee39.ieee` fixture is one, until its `scripts/ieee39_limit_setup.gvy` rates the branches
+> (34 lines at 600 MVA, 12 transformers at 800 MVA) — reports **0 overloads at any threshold**,
+> which is the data, not the run. Rate the branches (a `scripts/*.gvy` run through Chat, or a case
+> file that carries them) before reading the CA result. The **Rating provider** row then decides
+> which number the flow is compared with: `RATING_A` is rating MVA 1 (600 / 800 MW here), while the
+> default leaves the engine's `RATING_B` in place — rating MVA 2, and rating MVA 1 × 1.15 (line) /
+> × 1.35 (transformer) when that is zero, i.e. 690 / 1080 MW here, which reports fewer overloads.
+
+
+
+
+| Button         | Effect                                                                                                                                                                             |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **OK**         | Saves `wspace/<case-parent>/config/ca_run.json` — the over loading threshold, both section choices (0.4.7+) and the advanced solver knobs (0.7.2+), closes the dialog, and runs CA |
+| **Cancel** / ✕ | Closes without writing or running                                                                                                                                                  |
 
 
 `config/ca_run.json` is the same file the Java CLI reads for CA, so GUI and batch runs stay aligned.
@@ -323,20 +378,60 @@ For the full tool contract (inputs, cards, version history), see [interpss-tools
 ### What you can ask
 
 
-| Goal                              | Example prompt                                                   | Skill / tool                                   |
-| --------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------- |
-| Load the selected (or named) case | `Load the IEEE 118-bus case` / `Load the selected InterPSS case` | `$ipss-case-load` / `interpss_case_load`       |
-| Network info                      | `Show network info for the current case`                         | `$ipss-case-info` / `interpss_network_info`    |
-| Run AC load flow                  | `Run ACLF on the selected case`                                  | `$ipss-case-aclf` / `interpss_run_aclf`        |
-| Adjust load Q to a voltage band   | `Adjust Bus14 load Q to bring it into [0.89, 0.90] pu`           | `$ipss-case-aclf-adjust` / `interpss_run_gvy` + `interpss_run_aclf` |
-| Case summary / top-N              | `Summarize the current case` / `Find the lowest voltage buses`   | `$ipss-case-summary` / `interpss_case_summary` |
-| What-if scenario script           | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve`             | `$ipss-case-script` / `interpss_run_gvy`       |
-| One-line diagram for the case     | `Draw the one-line diagram for the current case`                 | `$ipss-case-diagram` (script)                  |
+| Goal                              | Example prompt                                                               | Skill / tool                                                        |
+| --------------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Load the selected (or named) case | `Load the IEEE 118-bus case` / `Load the selected InterPSS case`             | `$ipss-case-load` / `interpss_case_load`                            |
+| Network info                      | `Show network info for the current case`                                     | `$ipss-case-info` / `interpss_network_info`                         |
+| Run AC load flow                  | `Run ACLF on the selected case`                                              | `$ipss-case-aclf` / `interpss_run_aclf`                             |
+| Adjust load Q to a voltage band   | `Adjust Bus14 load Q to bring it into [0.90, 0.91] pu`                       | `$ipss-case-aclf-adjust` / `interpss_run_gvy` + `interpss_run_aclf` |
+| Case summary / top-N              | `Summarize the current case` / `Find the lowest voltage buses`               | `$ipss-case-summary` / `interpss_case_summary`                      |
+| What-if scenario script           | `Run ieee14_adjBus14.gvy on IEEE 14-bus, then solve`                         | `$ipss-case-script` / `interpss_run_gvy`                            |
+| DC contingency screening          | `Run a contingency analysis on the current case`                             | `$ipss-case-ca` / `interpss_run_ca`                                 |
+| Relieve overloads by redispatch   | `Relieve the N-1 overloads on the selected case by redispatching generation` | `$ipss-case-optadj` / `interpss_case_optadj`                        |
+| One-line diagram for the case     | `Draw the one-line diagram for the current case`                             | `$ipss-case-diagram` (script)                                       |
 
 
-Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`, `$ipss-case-diagram`. Plain natural language works the same when the agent picks those tools.
+Slash / skill forms: `$ipss-case-load`, `$ipss-case-info`, `$ipss-case-aclf`, `$ipss-case-aclf-adjust`, `$ipss-case-summary`, `$ipss-case-script`, `$ipss-case-ca`, `$ipss-case-optadj`, `$ipss-case-diagram`. Plain natural language works the same when the agent picks those tools.
 
-For the Diagram tab, generation, and draw.io editing, see [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
+### Relieve overloads by redispatching generation (OptAdj)
+
+Ask for the overloads to be relieved and the agent calls `interpss_case_optadj`: a DC-sensitivity
+scan collects the branches above a scan percentage, a linear program moves the control generators so
+the monitored loadings stay under an enforce percentage, and the same set is re-checked. Two modes,
+chosen by `optAdjType`:
+
+- `genAdjBaseCase` (default) — pre-contingency loading, scan default 50 %;
+- `genAdjCA_N-1` — post-contingency loading for single branch outages, scan default 90 %; pass a
+`contingencyFile` to use a listed contingency set instead of all N-1 outages.
+
+The config's other keys ride along in `optAdjConfig`: `contingencyMode`, `sparseSenMatrix` (`true` =
+sparse sensitivities, the default) and `threads` — six file keys in all, since the mode is not one of
+them (0.7.11): it is the argument above, or an `optAdjType` inside `optAdjConfig` / the case's
+`config/opt_adj_run.json`, and when none names one a `contingencyFile` means N-1 and otherwise the
+basecase — the same inference a CLI run makes. The N-1 token was renamed from `genAdjCaN_1` in 0.7.8 —
+the older spelling is still accepted wherever the mode is read and normalised, so an existing config
+file keeps working.
+
+The card reports the mode, both thresholds, the before → after overload counts, how many control
+generators moved, and an **Explore results** row with the *Gen adjustments* (`adjP` per generator, in
+MW) and *Branch loading* (before/after `loadingBeforePct` / `loadingAfterPct`) tables. Basecase
+writes `*_DF_optadj_gen.csv` / `*_DF_optadj_branch.csv`; N-1 writes the `_N1_` pair (0.7.5+). The
+method, prerequisites and anchors are in [gen_opt_adjustment.md](../gen_opt_adjustment.md).
+
+Two things to know before you rely on it:
+
+- **The case needs P gen limits and branch ratings.** The run refuses a case whose generators carry
+no `pGenLimit` or whose branches carry no rating MVA 1 (`LimMvaA`) instead of guessing — the IEEE 39
+fixture needs its `scripts/ieee39_limit_setup.gvy` applied first (ask Chat to run it, or use the
+script skill).
+- **The run changes the loaded model's generator dispatch** (like a scenario script). A later ACLF, CA
+or report sees the redispatched case; ask for the case to be reloaded if you want the file's own
+dispatch back.
+
+After a run, the **Diagram** tab’s branch hover adds **Basecase OptAdj Loading(%)** /
+**Contingency OptAdj Loading(%)** from those branch tables (post-redispatch `loadingAfterPct`,
+0.7.7+). For Diagram generation and draw.io editing, see
+[oneline_diagram_user_guide.md](oneline_diagram_user_guide.md).
 
 ### Case selection
 
@@ -349,11 +444,12 @@ When you do not name a case, tools resolve in this order:
 You can name a case as:
 
 
-| Form                       | Example                                       |
-| -------------------------- | --------------------------------------------- |
-| Workspace-relative path    | `data/ieee/Ieee118Bus/ieee118.ieee`           |
-| Path with `wspace/` prefix | `wspace/data/ieee/Ieee14Bus/ieee14.ieee`      |
-| Preset label               | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
+| Form                       | Example                                             |
+| -------------------------- | --------------------------------------------------- |
+| Workspace-relative path    | `data/ieee/Ieee118Bus/ieee118.ieee`                 |
+| BPA Dat case (0.7.1+)      | `data/bpa/ieee9/IEEE9.dat` (`.DAT` is accepted too) |
+| Path with `wspace/` prefix | `wspace/data/ieee/Ieee14Bus/ieee14.ieee`            |
+| Preset label               | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus`       |
 
 
 `interpss_case_load` is a **no-op** (`alreadyLoaded: true`) when the bridge already holds that exact case — it does not re-parse. To force a re-parse of the same case, use the tab’s **Load** button (or `reload: true` on a script run).
@@ -362,14 +458,18 @@ You can name a case as:
 
 
 
-#### Load → network info → ACLF
+#### Load → ACLF
 
 ```text
-Load IEEE 118-bus and show network info
-Run ACLF on the selected case
+/ipss-case-load @wspace/data/ieee/Ieee118Bus/ieee118.ieee
+/ipss-case-aclf
 ```
 
-After a successful ACLF in Chat, the tool card can show **Explore results** (Bus / Branch / Gen / Load) and a **Report** button for the AC Loadflow Markdown report — similar to the InterPSS tab explorers. That Chat **Report** always generates the AC Loadflow report (`reportType: aclf`), even if a contingency CSV also exists; use the InterPSS tab **Report** button when you want the contingency-based auto pick (NERC vs ACLF).
+After a successful ACLF in Chat, the tool card can show **Explore results** (Bus / Branch / Gen / Load) and a **Report** button for the AC Loadflow Markdown report — similar to the InterPSS tab explorers. 
+
+![DSH Chat ACLF](../image/ipss-dsh-chat-aclf.png)
+
+That Chat **Report** always generates the AC Loadflow report (`reportType: aclf`), even if a contingency CSV also exists; use the InterPSS tab **Report** button when you want the contingency-based auto pick (NERC vs ACLF).
 
 #### Summary and rankings
 
@@ -392,7 +492,8 @@ Notes:
 Scripts live under the case folder’s `scripts/` directory (for example `data/ieee/Ieee14Bus/scripts/`). The script **edits** the held model in place and does not solve; run ACLF afterward when you need solved results.
 
 ```text
-On IEEE 14-bus, run ieee14_adjBus14.gvy, then run ACLF
+/ipss-case-load @wspace/data/ieee/Ieee14Bus/ieee14.ieee @wspace/data/ieee/Ieee14Bus/scripts/ieee14_adjBus14.gvy
+/ipss-case-aclf
 ```
 
 Important:
@@ -403,8 +504,6 @@ Important:
 - Only run scripts you trust.
 
 To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bus14 / Bus13 examples), see [loadflow-adjustment-user-guide.md](loadflow-adjustment-user-guide.md).
-
-
 
 ### Chat vs InterPSS tab vs batch Chat
 
@@ -437,7 +536,7 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | “InterPSS is not available in this workspace…” | Workspace `README.md` first H1 must be exactly `iPSS Agent`.                                                             |
 | **ACLF** / **CA** greyed out                   | Click **Load** successfully first.                                                                                       |
-| Case picker empty                              | No matching `.ieee` or `.raw`/`.RAW` under `wspace/data` for the selected format.                                        |
+| Case picker empty                              | No matching `.ieee`, `.raw`/`.RAW`, or `.dat`/`.DAT` (BPA, 0.7.1+) under `wspace/data` for the selected format.          |
 | CA dialog custom pick errors                   | Pick a case-folder `.json` with a `contingencies` or `monitored_branches` array; check the green count / red error line. |
 | Tab picker shows a different case than Chat    | Update the plugin to 0.3.19+ (picker mirrors the bridge), or pass `case` explicitly in Chat.                             |
 | **Report** greyed out                          | No converged result CSVs yet — run ACLF (and CA for NERC).                                                               |
@@ -451,7 +550,10 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 ### Related
 
 - Diagram tab / one-line generation — [oneline_diagram_user_guide.md](oneline_diagram_user_guide.md)
+- OptAdj method and IEEE39 anchors — [gen_opt_adjustment.md](../gen_opt_adjustment.md)
+- Load-Q / OptAdj user workflows — [loadflow-adjustment-user-guide.md](loadflow-adjustment-user-guide.md)
 - InterPSS DSH Chat tools (developer reference) — [interpss-tools.md](../interpss-tools.md)
+- Release **0.7.7** (OptAdj Diagram tooltips) — [Release-V0.7.7.md](../release_note/Release-V0.7.7.md)
 - Batch Chat / `/ipss-sim` — [batch_chat_user_guide.md](batch_chat_user_guide.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)
 - Install or update the plugin — [InstallDSHPlugin.md](../../InstallDSHPlugin.md)

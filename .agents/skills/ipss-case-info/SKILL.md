@@ -1,6 +1,6 @@
 ---
 name: ipss-case-info
-description: Use when asked to show the current InterPSS simulation case's network information — active bus and branch counts, total generation and load, load-flow convergence, and maximum mismatch — for the case selected in the InterPSS tab or for a named IEEE CDF / PSS/E RAW case.
+description: Use when asked to show the current InterPSS simulation case's network information — active bus and branch counts, total generation and load, load-flow convergence, and maximum mismatch — for the case selected in the InterPSS tab or for a named IEEE CDF / PSS/E RAW / BPA Dat case.
 metadata:
   short-description: Show the current case's network info
 ---
@@ -43,6 +43,7 @@ Do not ask the user which case to use: with no argument the tool resolves the ca
 |---|---|
 | Workspace-relative path | `data/ieee/Ieee118Bus/ieee118.ieee` |
 | Absolute path containing `/wspace/data/` | `/…/ipss-agent/wspace/data/ieee/Ieee14Bus/ieee14.ieee` |
+| BPA Dat case (plugin 0.7.1+) | `data/bpa/ieee9/IEEE9.dat` |
 | Preset label (case-insensitive) | `IEEE 118-bus`, `IEEE 14-bus`, `Texas 2K-bus` |
 
 Loading the case into the embedded JVM is part of the call. A case the bridge already holds is reused rather than re-parsed, so a converged AC load flow is preserved — pass `case` only to target a different case.

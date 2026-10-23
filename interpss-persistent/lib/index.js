@@ -61,7 +61,7 @@ async function writeConfigText(fs, target, text, directPath) {
 
 const NAMESPACE = 'interpss'
 const PACKAGE = '@deepseek-ai/dsh-interpss'
-const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio', 'openDrawio']
+const METHODS = ['isActivated', 'checkResult', 'checkResultFiles', 'listCases', 'readCsv', 'busConnections', 'runAclf', 'runCa', 'runOptAdj', 'runReport', 'getAclfOptions', 'saveAclfOptions', 'listCaFiles', 'getCaOptions', 'saveCaOptions', 'loadCase', 'summarizeResult', 'getNetworkInfo', 'getBridgeCase', 'listDrawioFiles', 'readDrawio', 'openDrawio', 'getNetDiagramOptions', 'saveNetDiagramOptions']
 
 function jsonParam(name, wire) {
   return { name, wire, source: 'json', codec: { mode: 'src-json' } }
@@ -141,7 +141,11 @@ const DESCRIPTORS = METHODS.map((method) => ({
 // in the tab (preset switch, custom path, file picker, remount) already calls
 // the `checkResult` RPC, so the Host records the selection there instead of
 // adding a client-side call or a new Typert endpoint.
-const CASE_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/
+// Case-file types the tab and the tools accept: IEEE CDF (.ieee), PSS/E RAW (.raw/.RAW) and
+// BPA Dat (.dat/.DAT). The extension maps to the format string `NetworkLoader` dispatches on,
+// and the regexes are case-insensitive so an upper-case `.DAT`/`.RAW` is a case file too.
+const CASE_PATH_RE = /^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|dat)$/i
+const CASE_FORMATS = ['ieee', 'psse', 'bpa']
 // Anchor on the unique "/wspace/data/" marker: the DSH home itself may live
 // under a directory also named "wspace" (e.g. ~/Documents/wspace/…).
 const WS_DATA_MARKER = '/wspace/data/'
@@ -153,7 +157,19 @@ function sessionKey(sessionId) {
 }
 
 function formatOfCasePath(casePath) {
-  return /\.raw$/i.test(casePath) ? 'psse' : 'ieee'
+  if (/\.raw$/i.test(casePath)) return 'psse'
+  if (/\.dat$/i.test(casePath)) return 'bpa'
+  return 'ieee'
+}
+
+// The format a request declares, when it is one we know; otherwise the path decides.
+function normalizeCaseFormat(format, casePath) {
+  return CASE_FORMATS.indexOf(format) >= 0 ? format : formatOfCasePath(casePath)
+}
+
+// `IEEE9.dat` -> `IEEE9` (matches the Java `ProjectPaths.stem`, any extension stripped).
+function caseStem(fileName) {
+  return String(fileName).replace(/\.(ieee|raw|dat)$/i, '')
 }
 
 // Record (or clear, for an empty path) the case selected in the InterPSS tab.
@@ -165,7 +181,7 @@ function rememberSelectedCase(sessionId, casePath, format) {
   }
   selectedCaseBySession.set(key, {
     input: casePath,
-    format: format === 'psse' ? 'psse' : formatOfCasePath(casePath),
+    format: normalizeCaseFormat(format, casePath),
   })
 }
 
@@ -529,7 +545,7 @@ async function isIpssWorkspace(ctx, root) {
 function casePartsOf(caseInput) {
   const slash = caseInput.lastIndexOf('/')
   const parent = slash >= 0 ? caseInput.slice(0, slash) : ''
-  const stem = caseInput.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+  const stem = caseStem(caseInput.slice(slash + 1))
   return { parent, stem }
 }
 
@@ -650,11 +666,203 @@ const DEFAULT_CA_CONFIG = {
   // lands in the result CSV. The CA dialog's field, the tool's `overloadThreshold` and
   // config/ca_run.json all feed this one number.
   overloadThreshold: 90,
+  // The solver knobs behind the DC contingency analysis (0.7.2). They are the fields of
+  // ipss.core.lib's `DclfContingencyConfig`, which the runner copies onto the solver, plus
+  // the runner's own worker count — every default is the value the runner used before they
+  // became selectable, so a `ca_run.json` (or tool call) that names none of them behaves
+  // exactly as it always did.
+  dclfInclLoss: true,
+  dclfScreening: false,
+  dcLoadingCutoff: 100,
+  dcFlowChangeCutoff: 200,
+  solutionMethod: 'SparseEqnSolve',
+  kluEndpointRhsBatchSize: 0,
+  cacheViolationCombinedShiftFactors: false,
+  islandingTreatment: 'ANCHORED_COMPENSATE_ONE_BUS',
+  n1IslandingReplayEnabled: false,
+  multiOutageReplayMode: 'EXACT_TOPOLOGY',
+  highImpedanceReactancePu: 10000,
+  turnOffIslandBus: true,
+  autoTurnLine2Xfr: true,
+  // Which branch rating the overload check compares against: the library's own provider
+  // (`RATING_B` on ipss.core.lib 1.4.0 — rating MVA 2, or rating MVA 1 × 1.15 for a line /
+  // × 1.35 for a transformer when MVA 2 is zero), or either rating pinned.
+  ratingProvider: 'default',
+  // 0 = one worker per available processor, the runner's historical choice.
+  threads: 0,
+}
+
+// The solver knobs, by kind, so validation, the dialog and the guard read one table. The
+// enum lists are the Java enums' constant names verbatim: a value not in them is rejected
+// by the Host as well as by `CaRunConfig`, with the same wording.
+const CA_SOLUTION_METHODS = ['SparseEqnSolve', 'WoodburyMatrixUpdate']
+const CA_ISLANDING_TREATMENTS = ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY']
+const CA_MULTI_OUTAGE_REPLAY_MODES = ['EXACT_TOPOLOGY', 'HIGH_IMPEDANCE']
+const CA_RATING_PROVIDERS = ['default', 'RATING_A', 'RATING_B']
+const CA_BOOL_KEYS = ['dclfInclLoss', 'dclfScreening', 'cacheViolationCombinedShiftFactors',
+  'n1IslandingReplayEnabled', 'turnOffIslandBus', 'autoTurnLine2Xfr']
+const CA_CHOICE_KEYS = [
+  ['solutionMethod', CA_SOLUTION_METHODS],
+  ['islandingTreatment', CA_ISLANDING_TREATMENTS],
+  ['multiOutageReplayMode', CA_MULTI_OUTAGE_REPLAY_MODES],
+  ['ratingProvider', CA_RATING_PROVIDERS],
+]
+const CA_COUNT_KEYS = ['kluEndpointRhsBatchSize', 'threads']
+const CA_CUTOFF_KEYS = ['dcLoadingCutoff', 'dcFlowChangeCutoff']
+const CA_POSITIVE_KEYS = ['highImpedanceReactancePu']
+
+// The file's key order, and the exact payload written to config/ca_run.json and handed to
+// the bridge: one list so the dialog, the tool and the file cannot drift.
+const CA_CONFIG_KEYS = Object.keys(DEFAULT_CA_CONFIG)
+
+function caConfigPayload(config) {
+  const source = config && typeof config === 'object' ? config : DEFAULT_CA_CONFIG
+  const out = {}
+  for (const key of Object.keys(DEFAULT_CA_CONFIG)) {
+    out[key] = source[key] === undefined ? DEFAULT_CA_CONFIG[key] : source[key]
+  }
+  return out
+}
+
+// Generator-redispatch (OptAdj) run config (config/opt_adj_run.json beside config/ca_run.json).
+// The mode is a call argument (tool / bridge / CLI inference), not a file key. The thresholds and
+// contingency input are case-specific, so an absent file is the built-in default below. The method
+// and its prerequisites are documented in docs/gen_opt_adjustment.md.
+const DEFAULT_OPTADJ_CONFIG = {
+  // The SSA scan collects candidates above this percentage. null = follow the mode, which is what
+  // the two documented samples do (basecase 50 %, N-1 90 %); an explicit number always wins.
+  scanLoadingThreshold: null,
+  // The percentage the linear program enforces (both samples use 100 % of rating).
+  optAdjLoadingThreshold: 100,
+  contingencyMode: 'all',
+  contingencyFile: null,
+  // The optimizer's sensitivity path: true = sparse, false = dense. Java defaults to the same true,
+  // which is what its runner hard-coded before the knob, so an absent key changes no result.
+  sparseSenMatrix: true,
+  // 0 = one SSA worker per available processor.
+  threads: 0,
+}
+
+// The mode tokens and the mode-dependent scan default, duplicated from
+// `OptAdjRunConfig.GEN_ADJ_*`/`DEFAULT_SCAN_*` so a run that names no scan threshold still gets the
+// sample's value; guard §22 pins the two sides against each other. `OPTADJ_LEGACY_TYPES` maps the
+// retired spelling onto the canonical token, so a legacy name on the tool/UI arg behaves exactly
+// like the token Java accepts. Default mode when the caller names none.
+const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']
+const OPTADJ_DEFAULT_TYPE = 'genAdjBaseCase'
+const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }
+const OPTADJ_LEGACY_TYPES = { genAdjCaN_1: 'genAdjCA_N-1' }
+// The six keys the Java record reads from `config/opt_adj_run.json` — exactly what the payload
+// carries (0.7.11).
+const OPTADJ_CONFIG_KEYS = Object.keys(DEFAULT_OPTADJ_CONFIG)
+// The mode is not a Java file key: it travels as its own bridge argument. The Host still honors an
+// `optAdjType` in the config file or in `optAdjConfig` (0.7.4-0.7.10 files name it), so it is an
+// accepted *input* key while staying out of the payload.
+const OPTADJ_MODE_KEY = 'optAdjType'
+const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])
+
+// The canonical mode token for an untrusted value, '' when it names no known mode. Every reader —
+// tool arg, result-file names, CLI fallback — goes through this one mapping.
+function canonicalOptAdjType(value) {
+  if (typeof value !== 'string') return ''
+  const token = value.trim()
+  if (OPTADJ_TYPES.indexOf(token) >= 0) return token
+  const mapped = OPTADJ_LEGACY_TYPES[token]
+  return mapped === undefined ? '' : mapped
+}
+
+// Resolve the mode for a run: an explicit arg (with legacy spelling mapped), else N-1 when a
+// contingency path is present (CLI inference), else the basecase default.
+function resolveOptAdjType(explicitType, contRel) {
+  const type = canonicalOptAdjType(explicitType)
+  if (type !== '') return type
+  return contRel !== null && contRel !== undefined && contRel !== ''
+    ? 'genAdjCA_N-1'
+    : OPTADJ_DEFAULT_TYPE
+}
+
+// The bridge config JSON (no mode): every file key, with the mode-dependent scan default filled in
+// when the caller (or the file) left the scan threshold unset, so the Java side always receives an
+// explicit number. The mode travels as a separate bridge argument.
+function optAdjConfigPayload(config, optAdjType) {
+  const source = config && typeof config === 'object' ? config : DEFAULT_OPTADJ_CONFIG
+  const type = resolveOptAdjType(optAdjType, source.contingencyFile)
+  const out = {}
+  for (const key of OPTADJ_CONFIG_KEYS) {
+    out[key] = source[key] === undefined ? DEFAULT_OPTADJ_CONFIG[key] : source[key]
+  }
+  if (out.scanLoadingThreshold === null) out.scanLoadingThreshold = OPTADJ_SCAN_DEFAULTS[type]
+  return out
+}
+
+// The two CSVs an OptAdj run writes. The runner decides the names and reports them in the bridge
+// reply (`genFile`/`branchFile`); this mirrors `OptAdjRunner`'s rule for the two paths that have no
+// reply to read — the CLI fallback, and a JAR that predates those reply keys. The N-1 mode carries
+// the `N1` infix so its pair cannot overwrite a basecase pair in the same result folder.
+// Guard §22 pins this rule against the Java runner and the client's file lookup.
+function optAdjResultNames(stem, optAdjType) {
+  const suffix = canonicalOptAdjType(optAdjType) === 'genAdjCA_N-1' ? '_DF_optadj_N1' : '_DF_optadj'
+  return { genFile: stem + suffix + '_gen.csv', branchFile: stem + suffix + '_branch.csv' }
 }
 
 // The dialog reports how many entries a candidate file holds, which means
 // parsing every .json in the case folder; skip absurd ones.
+// config/net_diagram.json: the Diagram tab's flag thresholds and colours, edited from the tab's
+// gear dialog (0.6.26). It is the WORKSPACE-level file -- one flag style for every case -- and it
+// is a PREVIEW setting: the generator bakes no colour into a .drawio, so the desktop app and the
+// PNG still show the plain diagram.
+const DEFAULT_NET_DIAGRAM_CONFIG = {
+  Bus_flag_upper_limit: 1.1,
+  Bus_flag_lower_limit: 0.9,
+  Bus_flag_color: 'red',
+  Basecase_branch_flow_flag_percent: 80.0,
+  Basecase_branch_flow_flag_color: 'green',
+  Contingency_branch_flow_flag_percent: 100.0,
+  Contingency_branch_flow_flag_color: 'blue',
+  Show_birdseye_view: true,
+}
+
+const NET_DIAGRAM_COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\([^)]*\)|hsla?\([^)]*\))$/i
+
+// The seven known keys, validated; every other key the file carries is passed through untouched,
+// so a hand-edited file keeps whatever else it holds. Used on BOTH sides of the wire: the client
+// validates the form for immediate feedback, the Host sanitizes again so a bad value never lands.
+function sanitizeNetDiagramConfig(raw) {
+  const out = raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.assign({}, raw) : {}
+  const defaults = DEFAULT_NET_DIAGRAM_CONFIG
+  const num = (key, fallback, lo, hi) => {
+    const v = Number(out[key])
+    out[key] = Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback
+  }
+  const color = (key, fallback) => {
+    const v = typeof out[key] === 'string' ? out[key].trim() : ''
+    out[key] = NET_DIAGRAM_COLOR_RE.test(v) ? v : fallback
+  }
+  num('Bus_flag_upper_limit', defaults.Bus_flag_upper_limit, 0.05, 5.0)
+  num('Bus_flag_lower_limit', defaults.Bus_flag_lower_limit, 0.05, 5.0)
+  if (!(out.Bus_flag_lower_limit < out.Bus_flag_upper_limit)) {
+    out.Bus_flag_lower_limit = defaults.Bus_flag_lower_limit
+    out.Bus_flag_upper_limit = defaults.Bus_flag_upper_limit
+  }
+  color('Bus_flag_color', defaults.Bus_flag_color)
+  num('Basecase_branch_flow_flag_percent', defaults.Basecase_branch_flow_flag_percent, 0.0, 1000.0)
+  color('Basecase_branch_flow_flag_color', defaults.Basecase_branch_flow_flag_color)
+  num('Contingency_branch_flow_flag_percent', defaults.Contingency_branch_flow_flag_percent, 0.0, 1000.0)
+  color('Contingency_branch_flow_flag_color', defaults.Contingency_branch_flow_flag_color)
+  // The one switch: on unless it was explicitly turned off (the word counts, for a hand edit).
+  const bird = out.Show_birdseye_view
+  out.Show_birdseye_view = (bird === false || bird === 0 || String(bird).trim().toLowerCase() === 'false')
+    ? false
+    : ((bird === true || bird === 1 || String(bird).trim().toLowerCase() === 'true')
+      ? true : defaults.Show_birdseye_view)
+  return out
+}
+
 const CA_INSPECT_MAX_BYTES = 16 * 1024 * 1024
+
+function netDiagramConfigPath(root) {
+  return root + '/config/net_diagram.json'
+}
 
 function caConfigPath(root, parent) {
   return root + '/wspace/' + wspaceJoin(parent, 'config/ca_run.json')
@@ -662,6 +870,14 @@ function caConfigPath(root, parent) {
 
 function caConfigRel(parent) {
   return wspaceJoin(parent, 'config/ca_run.json')
+}
+
+function optAdjConfigPath(root, parent) {
+  return root + '/wspace/' + wspaceJoin(parent, 'config/opt_adj_run.json')
+}
+
+function optAdjConfigRel(parent) {
+  return wspaceJoin(parent, 'config/opt_adj_run.json')
 }
 
 // Case-folder .json files that can be contingency inputs: our own two config
@@ -783,6 +999,51 @@ async function validateCaConfig(ctx, root, value, requireFiles) {
     }
     out[fileKey] = rel
   }
+
+  // The solver knobs (0.7.2). An absent key keeps its default; a present one must be usable —
+  // the Java runner rejects the same values, and a knob silently replaced by a default is a run
+  // that ignores what the dialog said. Numbers accept the dialog's string form, and a missing
+  // value ('') means "unset", exactly like the threshold above.
+  const number = (key, lo, hi, message) => {
+    const raw = value[key]
+    if (raw === undefined || raw === null || raw === '') return null
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n < lo || n > hi) return message
+    out[key] = n
+    return null
+  }
+  for (const key of CA_BOOL_KEYS) {
+    const raw = value[key]
+    if (raw === undefined || raw === null) continue
+    if (typeof raw !== 'boolean') {
+      return { ok: false, error: key + ' must be true or false (got ' + JSON.stringify(raw) + ')' }
+    }
+    out[key] = raw
+  }
+  for (const entry of CA_CHOICE_KEYS) {
+    const key = entry[0]
+    const allowed = entry[1]
+    const raw = value[key]
+    if (raw === undefined || raw === null || raw === '') continue
+    if (allowed.indexOf(raw) < 0) {
+      return { ok: false, error: 'unsupported ' + key + ' ' + JSON.stringify(raw) +
+        ' (expected ' + allowed.join('|') + ')' }
+    }
+    out[key] = raw
+  }
+  for (const key of CA_COUNT_KEYS) {
+    const bad = number(key, 0, Number.MAX_SAFE_INTEGER, key + ' must be 0 or more')
+    if (bad !== null) return { ok: false, error: bad }
+    out[key] = Math.floor(out[key])
+  }
+  for (const key of CA_CUTOFF_KEYS) {
+    const bad = number(key, 0, 1000, key + ' must be a percentage between 0 and 1000')
+    if (bad !== null) return { ok: false, error: bad }
+  }
+  for (const key of CA_POSITIVE_KEYS) {
+    const bad = number(key, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER, key + ' must be a positive number')
+    if (bad !== null) return { ok: false, error: bad }
+  }
   return { ok: true, config: out }
 }
 
@@ -815,6 +1076,122 @@ async function resolveCaRunConfig(ctx, root, parent, explicit) {
   return { ok: true, config: await suggestCaConfig(ctx, root, parent), source: 'suggested' }
 }
 
+// Normalise an untrusted OptAdj payload to the six known file keys plus the optional mode. An
+// absent key keeps its default; a present one must be usable, because a redispatch that silently
+// ignores the requested mode or limit is worse than one that refuses. The mode is not a Java file
+// key, so it is carried on the validated object (readers take it from there) and never enters the
+// payload; a retired spelling is mapped onto the canonical token, because Java rejects it.
+async function validateOptAdjConfig(ctx, root, value, requireFiles) {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, error: 'the run configuration must be a JSON object' }
+  }
+  const out = Object.assign({}, DEFAULT_OPTADJ_CONFIG)
+
+  const rawType = value[OPTADJ_MODE_KEY]
+  if (rawType !== undefined && rawType !== null && rawType !== '') {
+    const type = canonicalOptAdjType(rawType)
+    if (type === '') {
+      return {
+        ok: false,
+        error: 'unsupported optAdjType ' + JSON.stringify(rawType) +
+          ' (expected ' + OPTADJ_TYPES.join('|') + ')',
+      }
+    }
+    out[OPTADJ_MODE_KEY] = type
+  }
+
+  // A loading percentage: 0 < t <= 1000, the rule the Java record enforces.
+  const loading = (key) => {
+    const raw = value[key]
+    if (raw === undefined || raw === null || raw === '') return null
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n <= 0 || n > 1000) {
+      return key + ' must be a loading percentage between 0 and 1000 (got ' + JSON.stringify(raw) + ')'
+    }
+    out[key] = n
+    return null
+  }
+  for (const key of ['scanLoadingThreshold', 'optAdjLoadingThreshold']) {
+    const bad = loading(key)
+    if (bad !== null) return { ok: false, error: bad }
+  }
+
+  // Sparse (true) or dense (false) sensitivities. A JSON boolean is the natural spelling; the two
+  // strings are accepted because a hand-written file often carries them, and both collapse to a
+  // real boolean before the payload reaches the bridge.
+  const rawSparse = value.sparseSenMatrix
+  if (rawSparse !== undefined && rawSparse !== null && rawSparse !== '') {
+    if (typeof rawSparse === 'boolean') out.sparseSenMatrix = rawSparse
+    else if (rawSparse === 'true') out.sparseSenMatrix = true
+    else if (rawSparse === 'false') out.sparseSenMatrix = false
+    else {
+      return {
+        ok: false,
+        error: 'sparseSenMatrix must be true or false (got ' + JSON.stringify(rawSparse) + ')',
+      }
+    }
+  }
+
+  const rawThreads = value.threads
+  if (rawThreads !== undefined && rawThreads !== null && rawThreads !== '') {
+    const n = Number(rawThreads)
+    if (!Number.isFinite(n) || n < 0) {
+      return { ok: false, error: 'threads must be 0 or more (got ' + JSON.stringify(rawThreads) + ')' }
+    }
+    out.threads = Math.floor(n)
+  }
+
+  const rawMode = value.contingencyMode
+  if (rawMode !== undefined && rawMode !== null && rawMode !== '' && rawMode !== 'all' && rawMode !== 'custom') {
+    return { ok: false, error: "contingencyMode must be 'all' or 'custom' (got " + JSON.stringify(rawMode) + ')' }
+  }
+  const mode = rawMode === 'custom' ? 'custom' : 'all'
+  out.contingencyMode = mode
+  if (mode === 'custom') {
+    const rel = typeof value.contingencyFile === 'string' ? value.contingencyFile.trim() : ''
+    if (rel === '') {
+      return { ok: false, error: "contingencyMode is 'custom' but no contingencyFile is set" }
+    }
+    const check = await caEntryCheck(ctx, root, rel)
+    if (!check.ok) return { ok: false, error: 'contingencyFile: ' + check.error }
+    if (requireFiles && !check.exists) {
+      return { ok: false, error: 'contingencyFile not found: ' + rel }
+    }
+    out.contingencyFile = rel
+  }
+  return { ok: true, config: out }
+}
+
+// Effective OptAdj config for a run: an explicit payload (the tool's merged arguments), else the
+// case-folder opt_adj_run.json, else the built-in default. There is no filename discovery here:
+// only the N-1 mode reads a file, and the tool names it explicitly.
+async function resolveOptAdjRunConfig(ctx, root, parent, explicit) {
+  if (explicit !== undefined && explicit !== null) {
+    const validated = await validateOptAdjConfig(ctx, root, explicit, true)
+    if (!validated.ok) return { ok: false, error: 'invalid run configuration: ' + validated.error }
+    return { ok: true, config: validated.config, source: 'request' }
+  }
+  const fs = ctx.get('fs')
+  if (fs !== undefined) {
+    let text = null
+    try {
+      text = await fs.readText(await fs.resolve(optAdjConfigPath(root, parent)))
+    } catch (e) {}
+    if (text !== null) {
+      let parsed = null
+      try {
+        parsed = JSON.parse(text)
+      } catch (e) {
+        return { ok: false, error: optAdjConfigRel(parent) + ' is not valid JSON' }
+      }
+      const validated = await validateOptAdjConfig(ctx, root, parsed, true)
+      if (!validated.ok) return { ok: false, error: validated.error }
+      return { ok: true, config: validated.config, source: 'case' }
+    }
+  }
+  return { ok: true, config: Object.assign({}, DEFAULT_OPTADJ_CONFIG), source: 'default' }
+}
+
 async function scanCases(fs, dirTarget, relDir, out) {
   let entries
   try {
@@ -829,12 +1206,16 @@ async function scanCases(fs, dirTarget, relDir, out) {
     } else if (entry.type === 'file') {
       if (/\.ieee$/i.test(entry.name)) out.push({ path: rel, format: 'ieee' })
       else if (/\.raw$/i.test(entry.name)) out.push({ path: rel, format: 'psse' })
+      else if (/\.dat$/i.test(entry.name)) out.push({ path: rel, format: 'bpa' })
     }
   }
 }
 
-// The preview reads one diagram at a time, so this bounds what it accepts as text.
-const MAX_DRAWIO_BYTES = 2 * 1024 * 1024
+// The preview reads one diagram at a time, so this bounds what it accepts as text. It is checked
+// BEFORE the read, so an oversized file never reaches the RPC payload. 4 MiB covers the largest
+// drawing this workspace produces -- a 2000-bus case is ~2.9 MiB of XML (Texas 2K) -- with room
+// for a hand-edited one on top; the 20000-cell preview cap is the other half of the bound.
+const MAX_DRAWIO_BYTES = 4 * 1024 * 1024
 
 // --- Launch the local draw.io app (shared, byte-identical in both hosts) -----
 // The browser cannot start a process, so the Diagram tab's edit button asks the Host — and the
@@ -1129,6 +1510,23 @@ function captureStdio() {
   return { out: () => '', err: () => '', stop: () => {} }
 }
 
+// Attach the intercepted stdout/stderr (e.g. "Using N threads…") to a bridge reply, so the GUI
+// can surface them instead of the dsh terminal, and mirror the case the run adopted. Shared by the
+// javaBridge provider's `runContingency` and `runContingencyWithConfig`, which differ only in what
+// they pass to the bridge.
+function withCaStdio(raw, cap, absCase) {
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      if (parsed.ok === true) lastLoadedAbs = absCase
+      parsed.stdout = cap.out()
+      parsed.stderr = cap.err()
+      return JSON.stringify(parsed)
+    }
+  } catch (e) {}
+  return raw
+}
+
 // Run one Groovy evaluation through the bridge: capture the script's println output,
 // then mirror the held case and its counts. Shared by `runGvy` (a .gvy file) and
 // `runGvySource` (inline source), so the two entry points cannot drift.
@@ -1232,7 +1630,7 @@ class InterpssService extends TypertRemoteService {
     const wspace = root + '/wspace'
     const slash = casePath.lastIndexOf('/')
     const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-    const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+    const stem = caseStem(casePath.slice(slash + 1))
     const infoRel = parent + '/result/' + stem + '_network_info.txt'
     try {
       const target = await fs.resolve(wspace + '/' + infoRel)
@@ -1249,6 +1647,21 @@ class InterpssService extends TypertRemoteService {
           stem + '_DF_branch.csv',
           stem + '_DF_gen.csv',
           stem + '_DF_load.csv',
+          // Listed whether or not a CA has been run: the client reads what it can and an absent
+          // file simply means "no contingency data". Without this line the Diagram tab never saw
+          // the table at all, so its contingency flags and tooltip line could never appear (0.6.31).
+          stem + '_DF_contingency.csv',
+          // The four OptAdj tables, listed the same way and for the same reason (0.6.31): the
+          // Diagram tab's tooltip adds a line per mode when the branch table lists the branch, and an
+          // absent file just means "no OptAdj data" (0.7.7 — the readCsv allow-list below had to learn
+          // these families as well). The `.gvy`/bridge path writes them -- basecase
+          // `_DF_optadj_branch.csv`, N-1 `_DF_optadj_N1_branch.csv` since 0.7.5; the `_gen` pair is
+          // what the OptAdj card's **Gen adjustments** table reads (0.7.10 — it was missing from both
+          // this list and the allow-list, so that button always answered `Invalid result path`).
+          stem + '_DF_optadj_branch.csv',
+          stem + '_DF_optadj_N1_branch.csv',
+          stem + '_DF_optadj_gen.csv',
+          stem + '_DF_optadj_N1_gen.csv',
           stem + '_network_info.txt',
         ],
       }
@@ -1261,7 +1674,7 @@ class InterpssService extends TypertRemoteService {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
     const casePath = input && typeof input.input === 'string' ? input.input : ''
-    if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+    if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
       return { ok: false, error: 'Invalid case path: ' + casePath }
     }
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
@@ -1269,7 +1682,7 @@ class InterpssService extends TypertRemoteService {
     const wspace = root + '/wspace'
     const slash = casePath.lastIndexOf('/')
     const parent = slash >= 0 ? casePath.slice(0, slash) : ''
-    const stem = casePath.slice(slash + 1).replace(/\.(ieee|raw|RAW)$/, '')
+    const stem = caseStem(casePath.slice(slash + 1))
     const resultDir = parent + '/result'
     const files = [
       stem + '_DF_bus.csv',
@@ -1319,7 +1732,7 @@ class InterpssService extends TypertRemoteService {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
     const caseInput = input && typeof input.case === 'string' ? input.case : ''
-    if (caseInput === '' || caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+    if (caseInput === '' || caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
     const root = this.resolveWorkspaceRoot(input && input.sessionId)
@@ -1416,7 +1829,11 @@ class InterpssService extends TypertRemoteService {
     const fs = this.ctx.get('fs')
     if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
     const path = input && typeof input.path === 'string' ? input.path : ''
-    if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency)\.csv$/.test(path)) {
+    // The result families the tab may page. This must name EVERY table a client read can ask for:
+    // the OptAdj pair was missing here in 0.7.6, so the Diagram tab's reads came back
+    // `Invalid result path`, the loading map stayed null and both OptAdj tooltip lines were silently
+    // empty (0.7.7). Guard §11 runs this very pattern against the names the client looks up.
+    if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency|optadj_branch|optadj_N1_branch|optadj_gen|optadj_N1_gen)\.csv$/.test(path)) {
       return { ok: false, error: 'Invalid result path: ' + path }
     }
     const start = (input && typeof input.start === 'number' && input.start > 0) ? Math.floor(input.start) : 0
@@ -1581,9 +1998,9 @@ class InterpssService extends TypertRemoteService {
       }
 
   async runAclf(input) {
-    const format = input && input.format === 'psse' ? 'psse' : 'ieee'
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
-    if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+    const format = normalizeCaseFormat(input && input.format, caseInput)
+    if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
 
@@ -1682,9 +2099,9 @@ class InterpssService extends TypertRemoteService {
   }
 
   async runCa(input) {
-    const format = input && input.format === 'psse' ? 'psse' : 'ieee'
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
-    if (caseInput.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(caseInput)) {
+    const format = normalizeCaseFormat(input && input.format, caseInput)
+    if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
 
@@ -1712,8 +2129,14 @@ class InterpssService extends TypertRemoteService {
         const absCont = contRel !== null ? root + '/wspace/' + contRel : null
         const absMon = monRel !== null ? root + '/wspace/' + monRel : null
         const absResults = root + '/wspace/' + resultDir
-        const raw = await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
-          caConfig.overloadThreshold)
+        // The whole run config goes over, not just the threshold, so the dialog's solver knobs
+        // reach the runner. An older bridge (jar without it) still runs: it takes the threshold
+        // and the solver keeps its own defaults, which is what that jar did anyway.
+        const raw = typeof bridge.runContingencyWithConfig === 'function'
+          ? await bridge.runContingencyWithConfig(format, absCase, absCont, absMon, absResults, stem,
+            JSON.stringify(caConfigPayload(caConfig)))
+          : await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem,
+            caConfig.overloadThreshold)
         const parsed = JSON.parse(raw)
         if (parsed && parsed.ok) {
           return {
@@ -1765,9 +2188,124 @@ class InterpssService extends TypertRemoteService {
     return { ok: true, resultDir: resultDir, contingencyFile: stem + '_DF_contingency.csv', caSummary: caSummary, stdout: res.stdout.text, stderr: res.stderr.text, input: caseInput }
   }
 
-  async loadCase(input) {
-    const format = input && input.format === 'psse' ? 'psse' : 'ieee'
+  // Generator redispatch (OptAdj) for a case: the chat tool's dialog-free entry point, and the
+  // RPC a future dialog would use. The run config comes from an explicit payload, else the case
+  // folder's config/opt_adj_run.json, else the built-in default (50 % scan / 100 % enforcement for
+  // basecase). The mode is `input.optAdjType` (or a legacy `input.config.optAdjType`), else
+  // inferred from a contingency path. The run MUTATES the held model's generator P, so `reload`
+  // starts from the file.
+  async runOptAdj(input) {
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
+    const format = normalizeCaseFormat(input && input.format, caseInput)
+    if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
+      return { ok: false, error: 'Invalid case path: ' + caseInput }
+    }
+
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+
+    const { parent, stem } = this.caseParts(caseInput)
+    const resultDir = parent + '/result'
+
+    // The mode is not a file key, but the validator accepts one from the config payload (0.7.4–0.7.10
+    // files name it) and canonicalises it; the RPC's own `optAdjType` wins over it.
+    const resolved = await resolveOptAdjRunConfig(this.ctx, root, parent, input && input.config)
+    if (!resolved.ok) return { ok: false, error: resolved.error }
+    const config = resolved.config
+    const reload = input && input.reload === true
+    const contRel = config.contingencyFile
+    let requestedType = config[OPTADJ_MODE_KEY]
+    if (input && input.optAdjType !== undefined && input.optAdjType !== null && input.optAdjType !== '') {
+      const mapped = canonicalOptAdjType(input.optAdjType)
+      if (mapped === '') {
+        return { ok: false, error: 'unsupported optAdjType ' + JSON.stringify(input.optAdjType) +
+          ' (expected ' + OPTADJ_TYPES.join('|') + ')' }
+      }
+      requestedType = mapped
+    }
+    const optAdjType = resolveOptAdjType(requestedType, contRel)
+
+    // In-process bridge path (preferred): no JVM spawn, cached network.
+    const bridge = this.bridge()
+    if (bridge !== undefined && typeof bridge.runOptAdjWithConfig === 'function') {
+      try {
+        const absCase = root + '/wspace/' + caseInput
+        const absCont = contRel !== null ? root + '/wspace/' + contRel : null
+        const absResults = root + '/wspace/' + resultDir
+        const raw = await bridge.runOptAdjWithConfig(format, absCase, absCont, absResults, stem, reload,
+          optAdjType, JSON.stringify(optAdjConfigPayload(config, optAdjType)))
+        const parsed = JSON.parse(raw)
+        if (parsed && parsed.ok) {
+          const type = parsed.optAdjType || optAdjType
+          const names = optAdjResultNames(stem, type)
+          return {
+            ok: true,
+            resultDir: resultDir,
+            genFile: parsed.genFile || names.genFile,
+            branchFile: parsed.branchFile || names.branchFile,
+            optAdjType: type,
+            scanLoadingThreshold: parsed.scanLoadingThreshold,
+            optAdjLoadingThreshold: parsed.optAdjLoadingThreshold,
+            contingencies: parsed.contingencies,
+            scanned: parsed.scanned,
+            overLimitBefore: parsed.overLimitBefore,
+            overLimitAfter: parsed.overLimitAfter,
+            controlGens: parsed.controlGens,
+            gensAdjusted: parsed.gensAdjusted,
+            gensWithoutPLimit: parsed.gensWithoutPLimit,
+            optAdjSummary: typeof parsed.optAdjSummary === 'string' ? parsed.optAdjSummary : null,
+            stdout: parsed.stdout || '',
+            stderr: parsed.stderr || '',
+            input: caseInput,
+          }
+        }
+        return { ok: false, error: parsed && parsed.error ? parsed.error : 'bridge runOptAdj failed' }
+      } catch (e) {
+        // Bridge threw (e.g. stale JAR / signature mismatch): fall through to the CLI below.
+      }
+    }
+
+    // Fallback: shell out to the Java OptAdj subcommand (IpssCmd optadj). The CLI infers N-1 from
+    // a contingency path the same way resolveOptAdjType does.
+    const shell = this.ctx.get('shell')
+    if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
+
+    const wspace = root + '/wspace'
+    const javaCp = root + '/target/classes:' + root + '/lib/ipss_runnable.jar:' + root + '/lib/deps/*'
+    let command = shellQuote(javaBin()) + ' -cp "' + javaCp + '" org.interpss.agent.IpssCmd optadj '
+      + format + ' ' + caseInput
+    if (contRel !== null) command += ' ' + shellQuote(contRel)
+    const spec = shell.resolve({ command: command, workdir: wspace, timeoutMs: 180000, stdoutMaxBytes: 300000 })
+
+    let res
+    try {
+      res = await shell.run(spec)
+    } catch (e) {
+      return { ok: false, error: 'command failed to start: ' + (e && e.message ? e.message : String(e)) }
+    }
+
+    if (res.exitCode !== 0) {
+      return { ok: false, error: 'generator redispatch failed (exit ' + res.exitCode + ')\n' + (res.stderr.text || res.stdout.text || '') }
+    }
+
+    const summary = /OptAdjSummary:[\s\S]*?Branch Loadings=\S+/.exec(res.stdout.text || '')
+    const names = optAdjResultNames(stem, optAdjType)
+    return {
+      ok: true,
+      resultDir: resultDir,
+      genFile: names.genFile,
+      branchFile: names.branchFile,
+      optAdjType: optAdjType,
+      optAdjSummary: summary ? summary[0].trim() : null,
+      stdout: res.stdout.text,
+      stderr: res.stderr.text,
+      input: caseInput,
+    }
+  }
+
+  async loadCase(input) {
+    const caseInput = input && typeof input.input === 'string' ? input.input : ''
+    const format = normalizeCaseFormat(input && input.format, caseInput)
     if (caseInput.indexOf('..') !== -1 || !CASE_PATH_RE.test(caseInput)) {
       return { ok: false, error: 'Invalid case path: ' + caseInput }
     }
@@ -1838,7 +2376,7 @@ class InterpssService extends TypertRemoteService {
 
   async runReport(input) {
     const casePath = input && typeof input.input === 'string' ? input.input : ''
-    if (casePath.indexOf('..') !== -1 || !/^data\/[A-Za-z0-9_.\/-]+\.(ieee|raw|RAW)$/.test(casePath)) {
+    if (casePath.indexOf('..') !== -1 || !CASE_PATH_RE.test(casePath)) {
       return { ok: false, error: 'Invalid case path: ' + casePath }
     }
 
@@ -1976,6 +2514,61 @@ class InterpssService extends TypertRemoteService {
     }
   }
 
+  // The Diagram tab's gear dialog (0.6.26): read and write the WORKSPACE
+  // config/net_diagram.json. A read never fails the diagram -- a missing or
+  // unparseable file falls back to the built-in defaults, with a warning the
+  // dialog shows. A write merges over what is on disk, so keys the dialog does
+  // not know survive, and always writes a sanitized document.
+  async getNetDiagramOptions(input) {
+    const fs = this.ctx.get('fs')
+    if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+    const cfgPath = netDiagramConfigPath(root)
+    const base = { ok: true, config: DEFAULT_NET_DIAGRAM_CONFIG, path: 'config/net_diagram.json' }
+    try {
+      const target = await fs.resolve(cfgPath)
+      const text = await fs.readText(target)
+      let raw = null
+      try {
+        raw = JSON.parse(text)
+      } catch (e) {
+        return { ok: true, config: DEFAULT_NET_DIAGRAM_CONFIG, exists: true, path: base.path,
+                 warning: 'config/net_diagram.json is not valid JSON; using the built-in defaults' }
+      }
+      return { ok: true, config: sanitizeNetDiagramConfig(raw), exists: true, path: base.path }
+    } catch (e) {
+      return { ok: true, config: DEFAULT_NET_DIAGRAM_CONFIG, exists: false, path: base.path }
+    }
+  }
+
+  async saveNetDiagramOptions(input) {
+    const fs = this.ctx.get('fs')
+    if (fs === undefined) return { ok: false, error: 'fs service unavailable' }
+    const config = input && input.config && typeof input.config === 'object' ? input.config : null
+    if (config === null) return { ok: false, error: 'missing options payload' }
+    const root = this.resolveWorkspaceRoot(input && input.sessionId)
+    if (root === '') return { ok: false, error: 'could not resolve the session workspace root' }
+    const cfgPath = netDiagramConfigPath(root)
+    let onDisk = {}
+    try {
+      const target = await fs.resolve(cfgPath)
+      const parsed = JSON.parse(await fs.readText(target))
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) onDisk = parsed
+    } catch (e) {
+      onDisk = {}
+    }
+    const merged = sanitizeNetDiagramConfig(Object.assign(onDisk, config))
+    try {
+      const target = await fs.resolve(cfgPath)
+      const written = await writeConfigText(fs, target, JSON.stringify(merged, null, 2) + '\n', cfgPath)
+      if (written.ok !== true) return { ok: false, error: 'failed to write ' + cfgPath + ': ' + written.error }
+      return { ok: true, config: merged, path: 'config/net_diagram.json' }
+    } catch (e) {
+      return { ok: false, error: 'failed to write ' + cfgPath + ': ' + (e && e.message ? e.message : String(e)) }
+    }
+  }
+
   // Candidate contingency / monitored-branch inputs: every .json beside the
   // case file, with the entry counts the dialog reports after a pick.
   async listCaFiles(input) {
@@ -2065,15 +2658,10 @@ class InterpssService extends TypertRemoteService {
     if (!validated.ok) return { ok: false, error: validated.error }
 
     const cfgRel = caConfigRel(parent)
-    const payload = {
-      contingencyMode: validated.config.contingencyMode,
-      contingencyFile: validated.config.contingencyFile,
-      monitorMode: validated.config.monitorMode,
-      monitoredBranchFile: validated.config.monitoredBranchFile,
-      // The dialog's over loading threshold. It must round-trip, or the next dialog
-      // open, the CLI and `interpss_run_ca` silently fall back to 90.
-      overloadThreshold: validated.config.overloadThreshold,
-    }
+    // The whole validated config, in the file's key order: the two mode/file pairs, the over
+    // loading threshold, and the solver knobs. It must round-trip, or the next dialog open, the
+    // CLI and `interpss_run_ca` silently fall back to the defaults.
+    const payload = caConfigPayload(validated.config)
     try {
       const target = await fs.resolve(caConfigPath(root, parent))
       const written = await writeConfigText(fs, target, JSON.stringify(payload, null, 2) + '\n', caConfigPath(root, parent))
@@ -3130,8 +3718,11 @@ function runGvyTool(ctx) {
 // DC contingency analysis with the dialog bypassed: the inputs come from an explicit
 // contingencyFile/monitorFile, else the case folder's config/ca_run.json, else the case-folder
 // discovery (*contingenc*.json / *monitor*.json), else the Java defaults (N-1 outages on
-// every branch not connected to the reference bus, every branch monitored). The runner
-// solves its own DC load flow, so no ACLF run is needed first.
+// every branch not connected to the reference bus, every branch monitored). The solver knobs
+// arrive in `caConfig` (or the case's ca_run.json) and are copied onto the solver by the
+// runner. The overload check compares post-contingency flow against a branch rating, so a case
+// whose tables carry no ratings (all of LimMvaA/B/C zero) reports no overloads however low the
+// threshold is — that is the case, not the run.
 function runCaTool(ctx) {
   return {
     name: 'interpss_run_ca',
@@ -3143,7 +3734,15 @@ function runCaTool(ctx) {
       'otherwise from the case folder config/ca_run.json, otherwise from the case folder discovery ' +
       '(*contingenc*.json / *monitor*.json), otherwise from the Java defaults (N-1 outages on every branch ' +
       'not connected to the reference bus, every branch monitored). `overloadThreshold` sets the ' +
-      'over loading threshold in percent (default 90, overridable per call or in config/ca_run.json). Writes ' +
+      'over loading threshold in percent (default 90, overridable per call or in config/ca_run.json). ' +
+      '`caConfig` carries the solver knobs — dclfInclLoss, dclfScreening, dcLoadingCutoff, ' +
+      'dcFlowChangeCutoff, solutionMethod (SparseEqnSolve|WoodburyMatrixUpdate), kluEndpointRhsBatchSize, ' +
+      'cacheViolationCombinedShiftFactors, islandingTreatment (SKIP|ANCHORED_COMPENSATE_ONE_BUS|' +
+      'FULL_DCLF_REPLAY), n1IslandingReplayEnabled, multiOutageReplayMode (EXACT_TOPOLOGY|HIGH_IMPEDANCE), ' +
+      'highImpedanceReactancePu, turnOffIslandBus, autoTurnLine2Xfr, ratingProvider ' +
+      '(default|RATING_A|RATING_B) and threads (0 = one per processor) — with the case file\'s values ' +
+      'as defaults. Overload detection compares post-contingency flow against a branch rating: a case ' +
+      'whose branch tables carry none reports no overloads at any threshold. Writes ' +
       '<stem>_DF_contingency.csv under wspace/<case dir>/result/ — the file the NERC TPL-001-5 report and ' +
       'the ACLF card Report button consume. The runner solves its own DC load flow, so the case only has ' +
       'to be loaded, not solved; large cases (PSS/E 2K-bus and up) take minutes.',
@@ -3179,6 +3778,22 @@ function runCaTool(ctx) {
             'Optional over loading threshold in percent (default 90): a monitored branch whose ' +
             'post-contingency loading reaches it is written to the result CSV. Overrides the case ' +
             'folder config/ca_run.json for this run.',
+        },
+        caConfig: {
+          type: 'object',
+          description:
+            'Optional solver overrides, merged over the case config/ca_run.json (and overridden by ' +
+            '`overloadThreshold` when both are given). Keys: dclfInclLoss (bool, default true), ' +
+            'dclfScreening (bool, false), dcLoadingCutoff (0-1000 percent, 100), dcFlowChangeCutoff ' +
+            '(0-1000 percent, 200), solutionMethod ("SparseEqnSolve" | "WoodburyMatrixUpdate"), ' +
+            'kluEndpointRhsBatchSize (int >= 0, 0), cacheViolationCombinedShiftFactors (bool, false), ' +
+            'islandingTreatment ("SKIP" | "ANCHORED_COMPENSATE_ONE_BUS" | "FULL_DCLF_REPLAY"), ' +
+            'n1IslandingReplayEnabled (bool, false), multiOutageReplayMode ("EXACT_TOPOLOGY" | ' +
+            '"HIGH_IMPEDANCE"), highImpedanceReactancePu (number > 0, 10000), turnOffIslandBus (bool, ' +
+            'true), autoTurnLine2Xfr (bool, true), ratingProvider ("default" | "RATING_A" | "RATING_B" — ' +
+            'which branch rating the overload check uses; "default" is the library\'s own ("RATING_B": ' +
+            'rating MVA 2, or rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when MVA 2 is ' +
+            'zero; "RATING_A" pins rating MVA 1)), threads (int >= 0, 0 = one per available processor).',
         },
       },
     },
@@ -3287,6 +3902,24 @@ function runCaTool(ctx) {
         explicit.monitoredBranchFile = mon.input
       }
       if (hasThreshold) explicit.overloadThreshold = args.overloadThreshold
+      // `caConfig` carries the solver knobs (loss inclusion, screening cutoffs, solution
+      // method, islanding/replay handling, rating provider, worker count) as an object keyed
+      // like the file. It is merged *before* the scalar arguments, so an explicit
+      // `overloadThreshold` still wins, and a run that omits the object is unchanged.
+      const override = args && args.caConfig !== undefined && args.caConfig !== null ? args.caConfig : null
+      if (override !== null) {
+        if (typeof override !== 'object' || Array.isArray(override)) {
+          return fail('caConfig must be a JSON object of run-configuration keys', 'argument')
+        }
+        for (const key of Object.keys(override)) {
+          if (CA_CONFIG_KEYS.indexOf(key) < 0) {
+            return fail('caConfig: unknown key ' + JSON.stringify(key) + ' (known: ' +
+              CA_CONFIG_KEYS.join(', ') + ')', 'argument')
+          }
+          explicit[key] = override[key]
+        }
+        if (hasThreshold) explicit.overloadThreshold = args.overloadThreshold
+      }
 
       const resolvedConfig = await resolveCaRunConfig(ctx, root, parent, undefined)
       if (resolvedConfig.ok !== true) return fail(resolvedConfig.error, 'argument')
@@ -3300,7 +3933,8 @@ function runCaTool(ctx) {
       const caConfig = configured.config
 
       const bridge = ctx.get('javaBridge')
-      if (bridge === undefined || typeof bridge.runContingency !== 'function') {
+      if (bridge === undefined
+        || (typeof bridge.runContingency !== 'function' && typeof bridge.runContingencyWithConfig !== 'function')) {
         return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
       }
       try {
@@ -3308,8 +3942,13 @@ function runCaTool(ctx) {
         const absResults = root + '/wspace/' + parent + '/result'
         const absCont = caConfig.contingencyFile === null ? null : root + '/wspace/' + caConfig.contingencyFile
         const absMon = caConfig.monitoredBranchFile === null ? null : root + '/wspace/' + caConfig.monitoredBranchFile
-        const raw = await bridge.runContingency(target.format, absCase, absCont, absMon, absResults, stem,
-          caConfig.overloadThreshold)
+        // The whole validated config (threshold included) goes over; a bridge without the
+        // config entry point falls back to the threshold-only call.
+        const raw = typeof bridge.runContingencyWithConfig === 'function'
+          ? await bridge.runContingencyWithConfig(target.format, absCase, absCont, absMon, absResults, stem,
+            JSON.stringify(caConfigPayload(caConfig)))
+          : await bridge.runContingency(target.format, absCase, absCont, absMon, absResults, stem,
+            caConfig.overloadThreshold)
         const parsed = JSON.parse(raw)
         if (!parsed || parsed.ok !== true) {
           return fail(String((parsed && parsed.error) || 'bridge runContingency failed'), source)
@@ -3336,6 +3975,298 @@ function runCaTool(ctx) {
         return value
       } catch (e) {
         return fail('InterPSS DC contingency analysis failed: ' + (e && e.message ? e.message : String(e)), source)
+      }
+    },
+  }
+}
+
+// --- Chat tool: interpss_case_optadj -----------------------------------------
+// Generator redispatch (OptAdj) with the dialog bypassed: the SSA scan collects the branches (or
+// post-contingency pairs) above a scan threshold, the linear program moves the control generators
+// so the monitored loadings stay under a percent-of-rating threshold, and the same monitored set
+// is re-checked. The method, its prerequisites and the two regression anchors are documented in
+// docs/gen_opt_adjustment.md. Loading is measured against each branch's rating MVA 1 and the LP
+// dereferences every generator's P limit, so a case that carries neither is refused with the
+// reason. The run MUTATES the held model's generator P, exactly like a .gvy scenario edit.
+function caseOptAdjTool(ctx) {
+  return {
+    name: 'interpss_case_optadj',
+    description:
+      LOAD_FIRST_HINT +
+      'Relieve basecase or N-1 branch thermal overloads on a power-system case in the embedded ' +
+      'InterPSS bridge by redispatching generator active power (OptAdj). `optAdjType` picks the ' +
+      'mode: "genAdjBaseCase" (pre-contingency loading, the default, scan default 50 %) or ' +
+      '"genAdjCA_N-1" (post-contingency loading for single branch outages, scan default 90 %) — an ' +
+      'explicit `scanLoadingThreshold` always wins, and the retired 0.7.4-0.7.7 spelling ' +
+      '"genAdjCaN_1" is still accepted on this argument and normalised to "genAdjCA_N-1". The mode ' +
+      'is not one of the six keys the Java record reads: it travels as its own argument, and when ' +
+      'neither this argument nor the config names one, a contingency file means N-1 (the same ' +
+      'inference the CLI makes), otherwise the basecase. `optAdjLoadingThreshold` is the ' +
+      'percentage the optimizer enforces (default 100). `contingencyFile` names the contingency ' +
+      'JSON (a file in the case folder, or a workspace-relative data/... path) and is only ' +
+      'meaningful for "genAdjCA_N-1"; omit it for all N-1 outages. `optAdjConfig` carries the six ' +
+      'file keys as an object (partial, unknown keys rejected) plus an optional `optAdjType` that ' +
+      'the Host still honors there instead, and `reload` re-parses the case first. The run MUTATES the ' +
+      'held model\'s generator P, so a later ACLF/CA sees the adjusted dispatch until the case is ' +
+      'reloaded. The scan measures loading against each branch\'s rating MVA 1 and the optimizer ' +
+      'needs a P gen limit per generator: a case whose branches carry no ratings, or whose ' +
+      'generators carry no limits, is refused with that reason (the IEEE 39 fixture needs its ' +
+      'scripts/ieee39_limit_setup.gvy first). Writes <stem>_DF_optadj_gen.csv (genName, genP, adjP, ' +
+      'limitMax, limitMin) and <stem>_DF_optadj_branch.csv (branchId, outageBranchId, limitMW, ' +
+      'baseFlowMW, loadingBeforePct, shiftedFlowMWAfter, loadingAfterPct) under ' +
+      'wspace/<case dir>/result/ — or, for `optAdjType` "genAdjCA_N-1", the same pair under the N1 ' +
+      'infix (<stem>_DF_optadj_N1_gen.csv / <stem>_DF_optadj_N1_branch.csv), so the two modes keep ' +
+      'separate result files. The reply\'s `genFile` / `branchFile` name what was written.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        case: {
+          type: 'string',
+          description:
+            "Optional case selector: a workspace-relative path such as 'data/ieee/ieee39/ieee39.ieee', " +
+            "an absolute path containing '/wspace/data/', or a preset label ('IEEE 118-bus', 'IEEE 14-bus', " +
+            "'Texas 2K-bus'). Omit it to use the case selected in the InterPSS tab, then the case already " +
+            'held by the bridge.',
+        },
+        optAdjType: {
+          type: 'string',
+          enum: OPTADJ_TYPES,
+          description:
+            'Mode: "genAdjBaseCase" (pre-contingency, default) or "genAdjCA_N-1" (post-contingency ' +
+            'for single branch outages).',
+        },
+        scanLoadingThreshold: {
+          type: 'number',
+          description:
+            'Optional candidate-collection percentage (0 < t <= 1000; default 50 for genAdjBaseCase, ' +
+            '90 for genAdjCA_N-1).',
+        },
+        optAdjLoadingThreshold: {
+          type: 'number',
+          description:
+            'Optional percentage the linear program enforces (0 < t <= 1000, default 100).',
+        },
+        contingencyFile: {
+          type: 'string',
+          description:
+            'genAdjCA_N-1 mode only: the contingency JSON, addressable like the CA tool\'s ' +
+            '`contingencyFile`. Omit it for all N-1 outages. A basecase run rejects it.',
+        },
+        optAdjConfig: {
+          type: 'object',
+          description:
+            'Optional overrides as one object, merged over the arguments above per key (the ' +
+            'arguments win when both are given). The six file keys: scanLoadingThreshold (number, ' +
+            'null = follow the mode), optAdjLoadingThreshold (number, 100), contingencyMode ' +
+            '("all" | "custom"), contingencyFile (workspace-relative path), sparseSenMatrix ' +
+            '(boolean, true = sparse sensitivities, the default), threads (int >= 0, 0 = one SSA ' +
+            'worker per available processor). An `optAdjType` here is also accepted (the retired ' +
+            '"genAdjCaN_1" included) and honored when the top-level argument names no mode; it is ' +
+            'never sent in the payload Java parses.',
+        },
+        reload: {
+          type: 'boolean',
+          description:
+            'Re-parse the case file before running (default false). The run overwrites the held ' +
+            'model\'s generator P, so a second run continues from the adjusted dispatch unless this ' +
+            'is set.',
+        },
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          case: { type: 'string' },
+          source: { type: 'string' },
+          format: { type: 'string' },
+          resultDir: { type: 'string' },
+          optAdjType: { type: 'string' },
+          genFile: { type: 'string' },
+          branchFile: { type: 'string' },
+          contingencyFile: { type: 'string' },
+          scanLoadingThreshold: { type: 'number' },
+          optAdjLoadingThreshold: { type: 'number' },
+          contingencies: { type: 'number' },
+          scanned: { type: 'number' },
+          overLimitBefore: { type: 'number' },
+          overLimitAfter: { type: 'number' },
+          controlGens: { type: 'number' },
+          gensAdjusted: { type: 'number' },
+          gensWithoutPLimit: { type: 'number' },
+          optAdjSummary: { type: 'string' },
+          error: { type: 'string' },
+        },
+      },
+      render(args, value) {
+        if (value && value.ok === true) {
+          const num = (n) => (typeof n === 'number' && Number.isFinite(n) ? String(n) : '?')
+          const mode = String(value.optAdjType || '')
+          // The N-1 mode carries contingencies; compared canonically so a legacy echoed token still
+          // reads as N-1.
+          const n1 = canonicalOptAdjType(mode) === 'genAdjCA_N-1'
+          const inputs = typeof value.contingencyFile === 'string' && value.contingencyFile !== ''
+            ? value.contingencyFile
+            : (n1 ? 'all N-1 outages' : 'basecase (no contingencies)')
+          return [{
+            type: 'text',
+            text: [
+              'InterPSS generator redispatch \u2014 ' + String(value.case || '') +
+                ' (source: ' + String(value.source || '') + ')',
+              'Mode ' + mode + ' \u00b7 scan ' + num(value.scanLoadingThreshold) + '% \u00b7 enforce ' +
+                num(value.optAdjLoadingThreshold) + '%' +
+                (n1 ? ' \u00b7 ' + num(value.contingencies) + ' contingencies' : ''),
+              'Over limit ' + num(value.overLimitBefore) + ' \u2192 ' + num(value.overLimitAfter) +
+                ' \u00b7 ' + num(value.gensAdjusted) + ' of ' + num(value.controlGens) +
+                ' control generators adjusted \u00b7 ' + num(value.scanned) + ' scanned entries',
+              'Inputs: ' + inputs,
+              'Results: wspace/' + String(value.resultDir || '') + ' (' + String(value.genFile || '') +
+                ', ' + String(value.branchFile || '') + ')',
+            ].join('\n'),
+          }]
+        }
+        return [{
+          type: 'text',
+          text: 'InterPSS generator redispatch failed: ' + String((value && value.error) || 'unknown error'),
+        }]
+      },
+      // Persisted to the card's block.meta so the card can page both CSVs without the generic
+      // row's expand toggle. The two names are what the client's explorer kinds match on.
+      presentationMeta(args, value) {
+        if (value === null || value === undefined || value.ok !== true) return { ok: false }
+        return {
+          ok: true,
+          case: String(value.case || ''),
+          source: String(value.source || ''),
+          resultDir: String(value.resultDir || ''),
+          optadjGenCsv: String(value.genFile || ''),
+          optadjBranchCsv: String(value.branchFile || ''),
+        }
+      },
+    },
+    presentCall(args) {
+      return { card: 'generic', title: 'InterPSS generator redispatch', kind: 'execute', rawInput: args }
+    },
+    async execute(args, exec) {
+      const fail = (error, source) => ({ ok: false, error: error, source: source === undefined ? 'bridge' : source })
+      const sessionId = exec && exec.agent && typeof exec.agent.id === 'string' ? exec.agent.id : ''
+      const root = resolveWorkspaceRoot(ctx, sessionId)
+      if (root === '') return fail('could not resolve the session workspace root', 'none')
+      if (!(await isIpssWorkspace(ctx, root))) {
+        return fail('InterPSS is not available in this workspace: the workspace README.md first heading must be "iPSS Agent"', 'none')
+      }
+      const resolvedCase = resolveToolCase(sessionId, args && typeof args.case === 'string' ? args.case : '')
+      if (resolvedCase.error !== undefined) return fail(resolvedCase.error, 'argument')
+      if (resolvedCase.target === null) {
+        return fail('no simulation case is selected: pick one in the InterPSS tab, or pass `case` (a data/... path, an absolute path containing /wspace/data/, or a preset label)', 'none')
+      }
+      const target = resolvedCase.target
+      const source = resolvedCase.source
+
+      const { parent, stem } = casePartsOf(target.input)
+
+      // File-key arguments, then the `optAdjConfig` object, then the case's opt_adj_run.json: a
+      // later layer overrides an earlier one per key. The mode is the separate `optAdjType` arg
+      // (not a file key), so passing only the mode keeps the case's own thresholds.
+      const explicit = {}
+      let requestedType = args && typeof args.optAdjType === 'string' ? args.optAdjType : ''
+      if (requestedType.trim() !== '') {
+        const mapped = canonicalOptAdjType(requestedType)
+        if (mapped === '') {
+          return fail('unsupported optAdjType ' + JSON.stringify(requestedType) +
+            ' (expected ' + OPTADJ_TYPES.join('|') + ')', 'argument')
+        }
+        requestedType = mapped
+      }
+      if (args && typeof args.scanLoadingThreshold === 'number' && Number.isFinite(args.scanLoadingThreshold)) {
+        explicit.scanLoadingThreshold = args.scanLoadingThreshold
+      }
+      if (args && typeof args.optAdjLoadingThreshold === 'number' && Number.isFinite(args.optAdjLoadingThreshold)) {
+        explicit.optAdjLoadingThreshold = args.optAdjLoadingThreshold
+      }
+      const hasCont = args && typeof args.contingencyFile === 'string' && args.contingencyFile.trim() !== ''
+      let contInput = null
+      if (hasCont) {
+        const cont = resolveCaFileArgument(target.input, args.contingencyFile)
+        if (cont.ok !== true) return fail(cont.error, 'argument')
+        contInput = cont.input
+        explicit.contingencyMode = 'custom'
+        explicit.contingencyFile = cont.input
+      }
+      const override = args && args.optAdjConfig !== undefined && args.optAdjConfig !== null
+        ? args.optAdjConfig
+        : null
+      if (override !== null) {
+        if (typeof override !== 'object' || Array.isArray(override)) {
+          return fail('optAdjConfig must be a JSON object of run-configuration keys', 'argument')
+        }
+        for (const key of Object.keys(override)) {
+          if (OPTADJ_INPUT_KEYS.indexOf(key) < 0) {
+            return fail('optAdjConfig: unknown key ' + JSON.stringify(key) + ' (known: ' +
+              OPTADJ_INPUT_KEYS.join(', ') + ')', 'argument')
+          }
+          explicit[key] = override[key]
+        }
+        // A resolved `contingencyFile` argument still wins over the object's own key.
+        if (hasCont) {
+          explicit.contingencyMode = 'custom'
+          explicit.contingencyFile = contInput
+        }
+      }
+
+      const resolvedConfig = await resolveOptAdjRunConfig(ctx, root, parent, undefined)
+      if (resolvedConfig.ok !== true) return fail(resolvedConfig.error, 'argument')
+      let config = resolvedConfig.config
+      if (Object.keys(explicit).length > 0) {
+        const merged = Object.assign({}, config, explicit)
+        const validated = await validateOptAdjConfig(ctx, root, merged, true)
+        if (!validated.ok) return fail('invalid run configuration: ' + validated.error, 'argument')
+        config = validated.config
+      }
+      // The mode: the `optAdjType` argument wins, then the one the object/file named (the validator
+      // canonicalised it), then the CLI's own inference — a contingency path means N-1.
+      const optAdjType = resolveOptAdjType(requestedType || config[OPTADJ_MODE_KEY], config.contingencyFile)
+
+      const bridge = ctx.get('javaBridge')
+      if (bridge === undefined || typeof bridge.runOptAdjWithConfig !== 'function') {
+        return fail('the in-process InterPSS bridge is unavailable; install java-bridge and rebuild the uber JAR (see scripts/setup-java-bridge.sh)', source)
+      }
+      try {
+        const absCase = root + '/wspace/' + target.input
+        const absResults = root + '/wspace/' + parent + '/result'
+        const absCont = config.contingencyFile === null ? null : root + '/wspace/' + config.contingencyFile
+        const raw = await bridge.runOptAdjWithConfig(target.format, absCase, absCont, absResults, stem,
+          args && args.reload === true, optAdjType, JSON.stringify(optAdjConfigPayload(config, optAdjType)))
+        const parsed = JSON.parse(raw)
+        if (!parsed || parsed.ok !== true) {
+          return fail(String((parsed && parsed.error) || 'bridge runOptAdj failed'), source)
+        }
+        adoptLoadedCase(sessionId, target)
+        const type = typeof parsed.optAdjType === 'string' ? parsed.optAdjType : optAdjType
+        const names = optAdjResultNames(stem, type)
+        const value = {
+          ok: true,
+          case: target.input,
+          source: source,
+          format: target.format,
+          resultDir: parent + '/result',
+          optAdjType: type,
+          genFile: typeof parsed.genFile === 'string' ? parsed.genFile : names.genFile,
+          branchFile: typeof parsed.branchFile === 'string' ? parsed.branchFile : names.branchFile,
+          optAdjSummary: typeof parsed.optAdjSummary === 'string' ? parsed.optAdjSummary : '',
+        }
+        if (config.contingencyFile !== null) value.contingencyFile = config.contingencyFile
+        const numbers = ['scanLoadingThreshold', 'optAdjLoadingThreshold', 'contingencies', 'scanned',
+          'overLimitBefore', 'overLimitAfter', 'controlGens', 'gensAdjusted', 'gensWithoutPLimit']
+        for (const key of numbers) {
+          if (typeof parsed[key] === 'number' && Number.isFinite(parsed[key])) value[key] = parsed[key]
+        }
+        return value
+      } catch (e) {
+        return fail('InterPSS generator redispatch failed: ' + (e && e.message ? e.message : String(e)), source)
       }
     },
   }
@@ -3459,7 +4390,7 @@ export default {
         const bridge = await ensureBridge(rootFor(target))
         let reused = true
         if (target !== lastLoadedAbs) {
-          const raw = await bridge.loadCase(format === 'psse' ? 'psse' : 'ieee', target)
+          const raw = await bridge.loadCase(normalizeCaseFormat(format, target), target)
           let parsed = null
           try { parsed = JSON.parse(raw) } catch (e) {}
           if (!parsed || parsed.ok !== true) return raw
@@ -3499,18 +4430,46 @@ export default {
         } finally {
           cap.stop()
         }
-        // Attach the intercepted stdout/stderr (e.g. "Using N threads…") so the
-        // GUI can surface them instead of the dsh terminal.
+        return withCaStdio(raw, cap, absCase)
+      },
+      // The whole `ca_run.json` payload (threshold plus every solver knob) as JSON. A jar with
+      // only the 7-argument `runContingency` is still usable: it runs with its own defaults.
+      async runContingencyWithConfig(format, absCase, absCont, absMon, absResults, stem, caConfigJson) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        const cap = captureStdio()
+        let raw
         try {
-          const parsed = JSON.parse(raw)
-          if (parsed && typeof parsed === 'object') {
-            if (parsed.ok === true) lastLoadedAbs = absCase
-            parsed.stdout = cap.out()
-            parsed.stderr = cap.err()
-            raw = JSON.stringify(parsed)
-          }
-        } catch (e) {}
-        return raw
+          raw = typeof bridge.runContingencyWithConfig === 'function'
+            ? await bridge.runContingencyWithConfig(format, absCase, absCont, absMon, absResults, stem,
+              caConfigJson)
+            : await bridge.runContingency(format, absCase, absCont, absMon, absResults, stem, 90)
+        } finally {
+          cap.stop()
+        }
+        return withCaStdio(raw, cap, absCase)
+      },
+      // Mode as a separate argument; the rest is the `opt_adj_run.json` payload (thresholds,
+      // contingency input, sparse flag, worker count) as JSON. A jar without
+      // `runOptAdjWithConfig` cannot do the redispatch at all, so this reports the missing entry
+      // point instead of silently doing something else.
+      async runOptAdjWithConfig(format, absCase, absCont, absResults, stem, reload, optAdjType,
+          optAdjConfigJson) {
+        const bridge = await ensureBridge(rootFor(absCase))
+        if (typeof bridge.runOptAdjWithConfig !== 'function') {
+          return JSON.stringify({
+            ok: false,
+            error: 'this bridge JAR has no runOptAdjWithConfig entry point; rebuild the uber JAR',
+          })
+        }
+        const cap = captureStdio()
+        let raw
+        try {
+          raw = await bridge.runOptAdjWithConfig(format, absCase, absCont, absResults, stem,
+            reload === true, optAdjType, optAdjConfigJson)
+        } finally {
+          cap.stop()
+        }
+        return withCaStdio(raw, cap, absCase)
       },
       // Resolved `java` launcher for the dynamic plugin's CLI shell fallback.
       // Synchronous, does NOT start the JVM; safe to call even when java-bridge
@@ -3538,7 +4497,7 @@ export default {
     // call is gated on the iPSS Agent workspace activation check.
     const tools = ctx.get('tools')
     if (tools !== undefined) {
-      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx), runGvyTool(ctx), runCaTool(ctx)]
+      const chatToolDefs = [caseLoadTool(ctx), networkInfoTool(ctx), runAclfTool(ctx), caseSummaryTool(ctx), runGvyTool(ctx), runCaTool(ctx), caseOptAdjTool(ctx)]
       for (const definition of chatToolDefs) {
         ctx.effect(() => tools.register(definition))
       }

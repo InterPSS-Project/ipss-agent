@@ -35,7 +35,7 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar <simutype> <format> <input> [<
 | Argument                 | Values         | Description                                          |
 | ------------------------ | -------------- | ---------------------------------------------------- |
 | `simutype`               | `aclf`, `ca`   | Simulation type: load flow or contingency analysis   |
-| `format`                 | `ieee`, `psse` | Input file format                                    |
+| `format`                 | `ieee`, `psse`, `bpa` | Input file format                              |
 | `input`                  | path           | Case file path (relative to `wspace/`)               |
 | `cont_file` / `monitor_file` | path       | Optional contingency / monitored-branches JSON (relative to `wspace/`); each overrides the matching `ca_run.json` entry for `ca` |
 
@@ -103,6 +103,52 @@ For another IEEE CDF case, supply your own `contingency.json` and `monitored.jso
 paths after the `.ieee` file, using `ca ieee ...`, or drop a `ca_run.json` beside
 the case and run `ca ieee <case>` with no file arguments.
 
+## Run Generator Redispatch (OptAdj)
+
+`optadj` relieves branch thermal overloads by redispatching generator active power: an SSA scan
+collects the branches (or post-contingency pairs) above a scan percentage, a linear program moves
+the control generators so the monitored loadings stay under an enforce percentage, and the same
+monitored set is re-checked. The method and its prerequisites are documented in
+[docs/gen_opt_adjustment.md](docs/gen_opt_adjustment.md).
+
+```bash
+cd wspace
+# Basecase (pre-contingency): from the case's config/opt_adj_run.json, else 50 % scan / 100 % enforce
+java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar optadj ieee data/ieee/ieee39/ieee39.ieee
+
+# N-1 (post-contingency) with an explicit contingency file
+java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar optadj ieee data/ieee/ieee39/ieee39.ieee \
+  data/ieee/ieee39/contingencies.json
+```
+
+`optadj` takes **at most one** positional file (the N-1 contingency JSON; a monitor file is
+rejected — the SSA scan is the monitored set). A basecase run refuses a contingency file. The **mode**
+is not a file key (since 0.7.11 the record reads six): the CLI infers `genAdjCA_N-1` when a contingency
+path is present and otherwise runs `genAdjBaseCase` — the same inference the chat tool falls back on,
+so one file means the same thing to both. The case
+folder's `config/opt_adj_run.json` (the same file the chat tool reads and writes) overrides the
+built-in defaults:
+
+| Key | Values | Meaning |
+| --- | --- | --- |
+| `scanLoadingThreshold` | `0 < t <= 1000`; unset = 50 basecase / 90 N-1 | Candidate-collection percentage |
+| `optAdjLoadingThreshold` | `0 < t <= 1000` (default `100`) | Percentage the optimizer enforces |
+| `contingencyMode` | `all` (default) \| `custom` | All N-1 outages, or the listed contingencies (`genAdjCA_N-1` only) |
+| `contingencyFile` | path under `wspace/` | The contingency JSON; required when the mode is `custom` |
+| `sparseSenMatrix` | `true` (default) \| `false` | Sensitivity path passed to the LP's optimizer: sparse, or dense |
+| `threads` | `>= 0` (default `0`) | SSA workers; `0` = one per available processor |
+
+The N-1 mode token was renamed from `genAdjCaN_1` to `genAdjCA_N-1` in 0.7.8. The record accepts the
+canonical token only, and the CLI takes its mode from the inference above — an `optAdjType` left in a
+file (0.7.4–0.7.10 wrote one) is ignored here. The DSH Host still honors it, folding the retired
+spelling onto the canonical token, so an older file keeps its mode through the plugin.
+
+Two preconditions are refused with the reason rather than producing a meaningless run: every active
+generator needs a **P gen limit** and every branch a **rating MVA 1** (the scan divides the flow by
+it). The IEEE 39 fixture carries neither — apply
+`wspace/data/ieee/ieee39/scripts/ieee39_limit_setup.gvy` first. Note that the run **overwrites the
+network's generator P in memory**; the CLI process exits, so nothing persists to the case file.
+
 ## Outputs
 
 Results are written under `wspace/<input_parent>/result/`:
@@ -113,6 +159,8 @@ Results are written under `wspace/<input_parent>/result/`:
 - `<stem>_DF_gen.csv`
 - `<stem>_DF_load.csv`
 - `<stem>_DF_contingency.csv` (CA only)
+- `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv` (OptAdj basecase)
+- `<stem>_DF_optadj_N1_gen.csv` + `<stem>_DF_optadj_N1_branch.csv` (OptAdj N-1, `genAdjCA_N-1`)
 
 See [Setup.md](Setup.md) for the full layout and the report generators in
 [GenReport.md](GenReport.md).

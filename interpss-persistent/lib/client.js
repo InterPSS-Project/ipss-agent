@@ -37,6 +37,109 @@ module.exports = {
       { label: 'Texas 2K-bus', format: 'psse', input: 'data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW' },
     ]
 
+    // The three case-file types the picker offers, in dropdown order. One table so the select,
+    // the picker's badge / empty text and the placeholder cannot drift; the values are the ones
+    // the Host's CASE_PATH_RE and the bridge's NetworkLoader dispatch on.
+    const CASE_FORMATS = [
+      { format: 'ieee', label: 'IEEE CDF', badge: 'IEEE', ext: '.ieee', example: 'data/ieee/Ieee118Bus/ieee118.ieee' },
+      { format: 'psse', label: 'PSS/E RAW', badge: 'PSSE', ext: '.raw', example: 'data/psse/Texas2K/Texas2k_series24_case1_2016summerPeak_v36.RAW' },
+      { format: 'bpa', label: 'BPA Dat', badge: 'BPA', ext: '.dat', example: 'data/bpa/ieee9/IEEE9.dat' },
+    ]
+
+    // Which type a case path is: PSS/E for .raw, BPA Dat for .dat, IEEE CDF otherwise.
+    function caseFormatOfPath(input) {
+      const path = typeof input === 'string' ? input : ''
+      if (/\.raw$/i.test(path)) return 'psse'
+      if (/\.dat$/i.test(path)) return 'bpa'
+      return 'ieee'
+    }
+
+    // The table row for a format; an unknown format reads as IEEE CDF rather than blank.
+    function caseFormatEntry(format) {
+      const found = CASE_FORMATS.find((f) => f.format === format)
+      return found === undefined ? CASE_FORMATS[0] : found
+    }
+
+    function casePickerEmptyText(format) {
+      const f = caseFormatEntry(format)
+      return 'No ' + f.label + ' (' + f.ext + ') files found under wspace/data.'
+    }
+
+    // `IEEE9.dat` -> `IEEE9`. The Java side strips any extension (ProjectPaths.stem), so the
+    // tab must too or the result files it looks for would not be the ones the run wrote.
+    function caseStem(name) {
+      return String(name).replace(/\.(ieee|raw|dat)$/i, '')
+    }
+
+    // The CA dialog's solver fields (0.7.2), in the order the advanced panel lists them. One table
+    // drives the form's defaults, its validation, the payload written to ca_run.json, the run and
+    // the controls themselves; the keys and every default match the Host's DEFAULT_CA_CONFIG and
+    // the Java `CaRunConfig`, so the three cannot disagree about a knob's name or its default.
+    const CA_SOLVER_FIELDS = [
+      { key: 'dclfInclLoss', label: 'Include losses (INC_LOSS)', kind: 'bool', def: true },
+      { key: 'dclfScreening', label: 'Screening pass', kind: 'bool', def: false },
+      { key: 'dcLoadingCutoff', label: 'DC loading cutoff (%)', kind: 'number', min: 0, max: 1000, def: 100 },
+      { key: 'dcFlowChangeCutoff', label: 'DC flow change cutoff (%)', kind: 'number', min: 0, max: 1000, def: 200 },
+      { key: 'solutionMethod', label: 'Solution method', kind: 'select', options: ['SparseEqnSolve', 'WoodburyMatrixUpdate'], def: 'SparseEqnSolve' },
+      { key: 'kluEndpointRhsBatchSize', label: 'KLU RHS batch size (0 = off)', kind: 'number', min: 0, max: 1000000, integer: true, def: 0 },
+      { key: 'cacheViolationCombinedShiftFactors', label: 'Cache violation shift factors', kind: 'bool', def: false },
+      { key: 'islandingTreatment', label: 'Islanding treatment', kind: 'select', options: ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY'], def: 'ANCHORED_COMPENSATE_ONE_BUS' },
+      { key: 'n1IslandingReplayEnabled', label: 'N-1 islanding replay', kind: 'bool', def: false },
+      { key: 'multiOutageReplayMode', label: 'Multi-outage replay', kind: 'select', options: ['EXACT_TOPOLOGY', 'HIGH_IMPEDANCE'], def: 'EXACT_TOPOLOGY' },
+      { key: 'highImpedanceReactancePu', label: 'High impedance X (pu)', kind: 'number', min: 0, exclusiveMin: true, max: 100000000, def: 10000 },
+      { key: 'turnOffIslandBus', label: 'Turn off island buses', kind: 'bool', def: true },
+      { key: 'autoTurnLine2Xfr', label: 'Auto turn line into transformer', kind: 'bool', def: true },
+      { key: 'ratingProvider', label: 'Rating provider', kind: 'select', options: ['default', 'RATING_A', 'RATING_B'], def: 'default' },
+      { key: 'threads', label: 'Threads (0 = all cores)', kind: 'number', min: 0, max: 1024, integer: true, def: 0 },
+    ]
+
+    const caFieldStyle = { padding: '0 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', height: '30px', boxSizing: 'border-box', width: '100%' }
+
+    // The form's value for a solver field, as its control expects it: booleans stay booleans,
+    // everything else is a string so a half-typed number is validated rather than coerced.
+    function caSolverFieldValue(field, config) {
+      const raw = config === null || config === undefined ? undefined : config[field.key]
+      if (field.kind === 'bool') return typeof raw === 'boolean' ? raw : field.def
+      if (raw === undefined || raw === null || raw === '') return String(field.def)
+      return String(raw)
+    }
+
+    // The first unusable solver field, or null. Mirrors the Host's `validateCaConfig` (which
+    // rejects the same values again) and the Java `CaRunConfig` behind it.
+    function caSolverError(form) {
+      for (const field of CA_SOLVER_FIELDS) {
+        const value = form[field.key]
+        if (field.kind === 'bool') continue
+        if (field.kind === 'select') {
+          if (field.options.indexOf(value) < 0) return field.label + ' must be ' + field.options.join(' | ')
+          continue
+        }
+        const n = Number(value)
+        // `exclusiveMin` is for the knobs the runner wants strictly positive (a reactance, for
+        // instance): 0 is a value it rejects, so the dialog must not call it usable.
+        const belowMin = field.exclusiveMin === true ? !(n > field.min) : n < field.min
+        if (value === '' || value === null || value === undefined || !Number.isFinite(n) ||
+            belowMin || n > field.max) {
+          return field.label + (field.exclusiveMin === true
+            ? ' must be a number greater than ' + field.min
+            : ' must be a number between ' + field.min + ' and ' + field.max)
+        }
+        if (field.integer === true && !Number.isInteger(n)) return field.label + ' must be a whole number'
+      }
+      return null
+    }
+
+    // The solver fields as the Host wants them (numbers coerced, booleans real booleans).
+    function caSolverPayload(form) {
+      const out = {}
+      for (const field of CA_SOLVER_FIELDS) {
+        if (field.kind === 'bool') out[field.key] = form[field.key] === true
+        else if (field.kind === 'select') out[field.key] = form[field.key]
+        else out[field.key] = Number(form[field.key])
+      }
+      return out
+    }
+
     let lastSelection = { mode: '0', customFormat: 'ieee', customInput: '' }
     let checkSeq = 0
     let reportSeq = 0
@@ -53,7 +156,8 @@ module.exports = {
     let bridgeCaseSeen = ''
 
     // Which picker state shows a case path: a preset index, or the custom-path row
-    // (PSS/E for .raw, IEEE CDF otherwise). Pure, so the sync effect stays a one-liner.
+    // (PSS/E for .raw, BPA Dat for .dat, IEEE CDF otherwise). Pure, so the sync effect
+    // stays a one-liner.
     function bridgeCaseSelection(input) {
       const index = PRESETS.findIndex((p) => p.input === input)
       if (index >= 0) {
@@ -62,7 +166,7 @@ module.exports = {
       return {
         mode: 'custom',
         customInput: input,
-        customFormat: /\.raw$/i.test(input) ? 'psse' : 'ieee',
+        customFormat: caseFormatOfPath(input),
       }
     }
 
@@ -304,7 +408,23 @@ module.exports = {
       return pf + sign + qf
     }
 
-    function branchTooltip(r) {
+    // A percent as the tooltip says it: one decimal at most, and no pointless `.0` (`59%`, not
+    // `59.0%`). Anything that is not a number is "not available", and the line is left out.
+    function loadingText(value) {
+      const n = parseFloat(String(value === undefined || value === null ? '' : value).trim())
+      if (!Number.isFinite(n)) return null
+      return (Math.round(n * 10) / 10) + '%'
+    }
+
+    // `extra.contingencyLoading` is the worst contingency loading for this branch, which only the
+    // Diagram tab has (it reads the CA result table for the flags); the connection diagram passes
+    // nothing and simply gets no contingency line. The base-case loading comes from the branch table
+    // the row itself came from, so it shows wherever that table is the source -- and neither line
+    // appears for a table without those columns.
+    // `extra.optAdjLoading` / `extra.optAdjN1Loading` are the same idea for the two OptAdj result
+    // tables (basecase and N-1), so each OptAdj line sits under the plain loading it redispatch was
+    // run against. Also Diagram-tab-only, also "when available".
+    function branchTooltip(r, extra) {
       if (!r) return 'Branch info'
       const isXfmr = r[12] === 'true'
       const lines = []
@@ -318,6 +438,18 @@ module.exports = {
       lines.push('')
       lines.push('Power From->To: ' + pqText(r[19], r[20]))
       lines.push('Power To->From: ' + pqText(r[21], r[22]))
+      const extras = extra === undefined || extra === null ? {} : extra
+      const basecase = loadingText(r[24])
+      const contingency = loadingText(extras.contingencyLoading)
+      const optAdj = loadingText(extras.optAdjLoading)
+      const optAdjN1 = loadingText(extras.optAdjN1Loading)
+      if (basecase !== null || contingency !== null || optAdj !== null || optAdjN1 !== null) {
+        lines.push('')
+        if (basecase !== null) lines.push('Basecase Loading(%): ' + basecase)
+        if (optAdj !== null) lines.push('Basecase OptAdj Loading(%): ' + optAdj)
+        if (contingency !== null) lines.push('Contingency Loading(%): ' + contingency)
+        if (optAdjN1 !== null) lines.push('Contingency OptAdj Loading(%): ' + optAdjN1)
+      }
       return lines.join('\n')
     }
 
@@ -726,7 +858,10 @@ module.exports = {
     const DRAWIO_STROKE = '#000000'
     const DRAWIO_TEXT = '#111827'
     const DRAWIO_PAD = 20
-    const DRAWIO_MAX_CELLS = 2000
+    // The preview is O(cells) React elements, so this bounds what it will attempt. A 2000-bus case
+    // has to fit — Texas 2K is 2000 bars + 3220 branches + 861 transformer symbols = ~10.7k cells
+    // — and 20000 leaves room above that without letting a pathological file lock the tab up.
+    const DRAWIO_MAX_CELLS = 20000
     // Tooltip hit areas. A branch is a 1.5px line and a bus bar is 6px wide, so the drawn
     // geometry is impractical to hover; each interactive cell also emits an invisible shape
     // with this stroke width, or a transparent rect padded by this many scene units.
@@ -777,6 +912,889 @@ module.exports = {
       if (lum <= 0.18) return DRAWIO_INK
       if (sat > 0.25) return color
       return DRAWIO_MID
+    }
+
+    // --- the one-line diagram config (0.6.26) --------------------------------
+    // config/net_diagram.json holds three flag families for the PREVIEW: the bus voltage band and
+    // its colour, and a flow percent + colour for the base case and for contingencies. The file is
+    // the Host's to write (the gear dialog asks it to); this side only needs the same defaults and
+    // the same validation, so a missing or broken file still paints the familiar red, and a value
+    // the dialog accepts is a value the Host will keep.
+    const DRAWIO_NET_DEFAULTS = {
+      Bus_flag_upper_limit: 1.1,
+      Bus_flag_lower_limit: 0.9,
+      Bus_flag_color: 'red',
+      Basecase_branch_flow_flag_percent: 80.0,
+      Basecase_branch_flow_flag_color: 'green',
+      Contingency_branch_flow_flag_percent: 100.0,
+      Contingency_branch_flow_flag_color: 'blue',
+      Show_birdseye_view: true,
+    }
+    const DRAWIO_COLOR_RE = /^(#[0-9a-f]{3,8}|[a-z]+|rgba?\([^)]*\)|hsla?\([^)]*\))$/i
+    // The seven keys the dialog edits, in the order the file carries them, with the label the
+    // dialog shows and the bounds the form checks. One table drives the form, the validation and
+    // the sanitizer, so they cannot drift apart.
+    const DRAWIO_NET_FIELDS = [
+      { key: 'Bus_flag_upper_limit', label: 'Bus flag: upper limit (pu)', kind: 'number', min: 0.05, max: 5.0, step: 0.01 },
+      { key: 'Bus_flag_lower_limit', label: 'Bus flag: lower limit (pu)', kind: 'number', min: 0.05, max: 5.0, step: 0.01 },
+      { key: 'Bus_flag_color', label: 'Bus flag colour', kind: 'color' },
+      { key: 'Basecase_branch_flow_flag_percent', label: 'Base-case branch flow flag (%)', kind: 'number', min: 0, max: 1000, step: 1 },
+      { key: 'Basecase_branch_flow_flag_color', label: 'Base-case branch colour', kind: 'color' },
+      { key: 'Contingency_branch_flow_flag_percent', label: 'Contingency branch flow flag (%)', kind: 'number', min: 0, max: 1000, step: 1 },
+      { key: 'Contingency_branch_flow_flag_color', label: 'Contingency branch colour', kind: 'color' },
+      { key: 'Show_birdseye_view', label: 'Show the birdseye view', kind: 'boolean' },
+    ]
+
+    // Server values pasted over the defaults, with every unknown key kept: the file is hand-editable
+    // and a save must not throw away what the dialog does not show.
+    function drawioNetConfig(raw) {
+      const out = Object.assign({}, DRAWIO_NET_DEFAULTS)
+      const src = raw !== null && raw !== undefined && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+      for (const key of Object.keys(src)) out[key] = src[key]
+      for (const field of DRAWIO_NET_FIELDS) {
+        const value = out[field.key]
+        if (field.kind === 'number') {
+          const n = Number(value)
+          out[field.key] = Number.isFinite(n) ? Math.min(field.max, Math.max(field.min, n)) : DRAWIO_NET_DEFAULTS[field.key]
+        } else if (field.kind === 'boolean') {
+          // A switch is on unless it was explicitly turned off: `false`, or the word, from a hand edit.
+          const off = value === false || value === 0 || String(value).trim().toLowerCase() === 'false'
+          const on = value === true || value === 1 || String(value).trim().toLowerCase() === 'true'
+          out[field.key] = off ? false : (on ? true : DRAWIO_NET_DEFAULTS[field.key])
+        } else {
+          const text = typeof value === 'string' ? value.trim() : ''
+          out[field.key] = DRAWIO_COLOR_RE.test(text) ? text : DRAWIO_NET_DEFAULTS[field.key]
+        }
+      }
+      if (!(out.Bus_flag_lower_limit < out.Bus_flag_upper_limit)) {
+        out.Bus_flag_lower_limit = DRAWIO_NET_DEFAULTS.Bus_flag_lower_limit
+        out.Bus_flag_upper_limit = DRAWIO_NET_DEFAULTS.Bus_flag_upper_limit
+      }
+      return out
+    }
+
+    // The band, spelled the way every surface that mentions it must spell it: the filter dialog's
+    // checkbox, its live count, the toolbar's filter label and the bus tooltip all read the config,
+    // so a user who changes the band in the gear dialog sees that change everywhere at once (0.6.27).
+    function drawioBandText(config) {
+      const cfg = drawioNetConfig(config)
+      return '|V| outside ' + cfg.Bus_flag_lower_limit + '\u2013' + cfg.Bus_flag_upper_limit + ' pu'
+    }
+
+    // The flow thresholds, spelled for the two surfaces that quote them: the Filter dialog's
+    // checkboxes and the sentence that reports what the filter kept. `which` is 'basecase' or
+    // 'contingency' -- the two families the dialog can filter on (0.6.32).
+    function drawioLoadingThresholdText(config, which) {
+      const cfg = drawioNetConfig(config)
+      const pct = which === 'contingency'
+        ? cfg.Contingency_branch_flow_flag_percent
+        : cfg.Basecase_branch_flow_flag_percent
+      return (which === 'contingency' ? 'contingency' : 'base-case') + ' loading \u2265 ' + pct + '%'
+    }
+
+    // What stops OK: one message per offending field, or none. Kept separate from the sanitizer
+    // above, because a form should say WHY rather than silently clamp behind the user's back.
+    function drawioNetConfigErrors(form) {
+      const out = {}
+      const src = form === null || form === undefined ? {} : form
+      for (const field of DRAWIO_NET_FIELDS) {
+        const value = src[field.key]
+        if (field.kind === 'number') {
+          const n = Number(value)
+          if (String(value === null || value === undefined ? '' : value).trim() === '' || !Number.isFinite(n)) {
+            out[field.key] = 'a number is required'
+          } else if (n < field.min || n > field.max) {
+            out[field.key] = 'must be between ' + field.min + ' and ' + field.max
+          }
+        } else if (field.kind === 'boolean') {
+          // a switch is never wrong: it is on, or it is off
+          continue
+        } else {
+          const text = typeof value === 'string' ? value.trim() : ''
+          if (text === '') out[field.key] = 'a colour is required'
+          else if (!DRAWIO_COLOR_RE.test(text)) out[field.key] = 'a CSS colour name, #hex or rgb()'
+        }
+      }
+      const lower = Number(src.Bus_flag_lower_limit)
+      const upper = Number(src.Bus_flag_upper_limit)
+      if (out.Bus_flag_lower_limit === undefined && out.Bus_flag_upper_limit === undefined
+        && Number.isFinite(lower) && Number.isFinite(upper) && !(lower < upper)) {
+        out.Bus_flag_upper_limit = 'the upper limit must be above the lower limit'
+      }
+      return out
+    }
+
+    // A tiny CSV header lookup: the column index for `name`, or -1. Every table read here goes
+    // through it, because a positional read would silently flag the wrong branches in a reordered
+    // table (the same rule the voltage and area/zone columns follow).
+    function drawioColIndex(header, name) {
+      const cells = String(header === null || header === undefined ? '' : header).split(',')
+      for (let i = 0; i < cells.length; i += 1) {
+        if (String(cells[i]).trim().toLowerCase() === name) return i
+      }
+      return -1
+    }
+
+    // Loadings keyed the way the branch index keys them (both bus ids lowercased and sorted, joined
+    // with `|`), each carrying the highest loading among parallel circuits (or among contingencies).
+    // EVERY row is kept, whatever the display thresholds say: the tooltip quotes what the tables hold
+    // -- "when available" -- while the paint and the status counts apply the configured thresholds.
+    // Filtering here instead (0.6.30) hid a 70% contingency from the tooltip whenever the flag
+    // threshold was 100%, which is exactly the case the tables are read for.
+    function drawioMaxByPair(rows, percentAt, pairAt) {
+      const out = {}
+      if (percentAt < 0 || !Array.isArray(rows)) return out
+      for (const line of rows) {
+        const c = String(line).split(',')
+        const loading = parseFloat(String(c[percentAt] === undefined ? '' : c[percentAt]).trim())
+        if (!Number.isFinite(loading)) continue
+        const pair = pairAt(c)
+        if (pair === null) continue
+        if (out[pair] === undefined || loading > out[pair]) out[pair] = loading
+      }
+      return out
+    }
+
+    // The base-case flags, from `<stem>_DF_branch.csv`: `FromBusID`/`ToBusID` give the pair, and
+    // `Loading%` gives the loading, all by header NAME.
+    function drawioBranchLoads(header, rows) {
+      const iFrom = drawioColIndex(header, 'frombusid')
+      const iTo = drawioColIndex(header, 'tobusid')
+      const iLoading = drawioColIndex(header, 'loading%')
+      return drawioMaxByPair(rows, iLoading, (c) => {
+        const from = String(c[iFrom] === undefined ? '' : c[iFrom]).trim().toLowerCase()
+        const to = String(c[iTo] === undefined ? '' : c[iTo]).trim().toLowerCase()
+        if (iFrom < 0 || iTo < 0 || !drawioIsBusCell(from) || !drawioIsBusCell(to)) return null
+        return [from, to].sort().join('|')
+      })
+    }
+
+    // Loadings of a table whose `branchId` names the branch (`Bus1001->Bus1064(1)`), keyed by the
+    // bus pair and carrying the worst row. `percentName` and the id column are matched by header
+    // NAME, like every other read here. Shared by the CA table and the two OptAdj tables.
+    function drawioPairLoads(header, rows, percentName) {
+      const iId = drawioColIndex(header, 'branchid')
+      const iLoading = drawioColIndex(header, percentName)
+      return drawioMaxByPair(rows, iLoading, (c) => {
+        if (iId < 0) return null
+        const m = /^(bus\d+)\s*->\s*(bus\d+)/i.exec(String(c[iId] === undefined ? '' : c[iId]).trim())
+        if (m === null) return null
+        return [m[1].toLowerCase(), m[2].toLowerCase()].sort().join('|')
+      })
+    }
+
+    // The contingency flags, from the CA result table `<stem>_DF_contingency.csv`: its `BranchID`
+    // is `Bus1001->Bus1064(1)`, so the pair is the head of that string, and `LoadingPercent` is the
+    // worst loading any contingency left on the branch.
+    function drawioContingencyLoads(header, rows) {
+      return drawioPairLoads(header, rows, 'loadingpercent')
+    }
+
+    // The OptAdj result tables (`<stem>_DF_optadj_branch.csv`, and the `_N1_` pair the N-1 mode
+    // writes since 0.7.5) name the branch the same way, so they key the same way. `loadingAfterPct`
+    // is the loading the redispatch achieved — the number the run exists to produce — and the N-1
+    // table holds one row per (monitored branch, outage), so the max is the worst one. Rows exist
+    // only for the run's scan candidates, which is what makes the tooltip line "when available".
+    function drawioOptAdjLoads(header, rows) {
+      return drawioPairLoads(header, rows, 'loadingafterpct')
+    }
+
+    // The paint map the renderer takes: cell id -> colour. Bus flags come from the band in the
+    // config (via the same `drawioBusAlerts` the 0.6.18 annotation used), the two branch families
+    // from the flow tables, and a branch flagged by a contingency outranks one flagged by its base
+    // case. Buses and branches cannot collide -- a cell is either a bar/label or an edge/ring.
+    function drawioFlagPaint(nodes, edges, config, busAlerts, branchLoads, contingencyLoads) {
+      const out = {}
+      const cfg = config === null || config === undefined ? DRAWIO_NET_DEFAULTS : config
+      if (Array.isArray(nodes) && busAlerts !== null && busAlerts !== undefined) {
+        for (const n of nodes) {
+          const bus = drawioBusCellId(n)
+          if (bus !== null && busAlerts[String(bus).toLowerCase()] === true) out[n.id] = cfg.Bus_flag_color
+        }
+      }
+      if (!Array.isArray(edges)) return out
+      const index = drawioRingIndex(nodes || [])
+      for (const e of edges) {
+        const ends = drawioEdgeBusPair(e, edges, index)
+        if (ends === null) continue
+        const key = ends.slice().sort().join('|')
+        const contingency = contingencyLoads === null || contingencyLoads === undefined ? undefined : contingencyLoads[key]
+        const basecase = branchLoads === null || branchLoads === undefined ? undefined : branchLoads[key]
+        // The map holds every branch the tables mention; the thresholds decide what is painted, with
+        // a contingency flag outranking a base-case one.
+        if (contingency !== undefined && contingency >= cfg.Contingency_branch_flow_flag_percent) {
+          out[e.id] = cfg.Contingency_branch_flow_flag_color
+        } else if (basecase !== undefined && basecase >= cfg.Basecase_branch_flow_flag_percent) {
+          out[e.id] = cfg.Basecase_branch_flow_flag_color
+        }
+      }
+      return out
+    }
+
+    // The final paint map: the flags, with the search colour over the top -- a search is the
+    // deliberate act, so a bus that is both flagged and searched shows as searched. Pure, so the
+    // guard can hold the precedence still.
+    function drawioMergedPaint(flagPaint, searchHits, searchColour) {
+      const out = flagPaint === null || flagPaint === undefined ? {} : Object.assign({}, flagPaint)
+      if (searchHits !== null && searchHits !== undefined) {
+        for (const id of Object.keys(searchHits.buses || {})) out[id] = searchColour
+        for (const id of Object.keys(searchHits.edges || {})) out[id] = searchColour
+      }
+      return Object.keys(out).length === 0 ? null : out
+    }
+
+    const drawioGearIcon = React.createElement('svg',
+      { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+      React.createElement('circle', { cx: 8, cy: 8, r: 2.3, fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }),
+      React.createElement('path', {
+        d: 'M8 1.4 L9.2 3.1 L11.3 2.6 L11.5 4.7 L13.5 5.6 L12.5 7.4 L13.5 9.2 L11.5 10.1 L11.3 12.2 '
+          + 'L9.2 11.7 L8 13.4 L6.8 11.7 L4.7 12.2 L4.5 10.1 L2.5 9.2 L3.5 7.4 L2.5 5.6 L4.5 4.7 L4.7 2.6 L6.8 3.1 Z',
+        fill: 'none', stroke: 'currentColor', strokeWidth: 1.3, strokeLinejoin: 'round',
+      }),
+    )
+
+    // --- Render-time voltage annotation ---------------------------------------
+    // A bus whose solved |V| is outside this band is painted red — bar, outline and `Bus-N` label
+    // — by `DrawioDiagram`. The annotation is PAINT-TIME ONLY: it never touches the .drawio file,
+    // the parsed scene keeps its authored colours, and the desktop app plus the generator's PNG
+    // preview stay as authored. The colours are saturated on purpose: `drawioThemeColor` passes
+    // them through unchanged, so a violation reads the same in the light and the dark theme.
+    // The band and colour now come from config/net_diagram.json (0.6.26): `DRAWIO_NET_DEFAULTS`
+    // below carries the shipped values and `drawioNetConfig` fills in whatever the file omits, so
+    // with no config file at all the annotation is the red 0.9-1.1 pu it has always been.
+    const DRAWIO_DEFAULT_V_BAND = [DRAWIO_NET_DEFAULTS.Bus_flag_lower_limit, DRAWIO_NET_DEFAULTS.Bus_flag_upper_limit]
+
+    // The bus a node stands for — the bus half of `drawioHoverTarget`, without needing the
+    // element->branch pairs: a bar carries `busN`, a `Bus-N` label stands in for its bar.
+    function drawioBusCellId(node) {
+      if (node === null || node === undefined) return null
+      if (drawioIsBusId(node.id)) return node.id
+      return drawioLabelBusId(node.lines)
+    }
+
+    // Strictly outside the band: the endpoints 0.9 and 1.1 are in band, and a value that is not a
+    // finite number (a blank VoltMag, a `-` placeholder) is simply not annotated.
+    function drawioVoltOutsideBand(volt, band) {
+      const limits = Array.isArray(band) && band.length === 2 ? band : DRAWIO_DEFAULT_V_BAND
+      const v = typeof volt === 'number' ? volt : parseFloat(volt)
+      if (!Number.isFinite(v)) return false
+      return v < limits[0] || v > limits[1]
+    }
+
+    // Which of `wantedIds` are out of band, as a plain lookup the renderer can index by bus id.
+    // `busRows` are raw CSV lines (`readCsv` hands back the file's own text) and the columns are
+    // found by NAME, never by position: `VoltAng` and `NomVolt` sit right beside `VoltMag`, and a
+    // positional read would silently colour the wrong buses.
+    function drawioVoltColumns(header) {
+      const cells = String(header === null || header === undefined ? '' : header).split(',')
+      const at = (name) => {
+        for (let i = 0; i < cells.length; i += 1) {
+          if (String(cells[i]).trim().toLowerCase() === name) return i
+        }
+        return -1
+      }
+      return { id: at('id'), volt: at('voltmag') }
+    }
+
+    function drawioBusAlerts(header, busRows, wantedIds, band) {
+      const out = {}
+      const cols = drawioVoltColumns(header)
+      if (cols.id < 0 || cols.volt < 0 || !Array.isArray(busRows)) return out
+      for (const line of busRows) {
+        const c = String(line).split(',')
+        const id = String(c[cols.id] || '').trim()
+        if (id === '') continue
+        if (wantedIds !== null && wantedIds !== undefined && wantedIds[id.toLowerCase()] !== true) continue
+        if (drawioVoltOutsideBand(String(c[cols.volt] || '').trim(), band)) out[id.toLowerCase()] = true
+      }
+      return out
+    }
+
+    // --- Search and filter (0.6.23) -------------------------------------------
+    // Both are paint-time overrides of the same kind as the voltage alert: a search paints what it
+    // found, a filter skips what does not match, and neither touches the .drawio file, the parsed
+    // scene or the draw.io desktop app. The rules live here, module-level and pure, because they
+    // are the only part of the feature with behaviour worth pinning down in the guard -- the rest
+    // is a dialog and a pair of buttons.
+    // What a search paints its hits with — the bar, the `Bus-N` label text and the branch line.
+    // **Green since 0.6.36** (it was the accent blue `#1F6FEB`): a bus or branch that was *found*
+    // should not read as a link, and this mid-luminance green keeps the label legible on the light
+    // and the dark canvas alike (`green` itself is too dark there). It is deliberately apart from
+    // the flag colours in `config/net_diagram.json`: a search is a deliberate act and outranks
+    // them, so the two must be able to differ on screen.
+    const DRAWIO_MATCH_FILL = '#2EA043'
+
+    // The birdseye's viewport frame: the tab's other accent, and the one that stayed blue when the
+    // search highlight turned green — the frame answers "where am I looking", not "what did I find".
+    const DRAWIO_BIRDSEYE_FRAME = '#1F6FEB'
+
+    // What a SELECTED (or hovered) bus/branch is marked with. Selection keeps the frame's blue --
+    // the same colour the draw.io app itself uses for its own selection, and deliberately neither
+    // the green search nor a config flag colour, because "this is what I picked" is a third thing.
+    // The mark is an OUTLINE painted over the cell, never a replacement for its fill: a red bus or
+    // a green search hit must stay readable underneath it.
+    const DRAWIO_SELECT_STROKE = DRAWIO_BIRDSEYE_FRAME
+    const DRAWIO_SELECT_PAD = 3
+    const DRAWIO_SELECT_FILL_OPACITY = 0.12
+    const DRAWIO_HOVER_FILL_OPACITY = 0.07
+
+    const drawioIsBusCell = (id) => /^bus\d+$/i.test(String(id === null || id === undefined ? '' : id))
+
+    // Which cells are a transformer's two rings, and which group holds them. The generated file
+    // puts them in a `style=group` cell, and that is what a branch through a transformer has to be
+    // resolved against: its two stub edges each go bus -> ring, so neither is a bus pair on its own.
+    function drawioRingIndex(nodes) {
+      const groupOf = {}
+      const rings = {}
+      for (const n of nodes) {
+        if (n.parent !== undefined && n.parent !== null && n.parent !== '' && n.parent !== '1') groupOf[n.id] = n.parent
+      }
+      for (const n of nodes) {
+        const g = groupOf[n.id]
+        if (g !== undefined) {
+          if (rings[g] === undefined) rings[g] = []
+          rings[g].push(n.id)
+        }
+      }
+      return { groupOf: groupOf, rings: rings }
+    }
+
+    // The bus pair an edge connects, or null when it cannot be resolved. A plain branch is
+    // bus -> bus; a transformer branch is two stubs, so the ring's sibling stub supplies the other
+    // bus (without this, search and filter would miss every branch through a transformer).
+    function drawioEdgeBusPair(edge, edges, index) {
+      // The parsed scene names these `source` / `target` (the draw.io cell attributes).
+      if (drawioIsBusCell(edge.source) && drawioIsBusCell(edge.target)) {
+        return [String(edge.source).toLowerCase(), String(edge.target).toLowerCase()]
+      }
+      const busEnd = drawioIsBusCell(edge.source) ? edge.source : (drawioIsBusCell(edge.target) ? edge.target : null)
+      const ring = drawioIsBusCell(edge.source) ? edge.target : edge.source
+      if (busEnd === null || ring === null || ring === undefined) return null
+      const group = index.groupOf[ring]
+      if (group === undefined) return null
+      const siblings = index.rings[group] || []
+      for (const e of edges) {
+        if (e === edge) continue
+        const other = siblings.indexOf(e.source) >= 0 ? e.source : (siblings.indexOf(e.target) >= 0 ? e.target : null)
+        if (other === null) continue
+        if (drawioIsBusCell(e.source) && e.target === other) return [String(busEnd).toLowerCase(), String(e.source).toLowerCase()]
+        if (drawioIsBusCell(e.target) && e.source === other) return [String(busEnd).toLowerCase(), String(e.target).toLowerCase()]
+      }
+      return null
+    }
+
+    // What a search query matches, as cell-id lookups the renderer can paint from. The query is
+    // one of: a bus number (`1001`), a bus id (`Bus-1001`, `Bus1001`), part of a bus name
+    // (`ODESSA`, from the case's bus table), or a branch written with an arrow (`1001->1002`;
+    // `-`, `/` and the unicode arrow are accepted too). A bus and a branch are tried together,
+    // because `1001` is a valid bus on its own.
+    //
+    // Since 0.6.35 a branch may be written with bus ids as well as numbers — `Bus-1 -> Bus-2`,
+    // the spelling the diagram itself shows. Either end, or both, may carry the `bus` prefix
+    // (its hyphen and the spaces around the arrow are optional), so `Bus-1->Bus-2`,
+    // `bus1 -> bus2` and `1 -> Bus-2` all mean the same pair.
+    function drawioSearchHits(query, nodes, edges, busNames) {
+      const out = { buses: {}, edges: {}, nBus: 0, nBranch: 0, text: '' }
+      const q = String(query === null || query === undefined ? '' : query).trim().toLowerCase()
+      if (q === '') {
+        out.text = 'Type a bus number, a name, or a branch like 1001->1002 or Bus-1 -> Bus-2.'
+        return out
+      }
+      const index = drawioRingIndex(nodes)
+      const labels = {}
+      for (const n of nodes) {
+        const bus = drawioBusCellId(n)
+        if (bus !== null && !drawioIsBusCell(n.id)) labels[String(bus).toLowerCase()] = n.id
+      }
+      const bars = {}
+      for (const n of nodes) {
+        if (drawioIsBusCell(n.id)) bars[String(n.id).toLowerCase()] = n.id
+      }
+      const hit = (busKey) => {
+        if (out.buses[busKey] === true) return
+        out.buses[busKey] = true
+        out.nBus += 1
+        if (bars[busKey] !== undefined) out.buses[bars[busKey]] = true
+        if (labels[busKey] !== undefined) out.buses[labels[busKey]] = true
+      }
+      // 0.6.35: an id on either end (`Bus-1 -> Bus-2`), with the prefix's hyphen and the spaces
+      // around the separator all optional — the id spelling and the number spelling reach the
+      // same pair.
+      const pair = /^(?:bus\s*-?\s*)?(\d+)\s*(?:->|\u2192|[-\u2013/])\s*(?:bus\s*-?\s*)?(\d+)$/.exec(q)
+      if (pair !== null) {
+        const a = 'bus' + pair[1]
+        const b = 'bus' + pair[2]
+        // The reply names the buses the way the drawing does, whichever spelling was typed.
+        const from = 'Bus-' + pair[1]
+        const to = 'Bus-' + pair[2]
+        if (bars[a] === undefined || bars[b] === undefined) {
+          out.text = 'No branch between ' + from + ' and ' + to + ' in this diagram.'
+          return out
+        }
+        hit(a)
+        hit(b)
+        for (const e of edges) {
+          const ends = drawioEdgeBusPair(e, edges, index)
+          if (ends === null) continue
+          if ((ends[0] === a && ends[1] === b) || (ends[0] === b && ends[1] === a)) {
+            out.edges[e.id] = true
+            out.nBranch += 1
+          }
+        }
+        out.text = out.nBranch === 0
+          ? 'No branch drawn between ' + from + ' and ' + to + '.'
+          : out.nBranch + (out.nBranch === 1 ? ' branch' : ' branches') + ' between ' + from + ' and ' + to + '.'
+        return out
+      }
+      const num = /^bus-?(\d+)$/.exec(q)
+      if (num !== null) {
+        if (bars['bus' + num[1]] === undefined) {
+          out.text = 'No Bus-' + num[1] + ' in this diagram.'
+          return out
+        }
+        hit('bus' + num[1])
+        out.text = 'Bus-' + num[1] + ' found.'
+        return out
+      }
+      for (const key of Object.keys(bars)) {
+        if (key === 'bus' + q) hit(key)
+      }
+      if (out.nBus === 0 && busNames !== null && busNames !== undefined) {
+        for (const key of Object.keys(busNames)) {
+          if (String(busNames[key]).toLowerCase().indexOf(q) >= 0 && bars[key] !== undefined) hit(key)
+        }
+      }
+      out.text = out.nBus === 0
+        ? 'Nothing matches "' + query + '".'
+        : out.nBus + (out.nBus === 1 ? ' bus' : ' buses') + ' match "' + query + '".'
+      return out
+    }
+
+    // What a filter hides: every bus outside the chosen area/zone -- and, when asked, outside the
+    // |V| band -- plus the labels, branches and transformer symbols attached to those buses. A
+    // branch is hidden when EITHER end is hidden, so nothing is left dangling into nothing.
+    // Two KINDS of criterion, and the difference matters when they are combined (0.6.32):
+    //
+    //   - the bus criteria (area, zone, the voltage band) choose buses;
+    //   - the flow criteria (base-case, contingency loading) choose branches.
+    //
+    // A bus criterion alone leaves the network of the chosen buses standing, exactly as before. A
+    // flow criterion is the "only" kind: the branches that do not reach its threshold go, and so do
+    // the buses that are not an end of a branch that stays -- otherwise "only branches >= 70%" would
+    // still draw every bus. Combined, they narrow together: area 1 + base-case >= 70% is the
+    // overloaded branches *inside* area 1.
+    function drawioFilterHidden(filter, nodes, edges, meta, alerts, config, branchLoads, contingencyLoads) {
+      const out = { ids: {}, nBuses: 0, nBranches: 0, text: '' }
+      if (filter === null || filter === undefined) return out
+      const index = drawioRingIndex(nodes)
+      const cfg = drawioNetConfig(config)
+      const bars = []
+      for (const n of nodes) {
+        if (drawioIsBusCell(n.id)) bars.push(String(n.id).toLowerCase())
+      }
+      const keep = {}
+      const area = String(filter.area === undefined || filter.area === null ? '' : filter.area)
+      const zone = String(filter.zone === undefined || filter.zone === null ? '' : filter.zone)
+      const band = filter.outOfBand === true
+      const flowBase = filter.basecaseLoading === true
+      const flowCont = filter.contingencyLoading === true
+      const flow = flowBase || flowCont
+      for (const key of bars) {
+        const info = meta !== null && meta !== undefined && meta.ofBus !== undefined ? meta.ofBus[key] : undefined
+        let ok = true
+        if (area !== '') ok = info !== undefined && String(info.area) === area
+        if (ok && zone !== '') ok = info !== undefined && String(info.zone) === zone
+        if (ok && band) ok = alerts !== null && alerts !== undefined && alerts[key] === true
+        keep[key] = ok
+      }
+      // Phase B: the branch criteria, over the pairs the diagram draws (a transformer's two stubs are
+      // one pair, the same granularity the flow flags count in).
+      const loadOf = (loads, key) => (loads === null || loads === undefined ? undefined : loads[key])
+      const flowOk = (key) => {
+        if (!flow) return true
+        if (flowBase) {
+          const v = loadOf(branchLoads, key)
+          if (v === undefined || v < cfg.Basecase_branch_flow_flag_percent) return false
+        }
+        if (flowCont) {
+          const v = loadOf(contingencyLoads, key)
+          if (v === undefined || v < cfg.Contingency_branch_flow_flag_percent) return false
+        }
+        return true
+      }
+      const pairs = {}
+      const edgePair = {}
+      for (const e of edges) {
+        const ends = drawioEdgeBusPair(e, edges, index)
+        if (ends === null) continue
+        const key = ends.slice().sort().join('|')
+        edgePair[e.id] = key
+        pairs[key] = true
+      }
+      const edgeOk = {}
+      const incident = {}
+      for (const e of edges) {
+        const key = edgePair[e.id]
+        if (key === undefined) continue
+        const ends = key.split('|')
+        const ok = keep[ends[0]] !== false && keep[ends[1]] !== false && flowOk(key)
+        edgeOk[e.id] = ok
+        if (ok && flow) {
+          incident[ends[0]] = true
+          incident[ends[1]] = true
+        }
+      }
+      // Phase C: a flow criterion narrows the buses to the ends of what survives (see above).
+      const surv = {}
+      for (const key of bars) {
+        const ok = keep[key] !== false && (!flow || incident[key] === true)
+        surv[key] = ok
+        if (!ok) {
+          out.nBuses += 1
+          out.ids[key] = true
+        }
+      }
+      for (const n of nodes) {
+        const bus = drawioBusCellId(n)
+        if (bus !== null && surv[String(bus).toLowerCase()] === false) out.ids[n.id] = true
+      }
+      for (const e of edges) {
+        const key = edgePair[e.id]
+        if (key === undefined) continue
+        const ends = key.split('|')
+        if (edgeOk[e.id] !== true || surv[ends[0]] === false || surv[ends[1]] === false) out.ids[e.id] = true
+      }
+      let nPairs = 0
+      let nPairsKept = 0
+      const counted = {}
+      for (const key of Object.keys(edgePair)) {
+        const pairKey = edgePair[key]
+        if (counted[pairKey] === true) continue
+        counted[pairKey] = true
+        nPairs += 1
+        const ends = pairKey.split('|')
+        if (surv[ends[0]] !== false && surv[ends[1]] !== false && flowOk(pairKey)) nPairsKept += 1
+      }
+      out.totalBranches = nPairs
+      out.keptBranches = nPairsKept
+      out.nBranches = nPairs - nPairsKept
+      // a transformer's rings have no bus of their own: hide them with the stub that was hidden
+      for (const e of edges) {
+        if (out.ids[e.id] !== true) continue
+        const ring = drawioIsBusCell(e.source) ? e.target : e.source
+        if (ring === null || ring === undefined) continue
+        const group = index.groupOf[ring]
+        for (const r of (group === undefined ? [] : index.rings[group] || [])) out.ids[r] = true
+        if (group !== undefined) out.ids[group] = true
+      }
+      // The sentence names the area and zone the way the dialog's selects do; the toolbar's short
+      // label stays numeric, because that row has no space for names.
+      const nameOf = (list, num) => {
+        for (const item of (meta !== null && meta !== undefined && Array.isArray(list) ? list : [])) {
+          if (String(item.num) === String(num) && item.name !== '') return ' ' + item.name
+        }
+        return ''
+      }
+      const short = []
+      const parts = []
+      let busCriteria = false
+      let branchCriteria = false
+      if (area !== '') {
+        short.push('area ' + area)
+        parts.push('area ' + area + nameOf(meta === null || meta === undefined ? null : meta.areas, area))
+        busCriteria = true
+      }
+      if (zone !== '') {
+        short.push('zone ' + zone)
+        parts.push('zone ' + zone + nameOf(meta === null || meta === undefined ? null : meta.zones, zone))
+        busCriteria = true
+      }
+      if (band) {
+        short.push(drawioBandText(config))
+        parts.push(drawioBandText(config))
+        busCriteria = true
+      }
+      if (flowBase) {
+        short.push(drawioLoadingThresholdText(config, 'basecase'))
+        parts.push(drawioLoadingThresholdText(config, 'basecase'))
+        branchCriteria = true
+      }
+      if (flowCont) {
+        short.push(drawioLoadingThresholdText(config, 'contingency'))
+        parts.push(drawioLoadingThresholdText(config, 'contingency'))
+        branchCriteria = true
+      }
+      out.label = short.join(', ')
+      out.criteria = parts.join(', ')
+      out.kept = bars.length - out.nBuses
+      out.total = bars.length
+      // A branch criterion is answered in branches -- counting buses there would say "all 2000 shown"
+      // while the drawing shows a handful of overloaded lines. Both kinds together report both.
+      const clause = []
+      if (busCriteria || branchCriteria === false || out.nBuses > 0) clause.push(out.kept + ' of ' + out.total + ' buses')
+      if (branchCriteria) clause.push(out.keptBranches + ' of ' + out.totalBranches + ' branches')
+      out.text = parts.length === 0
+        ? 'Nothing is filtered: every bus is shown.'
+        : 'Showing ' + clause.join(' and ') + ' (' + out.criteria + ').'
+      return out
+    }
+
+    // The bus table's area/zone/name columns, folded into the lookups a filter needs: the distinct
+    // Area and Zone numbers with their names, and per bus its area, zone and name. Read by header
+    // name like the voltage columns -- `AreaNum` sits beside `AreaName`, and a positional read
+    // would silently filter on the wrong column. `into` lets the caller merge successive pages.
+    function drawioBusMeta(header, rows, into) {
+      const out = into || { areas: [], zones: [], ofBus: {} }
+      const seenArea = {}
+      const seenZone = {}
+      for (const a of out.areas) seenArea[a.num] = true
+      for (const z of out.zones) seenZone[z.num] = true
+      const cells = String(header === null || header === undefined ? '' : header).split(',')
+      const at = (name) => {
+        for (let i = 0; i < cells.length; i += 1) {
+          if (String(cells[i]).trim().toLowerCase() === name) return i
+        }
+        return -1
+      }
+      const iId = at('id')
+      if (iId < 0 || !Array.isArray(rows)) return out
+      const iName = at('name')
+      const iArea = at('areanum')
+      const iAreaName = at('areaname')
+      const iZone = at('zonenum')
+      const iZoneName = at('zonename')
+      const cell = (c, i) => (i < 0 ? '' : String(c[i] === undefined ? '' : c[i]).trim())
+      for (const line of rows) {
+        const c = String(line).split(',')
+        const key = String(c[iId] === undefined ? '' : c[iId]).trim().toLowerCase()
+        if (key === '') continue
+        const areaNum = cell(c, iArea)
+        const zoneNum = cell(c, iZone)
+        out.ofBus[key] = { area: areaNum, zone: zoneNum, name: cell(c, iName) }
+        if (areaNum !== '' && seenArea[areaNum] !== true) {
+          seenArea[areaNum] = true
+          out.areas.push({ num: areaNum, name: cell(c, iAreaName) })
+        }
+        if (zoneNum !== '' && seenZone[zoneNum] !== true) {
+          seenZone[zoneNum] = true
+          out.zones.push({ num: zoneNum, name: cell(c, iZoneName), area: areaNum })
+        }
+      }
+      out.areas.sort((x, y) => Number(x.num) - Number(y.num))
+      out.zones.sort((x, y) => Number(x.num) - Number(y.num))
+      return out
+    }
+
+    // What the search dialog tells the user, for THIS case (0.6.25): the bus count and the range
+    // the diagram actually draws, a branch example built from two of its own buses (in the id
+    // spelling since 0.6.35), and -- when the case's result table carries names -- one of them to
+    // search on. Without that table it says so, instead of suggesting a name search that cannot
+    // work.
+    function drawioSearchHelp(scene, meta) {
+      const nums = []
+      if (scene !== null && scene !== undefined && Array.isArray(scene.nodes)) {
+        for (const n of scene.nodes) {
+          const m = /^bus(\d+)$/i.exec(String(n.id === null || n.id === undefined ? '' : n.id))
+          if (m !== null) nums.push(Number(m[1]))
+        }
+      }
+      nums.sort((a, b) => a - b)
+      const uniq = nums.filter((v, i) => i === 0 || v !== nums[i - 1])
+      let word = ''
+      if (meta !== null && meta !== undefined && meta.ofBus !== undefined) {
+        for (const key of Object.keys(meta.ofBus).sort()) {
+          const full = String(meta.ofBus[key].name === undefined ? '' : meta.ofBus[key].name).trim()
+          if (full !== '') {
+            word = full.split(/\s+/)[0]
+            break
+          }
+        }
+      }
+      if (uniq.length === 0) {
+        return {
+          placeholder: '1001, Bus-1001, Bus-1001 -> Bus-1002',
+          hint: 'A number or id finds one bus, 1001->1002 or Bus-1001 -> Bus-1002 the branches between two, and part of a name finds every bus whose name contains it.',
+        }
+      }
+      const first = uniq[0]
+      const second = uniq.length > 1 ? uniq[1] : uniq[0]
+      // 0.6.35: the example is the id spelling (`Bus-1 -> Bus-2`), the one a person copies out of
+      // the drawing; the bare pair is named next to it so both forms are on screen.
+      const pair = first + '->' + second
+      const idPair = 'Bus-' + first + ' -> Bus-' + second
+      const range = uniq.length === 1 ? 'Bus-' + first : 'Bus-' + first + ' to Bus-' + uniq[uniq.length - 1]
+      const placeholder = [String(first), 'Bus-' + first].concat(word === '' ? [] : [word]).concat([idPair]).join(', ')
+      const hint = uniq.length + (uniq.length === 1 ? ' bus here (' : ' buses here (') + range + '). '
+        + 'A number or id finds one bus, ' + pair + ' or ' + idPair + ' the branches between two'
+        + (word === '' ? '; bus names need this case\u2019s ACLF result table, which is not there.'
+          : ', and part of a name like "' + word + '" finds every bus whose name contains it.')
+        + ' Matches are highlighted in the drawing.'
+      return { placeholder: placeholder, hint: hint }
+    }
+
+    // The two toolbar icons, built the way the draw.io mark is: a small inline svg, so the buttons
+    // stay crisps at any size and need no icon font or image request.
+    const drawioSearchIcon = React.createElement('svg',
+      { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+      React.createElement('circle', { cx: 6.8, cy: 6.8, r: 4.6, fill: 'none', stroke: 'currentColor', strokeWidth: 1.6 }),
+      React.createElement('path', { d: 'M10.4 10.4 L14 14', fill: 'none', stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round' }),
+    )
+    const drawioFilterIcon = React.createElement('svg',
+      { width: 15, height: 15, viewBox: '0 0 16 16', 'aria-hidden': 'true', style: { display: 'block' } },
+      React.createElement('path', { d: 'M1.6 2.2 H14.4 L9.4 8.2 V13.4 L6.6 12 V8.2 Z', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinejoin: 'round' }),
+    )
+
+    // --- the birdseye view (0.6.28) ------------------------------------------
+    // A whole-diagram thumbnail in the corner of the canvas, with the visible rectangle drawn on
+    // it: at 200% on a 2000-bus drawing there is otherwise nothing to say where you are. It is NOT
+    // a second DrawioDiagram -- that would double the DOM for 10k cells -- but two `<path>` strings,
+    // one for every branch and one for every bar, which the browser paints as a single shape each.
+    // The viewport frame is a real element on top, so the panning stays smooth.
+    const DRAWIO_BIRDSEYE_MAX_ITEMS = 30000
+
+    function drawioBirdseyePaths(scene) {
+      const out = { bars: '', edges: '' }
+      if (scene === null || scene === undefined) return out
+      const bars = []
+      const step = scene.nodes !== undefined && scene.nodes.length > DRAWIO_BIRDSEYE_MAX_ITEMS
+        ? Math.ceil(scene.nodes.length / DRAWIO_BIRDSEYE_MAX_ITEMS) : 1
+      for (let i = 0; i < (scene.nodes || []).length; i += step) {
+        const n = scene.nodes[i]
+        if (!drawioIsBusId(n.id) || n.kind !== 'rect') continue
+        // every bar as its own subpath: `M x y h w v h h -w z`
+        bars.push('M' + n.x + ' ' + n.y + 'h' + n.w + 'v' + n.h + 'h' + -n.w + 'z')
+      }
+      const edges = []
+      const estep = (scene.edges || []).length > DRAWIO_BIRDSEYE_MAX_ITEMS
+        ? Math.ceil(scene.edges.length / DRAWIO_BIRDSEYE_MAX_ITEMS) : 1
+      for (let i = 0; i < (scene.edges || []).length; i += estep) {
+        const pts = scene.edges[i].points || []
+        if (pts.length < 2) continue
+        let d = 'M' + pts[0].x + ' ' + pts[0].y
+        for (let k = 1; k < pts.length; k += 1) d += 'L' + pts[k].x + ' ' + pts[k].y
+        edges.push(d)
+      }
+      out.bars = bars.join('')
+      out.edges = edges.join('')
+      return out
+    }
+
+    // Where the canvas should look when a point at fractions (fx, fy) of the birdseye is clicked or
+    // dragged: the same size window, centred there, and held inside the drawing so a click on the
+    // thumbnail always lands on the diagram rather than on empty paper.
+    function drawioBirdseyeRect(scene, rect, fx, fy) {
+      if (scene === null || scene === undefined || rect === null || rect === undefined) return rect
+      const vb = scene.viewBox
+      const x = Number.isFinite(fx) ? Math.min(1, Math.max(0, fx)) : 0.5
+      const y = Number.isFinite(fy) ? Math.min(1, Math.max(0, fy)) : 0.5
+      const w = Math.min(rect.w, vb.w)
+      const h = Math.min(rect.h, vb.h)
+      const cx = vb.x + vb.w * x
+      const cy = vb.y + vb.h * y
+      const minX = vb.x
+      const maxX = vb.x + vb.w - w
+      const minY = vb.y
+      const maxY = vb.y + vb.h - h
+      return {
+        x: maxX <= minX ? minX : Math.min(maxX, Math.max(minX, cx - w / 2)),
+        y: maxY <= minY ? minY : Math.min(maxY, Math.max(minY, cy - h / 2)),
+        w: w,
+        h: h,
+      }
+    }
+
+    // What a search found, as ONE box in scene coordinates: a matched node from its own rectangle
+    // (a bar, or the `Bus-N` label beside it) and a matched branch from its polyline. The box is
+    // what the view is centred on rather than a cell, so a pair (`Bus-1 -> Bus-2`) frames between
+    // its two bars and a name that found several buses frames all of them.
+    function drawioHitBounds(scene, hits) {
+      if (scene === null || scene === undefined || hits === null || hits === undefined) return null
+      const ids = {}
+      for (const id of Object.keys(hits.buses || {})) ids[id] = true
+      for (const id of Object.keys(hits.edges || {})) ids[id] = true
+      let x0 = Infinity
+      let y0 = Infinity
+      let x1 = -Infinity
+      let y1 = -Infinity
+      const grow = (x, y) => {
+        if (x < x0) x0 = x
+        if (y < y0) y0 = y
+        if (x > x1) x1 = x
+        if (y > y1) y1 = y
+      }
+      for (const n of scene.nodes || []) {
+        if (ids[n.id] !== true) continue
+        grow(n.x, n.y)
+        grow(n.x + n.w, n.y + n.h)
+      }
+      for (const e of scene.edges || []) {
+        if (ids[e.id] !== true) continue
+        for (const p of e.points || []) grow(p.x, p.y)
+      }
+      if (x0 === Infinity || y0 === Infinity) return null
+      return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 }
+    }
+
+    // Where the canvas looks after a search (0.6.37): the same-size window, centred on what was
+    // found and held inside the drawing by the clamp the birdseye already uses. Only the POSITION
+    // moves -- the zoom is the one the user chose, and at Fit the whole drawing is on screen
+    // already, so there the window is as centred as it can be. A query that matched nothing (or a
+    // hit the scene does not carry) leaves the view exactly where it was.
+    function drawioCentreRect(scene, rect, hits) {
+      if (scene === null || scene === undefined || rect === null || rect === undefined) return rect
+      const box = drawioHitBounds(scene, hits)
+      if (box === null) return rect
+      const vb = scene.viewBox
+      const fx = vb.w === 0 ? 0.5 : (box.x + box.w / 2 - vb.x) / vb.w
+      const fy = vb.h === 0 ? 0.5 : (box.y + box.h / 2 - vb.y) / vb.h
+      return drawioBirdseyeRect(scene, rect, fx, fy)
+    }
+
+    // The thumbnail. Pointer events are captured here and never bubble: they must not also pan the
+    // canvas underneath, which is why every handler stops propagation.
+    function DrawioBirdseye(props) {
+      const scene = props.scene
+      const rect = props.rect
+      const [grab, setGrab] = React.useState(false)
+      const box = { position: 'absolute', right: '10px', bottom: '10px', width: '190px', height: '150px',
+        background: DRAWIO_PAPER, border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '6px',
+        overflow: 'hidden', boxShadow: '0 2px 10px rgba(0, 0, 0, 0.25)', opacity: 0.94, cursor: 'crosshair' }
+      return React.createElement('svg', {
+        viewBox: scene.viewBox.x + ' ' + scene.viewBox.y + ' ' + scene.viewBox.w + ' ' + scene.viewBox.h,
+        preserveAspectRatio: 'xMidYMid meet',
+        role: 'img',
+        'aria-label': 'Birdseye view of the whole diagram',
+        title: 'Birdseye view — click or drag to move the view',
+        style: box,
+        onPointerDown: (e) => {
+          e.stopPropagation()
+          e.preventDefault()
+          setGrab(true)
+          if (typeof e.currentTarget.setPointerCapture === 'function') {
+            try { e.currentTarget.setPointerCapture(e.pointerId) } catch (err) {}
+          }
+          props.onCentre(e)
+        },
+        onPointerMove: (e) => {
+          e.stopPropagation()
+          if (grab) props.onCentre(e)
+        },
+        onPointerUp: (e) => { e.stopPropagation(); setGrab(false) },
+        onPointerCancel: (e) => { e.stopPropagation(); setGrab(false) },
+        onPointerLeave: (e) => { e.stopPropagation(); if (grab) setGrab(false) },
+        // A click on the thumbnail moves the view; it must not reach the canvas's
+        // clear-the-selection click (0.7.13).
+        onClick: (e) => e.stopPropagation(),
+      },
+        React.createElement('path', { key: 'e', d: props.paths.edges, fill: 'none', stroke: DRAWIO_INK, strokeWidth: 1, vectorEffect: 'non-scaling-stroke', opacity: 0.45 }),
+        React.createElement('path', { key: 'b', d: props.paths.bars, fill: DRAWIO_INK, opacity: 0.7 }),
+        React.createElement('rect', {
+          key: 'v',
+          x: rect.x, y: rect.y, width: rect.w, height: rect.h,
+          fill: DRAWIO_BIRDSEYE_FRAME, fillOpacity: 0.18, stroke: DRAWIO_BIRDSEYE_FRAME,
+          strokeWidth: 1.5, vectorEffect: 'non-scaling-stroke',
+        }),
+      )
     }
 
     // mxGraphModel -> a flat, React-free scene description: { viewBox, nodes, edges }.
@@ -855,7 +1873,12 @@ module.exports = {
           order: i,
           kind: kind,
           x: x, y: y, w: w, h: h,
-          rounded: style.rounded !== undefined && kind === 'rect',
+          // `rounded` carries a VALUE, and draw.io's default (and this workspace's every file) is
+          // `rounded=0`: the presence of the key used to mean "round", which turned every 6x52 bus
+          // bar into a pill where draw.io draws a square (0.6.33).
+          rounded: kind === 'rect' && style.rounded !== undefined && style.rounded !== '0',
+          // draw.io rounds by `min(w, h) * arcSize`, arcSize defaulting to 15% -- not by a fixed 8.
+          arcSize: Math.min(0.5, Math.max(0, numOr(style.arcSize, 15) / 100)),
           fill: style.fillColor !== undefined ? style.fillColor : null,
           stroke: style.strokeColor !== undefined ? style.strokeColor : DRAWIO_STROKE,
           strokeWidth: numOr(style.strokeWidth, 1),
@@ -865,6 +1888,15 @@ module.exports = {
           bold: (numOr(style.fontStyle, 0) & 1) === 1,
           italic: (numOr(style.fontStyle, 0) & 2) === 2,
           lines: labelLines(cell.getAttribute('value')),
+          // Where the label sits inside its own box, as draw.io's style says. Absent keys keep
+          // draw.io's own defaults (centre / middle), so untagged text cells do not move.
+          align: style.align === 'left' || style.align === 'right' ? style.align : 'center',
+          vAlign: style.verticalAlign === 'top' || style.verticalAlign === 'bottom' ? style.verticalAlign : 'middle',
+          spacing: Math.max(0, numOr(style.spacing, 2)),
+          // A `text` cell has no fill of its own; `labelBackgroundColor` is the mask draw.io paints
+          // behind the glyphs, and reading it is what keeps wires out of the text (0.6.33).
+          labelBg: style.labelBackgroundColor !== undefined && style.labelBackgroundColor !== 'none'
+            ? style.labelBackgroundColor : null,
         }
         rects[node.id] = node
         nodes.push(node)
@@ -981,17 +2013,44 @@ module.exports = {
       }
     }
 
-    function drawioLabel(lines, cx, cy, node, key) {
+    // A label sits inside its own box the way draw.io's style says: `align` and `verticalAlign`
+    // pick the corner or the centre, `spacing` insets it from that edge (draw.io's default 2).
+    // Text is never measured here -- the vertical anchors use the usual font metrics (ascent 0.8em,
+    // descent 0.2em, line height 1.2em, the spacing the previous version already used per line) --
+    // so a top-aligned line starts a hair inside the box rather than exactly on the glyph grid.
+    // `middle` + `center` is byte-for-byte the old behaviour, which is what every bus label uses.
+    function drawioLabel(node, key) {
+      const lines = node.lines
       if (lines.length === 0) return null
+      const spacing = Number.isFinite(node.spacing) ? node.spacing : 2
+      const size = node.fontSize
+      let x = node.x + node.w / 2
+      let anchor = 'middle'
+      if (node.align === 'left') {
+        x = node.x + spacing
+        anchor = 'start'
+      } else if (node.align === 'right') {
+        x = node.x + node.w - spacing
+        anchor = 'end'
+      }
+      let y = node.y + node.h / 2
+      let firstDy = lines.length > 1 ? (-(lines.length - 1) * 0.6) + 'em' : '0.32em'
+      if (node.vAlign === 'top') {
+        y = node.y + spacing + size * 0.8
+        firstDy = '0'
+      } else if (node.vAlign === 'bottom') {
+        y = node.y + node.h - spacing - size * 0.2 - (lines.length - 1) * size * 1.2
+        firstDy = '0'
+      }
       const spans = lines.map((line, i) => React.createElement('tspan', {
         key: 't' + i,
-        x: cx,
-        dy: i === 0 ? (lines.length > 1 ? (-(lines.length - 1) * 0.6) + 'em' : '0.32em') : '1.2em',
+        x: x,
+        dy: i === 0 ? firstDy : '1.2em',
       }, line))
       return React.createElement('text', {
         key: key,
-        x: cx, y: cy, textAnchor: 'middle',
-        fontSize: node.fontSize, fontWeight: node.bold ? 600 : 400,
+        x: x, y: y, textAnchor: anchor,
+        fontSize: size, fontWeight: node.bold ? 600 : 400,
         fontStyle: node.italic ? 'italic' : 'normal', fill: drawioThemeColor(node.fontColor),
       }, spans)
     }
@@ -1002,6 +2061,10 @@ module.exports = {
     // "fit", and a fit is simply the scene's own viewBox.
     const DRAWIO_MIN_ZOOM = 0.1
     const DRAWIO_MAX_ZOOM = 12
+    // The percentages the zoom readout offers. Wheel and button zooming reach values in between
+    // (745%, say), so the control shows the current level as an extra entry when it is not one of
+    // these -- a readout that rounded to the nearest preset would be lying about the view.
+    const DRAWIO_ZOOM_PRESETS = [25, 50, 75, 100, 125, 150, 200, 300, 400]
 
     function drawioFitRect(vb) {
       return { x: vb.x, y: vb.y, w: vb.w, h: vb.h }
@@ -1134,6 +2197,42 @@ module.exports = {
       return String(nodeId).replace(/^bus/i, 'Bus')
     }
 
+    // Which cells a click on a bus or a branch should mark. `target` is exactly what the hit
+    // areas already report -- `{ kind: 'bus', id }` with a CELL id (`bus112`), from the bar or
+    // from its `Bus-N` label, or `{ kind: 'branch', key }` with the resolved pair key.
+    //
+    // A bus selection marks the bar AND its label, because either one is what the user clicked
+    // and the label is a separate draw.io cell. A branch selection marks every cell of the pair:
+    // both stub edges of a transformer and the two rings of its symbol, plus every parallel
+    // circuit between the same two buses (the tooltip already lists all of them).
+    //
+    // Pure and defensive: no scene, no target or an unknown target yields empty lists, and the
+    // scene/pairs objects are only read. The renderer calls this per repaint; the guard pins the
+    // bus/label and transformer behaviours down directly.
+    function drawioSelectionMarks(scene, pairs, target) {
+      const out = { nodes: [], edges: [] }
+      if (scene === null || scene === undefined || target === null || target === undefined) return out
+      if (target.kind === 'bus') {
+        const cell = String(target.id === undefined || target.id === null ? '' : target.id).toLowerCase()
+        if (cell === '') return out
+        for (const n of scene.nodes) {
+          if (String(n.id).toLowerCase() === cell || drawioLabelBusId(n.lines) === cell) out.nodes.push(n.id)
+        }
+        return out
+      }
+      if (target.kind === 'branch') {
+        const key = String(target.key === undefined || target.key === null ? '' : target.key)
+        if (key === '' || pairs === null || pairs === undefined) return out
+        for (const e of scene.edges) {
+          if (pairs.edgePair[e.id] === key) out.edges.push(e.id)
+        }
+        for (const n of scene.nodes) {
+          if (pairs.nodePair[n.id] === key) out.nodes.push(n.id)
+        }
+      }
+      return out
+    }
+
     // A bus-pair key back to something a person reads: bus4|bus7 -> Bus 4 to Bus 7.
     function drawioPairLabel(key) {
       const parts = String(key).split('|')
@@ -1159,6 +2258,21 @@ module.exports = {
       // Tooltips are opt-in: with no hover prop the renderer emits exactly what it always
       // did — no hit areas and no handlers — so a diagram still renders on its own.
       const hover = props.hover || null
+      // The resolved branch pairs. Normally they ride the hover object (they are what the hit
+      // areas need), but a selection mark needs them too, so a caller that only wants the mark
+      // can pass `pairs` on its own.
+      const pairs = props.pairs || (hover !== null && hover.pairs !== undefined ? hover.pairs : null)
+      // `paint` (0.6.26) maps a cell id to the colour it should take -- the bus's flag colour from
+      // config/net_diagram.json, a branch's flow-flag colour, or the search blue -- and `hidden`
+      // (0.6.23) skips a whole cell. Both are paint-time only: with neither, every colour below is
+      // exactly what it always was, and the .drawio on disk never learns any of it.
+      const paint = props.paint || null
+      const hidden = props.hidden || null
+      // The click selection and the transient hover mark (0.7.13). Both are targets in the shape
+      // `drawioHoverTarget` already produces; the renderer only outlines what they name, and with
+      // neither it emits exactly the tree it always did.
+      const selected = props.selected || null
+      const hovered = props.hovered || null
       // draw.io paints in the model's own document order, interleaving vertices and edges.
       // That order is load-bearing: this workspace's diagram declares `bg`, an opaque
       // 900x760 white rectangle, BEFORE its branches. Drawing every edge up front and every
@@ -1167,10 +2281,12 @@ module.exports = {
       const painted = []
       for (let i = 0; i < scene.edges.length; i += 1) {
         const e = scene.edges[i]
+        if (hidden !== null && hidden[e.id] === true) continue
+        const edgeColour = paint === null ? null : paint[e.id]
         const points = e.points.map((p) => p.x + ',' + p.y).join(' ')
         const parts = []
         // The invisible wide-stroke twin that makes a 1.5px branch hoverable.
-        if (hover !== null && hover.pairs !== undefined && hover.pairs.edgePair[e.id] !== undefined) {
+        if (hover !== null && pairs !== null && pairs.edgePair[e.id] !== undefined) {
           parts.push(React.createElement('polyline', {
             key: 'h',
             points: points,
@@ -1178,20 +2294,25 @@ module.exports = {
             stroke: 'transparent',
             strokeWidth: DRAWIO_HIT_STROKE,
             pointerEvents: 'stroke',
-            onMouseEnter: (ev) => hover.onBranch(hover.pairs.edgePair[e.id], ev),
+            onMouseEnter: (ev) => hover.onBranch(pairs.edgePair[e.id], ev),
             onMouseMove: hover.onMove,
             onMouseLeave: hover.onLeave,
+            // The click selects the pair. `onPick` owns the drag guard, so a pan that began on
+            // this line never turns into a selection.
+            onClick: (ev) => {
+              if (hover.onPick !== undefined) hover.onPick({ kind: 'branch', key: pairs.edgePair[e.id] }, ev)
+            },
           }))
         }
         parts.push(React.createElement('polyline', {
           key: 'l',
           points: points,
           fill: 'none',
-          stroke: drawioThemeColor(e.stroke),
-          strokeWidth: e.strokeWidth,
+          stroke: edgeColour === null || edgeColour === undefined ? drawioThemeColor(e.stroke) : edgeColour,
+          strokeWidth: edgeColour === null || edgeColour === undefined ? e.strokeWidth : e.strokeWidth + 1.5,
           strokeDasharray: e.dashed ? '6 4' : undefined,
         }))
-        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: drawioThemeColor(e.stroke) }))
+        if (e.arrow !== null) parts.push(React.createElement('polygon', { key: 'a', points: e.arrow, fill: edgeColour === null || edgeColour === undefined ? drawioThemeColor(e.stroke) : edgeColour }))
         if (e.label !== '') {
           parts.push(React.createElement('text', {
             key: 't',
@@ -1203,30 +2324,53 @@ module.exports = {
       }
       for (let i = 0; i < scene.nodes.length; i += 1) {
         const n = scene.nodes[i]
+        if (hidden !== null && hidden[n.id] === true) continue
+        const colour = paint === null ? null : paint[n.id]
+        const marked = colour !== null && colour !== undefined
         const parts = []
+        // A flagged or matched bus takes its colour on the bar's fill and outline, and on the
+        // `Bus-N` text — but NOT on the label's white paper box, which must stay white so it keeps
+        // masking the wires under the text. The scene object is never modified; the colour is
+        // chosen here.
+        const isBar = drawioIsBusId(n.id)
         if (n.kind === 'ellipse') {
           parts.push(React.createElement('ellipse', {
             key: 's',
             cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2, ry: n.h / 2,
             fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
-            stroke: drawioThemeColor(n.stroke), strokeWidth: n.strokeWidth,
+            stroke: marked ? colour : drawioThemeColor(n.stroke),
+            strokeWidth: marked ? n.strokeWidth + 1 : n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         } else if (n.kind === 'rect') {
           parts.push(React.createElement('rect', {
             key: 's',
             x: n.x, y: n.y, width: n.w, height: n.h,
-            rx: n.rounded ? Math.min(8, n.h / 2) : 0,
-            fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
-            stroke: drawioThemeColor(n.stroke), strokeWidth: n.strokeWidth,
+            rx: n.rounded ? Math.min(n.w, n.h) * (Number.isFinite(n.arcSize) ? n.arcSize : 0.15) : 0,
+            fill: marked && isBar ? colour : (n.fill === null ? 'none' : drawioThemeColor(n.fill)),
+            stroke: marked && isBar ? colour : drawioThemeColor(n.stroke),
+            strokeWidth: n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))
         }
-        const label = drawioLabel(n.lines, n.x + n.w / 2, n.y + n.h / 2, n, 't')
+        // A `text` cell draws no box of its own, so draw.io's `labelBackgroundColor` is the only
+        // mask behind its glyphs -- and without it the wires run straight through the text. Painted
+        // before the label and never tinted: a flag or a search colours the glyphs, not the mask,
+        // exactly as the `rect`-kind paper box behaves.
+        if (n.kind === 'text' && n.lines.length > 0 && n.labelBg !== null && n.labelBg !== undefined) {
+          parts.push(React.createElement('rect', {
+            key: 'bg',
+            x: n.x, y: n.y, width: n.w, height: n.h,
+            fill: drawioThemeColor(n.labelBg), stroke: 'none',
+          }))
+        }
+        const labelNode = marked && !isBar ? Object.assign({}, n, { fontColor: colour }) : n
+        const label = drawioLabel(labelNode, 't')
         if (label !== null) parts.push(label)
-        // A transparent padded rect, so a 6px bar or a 16px transformer ring is comfortable
-        // to hover. Added after the drawn geometry so it wins the hit test inside this group.
-        const target = hover === null ? null : drawioHoverTarget(n, hover.pairs === undefined ? null : hover.pairs)
+        // A transparent padded rect, so a 6px bus bar or a 16px transformer ring is comfortable
+        // to hover and to click. Added after the drawn geometry so it wins the hit test inside
+        // this group.
+        const target = hover === null ? null : drawioHoverTarget(n, pairs)
         if (target !== null) {
           parts.push(React.createElement('rect', {
             key: 'h',
@@ -1236,6 +2380,9 @@ module.exports = {
             onMouseEnter: (ev) => (target.kind === 'bus' ? hover.onBus(target.id, ev) : hover.onBranch(target.key, ev)),
             onMouseMove: hover.onMove,
             onMouseLeave: hover.onLeave,
+            onClick: (ev) => {
+              if (hover.onPick !== undefined) hover.onPick(target, ev)
+            },
           }))
         }
         painted.push({ order: n.order === undefined ? i : n.order, el: React.createElement('g', { key: 'n' + i }, parts) })
@@ -1243,6 +2390,81 @@ module.exports = {
       // A stable sort, so a model with no order recorded keeps edges before vertices.
       painted.sort((a, b) => a.order - b.order)
       const children = painted.map((p) => p.el)
+      // The selection/hover mark (0.7.13): outlines painted LAST, over the finished drawing, so a
+      // mark reads on top of a red flag fill or a green search hit without replacing either. The
+      // scene is only read; the .drawio on disk never learns any of it. With no target this whole
+      // block is skipped and the tree is exactly what it was.
+      const sameTarget = hovered !== null && selected !== null && (
+        hovered.kind === selected.kind && (hovered.kind === 'bus'
+          ? String(hovered.id).toLowerCase() === String(selected.id).toLowerCase()
+          : hovered.key === selected.key))
+      const markSets = []
+      if (hovered !== null && !sameTarget) markSets.push({ target: hovered, selected: false })
+      if (selected !== null) markSets.push({ target: selected, selected: true })
+      if (markSets.length > 0) {
+        const edgeById = {}
+        const nodeById = {}
+        for (const e of scene.edges) edgeById[e.id] = e
+        for (const n of scene.nodes) nodeById[n.id] = n
+        for (const set of markSets) {
+          const marks = drawioSelectionMarks(scene, pairs, set.target)
+          const parts = []
+          const pad = DRAWIO_SELECT_PAD
+          const fillOpacity = set.selected ? DRAWIO_SELECT_FILL_OPACITY : DRAWIO_HOVER_FILL_OPACITY
+          for (const id of marks.edges) {
+            // A filtered-out cell is not painted, so it must not be outlined either.
+            if (hidden !== null && hidden[id] === true) continue
+            const e = edgeById[id]
+            if (e === undefined) continue
+            const points = e.points.map((p) => p.x + ',' + p.y).join(' ')
+            parts.push(React.createElement('polyline', {
+              key: 'mh' + id, points: points, fill: 'none', stroke: DRAWIO_SELECT_STROKE,
+              strokeWidth: e.strokeWidth + (set.selected ? 5 : 3),
+              strokeOpacity: set.selected ? 0.3 : 0.18,
+              strokeLinecap: 'round', strokeLinejoin: 'round',
+            }))
+            // The dashed core is what keeps a selected branch readable at `Fit`, where a 1.5px
+            // line is a hair. A hovered branch gets the halo only.
+            if (set.selected) {
+              parts.push(React.createElement('polyline', {
+                key: 'md' + id, points: points, fill: 'none', stroke: DRAWIO_SELECT_STROKE,
+                strokeWidth: 2, strokeDasharray: '6 3', strokeLinecap: 'round', strokeLinejoin: 'round',
+              }))
+            }
+          }
+          for (const id of marks.nodes) {
+            if (hidden !== null && hidden[id] === true) continue
+            const n = nodeById[id]
+            if (n === undefined) continue
+            const base = {
+              key: 'mn' + id,
+              fill: n.kind === 'text' ? 'none' : DRAWIO_SELECT_STROKE,
+              fillOpacity: n.kind === 'text' ? undefined : fillOpacity,
+              stroke: DRAWIO_SELECT_STROKE,
+              strokeWidth: set.selected ? 2 : 1.5,
+              strokeDasharray: set.selected ? '5 3' : (n.kind === 'text' ? '3 3' : undefined),
+            }
+            if (n.kind === 'ellipse') {
+              parts.push(React.createElement('ellipse', Object.assign({}, base, {
+                cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2 + pad, ry: n.h / 2 + pad,
+              })))
+            } else {
+              // A rect bus bar, a paper label box, or a `text` cell — which draws no box of its
+              // own, so the outline is drawn around the box its glyphs occupy.
+              parts.push(React.createElement('rect', Object.assign({}, base, {
+                x: n.x - pad, y: n.y - pad, width: n.w + pad * 2, height: n.h + pad * 2,
+                rx: n.kind === 'rect' && n.rounded
+                  ? Math.min(n.w, n.h) * (Number.isFinite(n.arcSize) ? n.arcSize : 0.15) : 0,
+              })))
+            }
+          }
+          if (parts.length > 0) {
+            children.push(React.createElement('g', {
+              key: set.selected ? 'sel' : 'hov', pointerEvents: 'none',
+            }, parts))
+          }
+        }
+      }
       return React.createElement('svg', {
         viewBox: vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h,
         preserveAspectRatio: 'xMidYMid meet',
@@ -1424,6 +2646,9 @@ module.exports = {
       const [caOpen, setCaOpen] = React.useState(false)
       const [caLoading, setCaLoading] = React.useState(false)
       const [caForm, setCaForm] = React.useState(null)
+      // The advanced solver panel's open state. Kept across dialog opens (a user who wants the
+      // knobs usually wants them again), and it only edits fields already in `caForm`.
+      const [caAdvanced, setCaAdvanced] = React.useState(false)
       const [caFiles, setCaFiles] = React.useState(null)
       const [caFilesLoading, setCaFilesLoading] = React.useState(false)
       const [caPicker, setCaPicker] = React.useState(null)
@@ -1500,7 +2725,7 @@ module.exports = {
           const input = customInput.trim()
           const slash = input.lastIndexOf('/')
           const base = slash >= 0 ? input.slice(slash + 1) : input
-          const displayName = base.replace(/\.(ieee|raw|RAW)$/, '')
+          const displayName = caseStem(base)
           return { format: customFormat, input: input, displayName: displayName }
         }
         const p = PRESETS[Number(mode)]
@@ -1660,7 +2885,9 @@ module.exports = {
           if (message.kind === 'hint') return 'select a file for the ' + (kind === 'contingency' ? 'user-defined contingency' : 'monitored branches')
           if (message.kind === 'error') return message.text
         }
-        return null
+        // The solver panel is part of the run: an unparsable cutoff or an unknown enum value is
+        // reported here rather than being silently defaulted by the Host.
+        return caSolverError(caForm)
       }
 
       function loadCaFiles(c) {
@@ -1692,7 +2919,12 @@ module.exports = {
           (res) => {
             setCaLoading(false)
             if (res && res.ok && res.config) {
+              // The solver knobs come from the same answer as the file selections; a Host that
+              // does not know a key (an older plugin) leaves the table's default in place.
+              const solver = {}
+              for (const field of CA_SOLVER_FIELDS) solver[field.key] = caSolverFieldValue(field, res.config)
               setCaForm({
+                ...solver,
                 contingencyMode: res.config.contingencyMode === 'custom' ? 'custom' : 'all',
                 contingencyFile: res.config.contingencyFile || null,
                 monitorMode: res.config.monitorMode === 'custom' ? 'custom' : 'all',
@@ -1717,6 +2949,49 @@ module.exports = {
         if (caForm === null) return
         setCaDialogError(null)
         setCaForm({ ...caForm, overloadThreshold: value })
+      }
+
+      // One advanced solver field, rendered by its kind: a checkbox, a select of the Java enum's
+      // constant names, or a text input whose value is validated by `caSolverError` on OK.
+      function setCaSolver(key, value) {
+        if (caForm === null) return
+        setCaDialogError(null)
+        setCaForm({ ...caForm, [key]: value })
+      }
+
+      function renderCaSolverField(field) {
+        if (caForm === null) return null
+        const value = caForm[field.key]
+        const label = React.createElement('span', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' } }, field.label)
+        if (field.kind === 'bool') {
+          return React.createElement('label', { key: field.key, style: { display: 'flex', alignItems: 'center', gap: '8px', minHeight: '30px' } },
+            React.createElement('input', {
+              type: 'checkbox',
+              checked: value === true,
+              onChange: (e) => setCaSolver(field.key, e.target.checked),
+            }),
+            label,
+          )
+        }
+        if (field.kind === 'select') {
+          return React.createElement('label', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+            label,
+            React.createElement('select', {
+              value: value,
+              onChange: (e) => setCaSolver(field.key, e.target.value),
+              style: caFieldStyle,
+            }, field.options.map((option) => React.createElement('option', { key: option, value: option }, option))),
+          )
+        }
+        return React.createElement('label', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '4px' } },
+          label,
+          React.createElement('input', {
+            type: 'text',
+            value: value,
+            onChange: (e) => setCaSolver(field.key, e.target.value),
+            style: caFieldStyle,
+          }),
+        )
       }
 
       function setCaMode(kind, mode) {
@@ -1773,6 +3048,9 @@ module.exports = {
           monitorMode: caForm.monitorMode,
           monitoredBranchFile: caForm.monitorMode === 'custom' ? caForm.monitoredBranchFile : null,
           overloadThreshold: Number(caForm.overloadThreshold),
+          // The advanced panel's solver knobs: written to ca_run.json and handed straight to the
+          // run, so what the dialog shows is what the solver gets.
+          ...caSolverPayload(caForm),
         }
         setCaSaving(true)
         setCaDialogError(null)
@@ -2072,14 +3350,13 @@ module.exports = {
       ]
       const caseInputRow = isCustom ? [
         React.createElement('select', { key: 'fmt', value: customFormat, onChange: (e) => { const f = e.target.value; lastSelection.customFormat = f; setCustomFormat(f); onCaseChanged(customInput.trim()) }, style: selectStyle },
-          React.createElement('option', { value: 'ieee' }, 'IEEE CDF'),
-          React.createElement('option', { value: 'psse' }, 'PSS/E RAW'),
+          CASE_FORMATS.map((f) => React.createElement('option', { key: f.format, value: f.format }, f.label)),
         ),
         React.createElement('div', { key: 'pathbox', style: { display: 'flex', alignItems: 'stretch', width: '380px', maxWidth: '100%' } },
           React.createElement('input', {
             type: 'text',
             value: customInput,
-            placeholder: 'data/ieee/Ieee118Bus/ieee118.ieee',
+            placeholder: caseFormatEntry(customFormat).example,
             onChange: (e) => { const v = e.target.value; lastSelection.customInput = v; setCustomInput(v); onCaseChanged(v.trim()) },
             style: { ...selectStyle, flex: '1 1 auto', minWidth: 0, borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: 'none' },
           }),
@@ -2116,7 +3393,7 @@ module.exports = {
         } else if (cases !== null) {
           const filtered = cases.filter((c) => c && c.format === customFormat)
           if (filtered.length === 0) {
-            pickerBody = React.createElement('div', { style: { padding: '12px', color: 'var(--dsw-alias-label-secondary)' } }, customFormat === 'psse' ? 'No PSS/E RAW (.raw) files found under wspace/data.' : 'No IEEE CDF (.ieee) files found under wspace/data.')
+            pickerBody = React.createElement('div', { style: { padding: '12px', color: 'var(--dsw-alias-label-secondary)' } }, casePickerEmptyText(customFormat))
           } else {
             pickerBody = filtered.map((c) =>
               React.createElement('button', {
@@ -2124,7 +3401,7 @@ module.exports = {
                 onClick: () => pickCase(c),
                 style: { display: 'block', width: '100%', textAlign: 'left', padding: '6px 10px', border: 'none', borderBottom: '1px solid var(--dsw-alias-border-l1)', background: 'transparent', color: 'var(--dsw-alias-label-primary)', cursor: 'pointer', fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '12px' },
               },
-                React.createElement('span', { style: { opacity: 0.65, marginRight: '10px' } }, c.format === 'psse' ? 'PSSE' : 'IEEE'),
+                React.createElement('span', { style: { opacity: 0.65, marginRight: '10px' } }, caseFormatEntry(c.format).badge),
                 c.path,
               ),
             )
@@ -2492,6 +3769,18 @@ module.exports = {
               style: { width: '92px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', textAlign: 'center' },
             }),
           ) : null,
+          // The solver knobs, behind a disclosure: the two case-input sections stay the dialog's
+          // main job, and a run that never opens this panel writes the defaults back unchanged.
+          caForm !== null ? React.createElement('div', { style: { marginBottom: '12px' } },
+            React.createElement('button', {
+              onClick: () => setCaAdvanced(!caAdvanced),
+              'aria-expanded': caAdvanced ? 'true' : 'false',
+              style: { ...btn, padding: '4px 10px', fontSize: '12px' },
+            }, (caAdvanced ? '▾ ' : '▸ ') + 'Advanced solver settings'),
+            caAdvanced ? React.createElement('div', {
+              style: { marginTop: '8px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '8px 12px' },
+            }, CA_SOLVER_FIELDS.map((field) => renderCaSolverField(field))) : null,
+          ) : null,
           caCase !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginBottom: '10px' } }, 'Case: ' + caCase.displayName) : null,
           caLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
           caForm === null ? React.createElement('pre', { style: { ...mono, maxHeight: '180px', overflow: 'auto' } }, caDialogError || 'no run configuration available') :
@@ -2654,21 +3943,70 @@ module.exports = {
       const [scene, setScene] = React.useState(null)
       const [loading, setLoading] = React.useState(false)
       const [error, setError] = React.useState(null)
-      const [view, setView] = React.useState('rendered')
       const [resultDir, setResultDir] = React.useState(null)
       const [branchFile, setBranchFile] = React.useState(null)
+      const [busFile, setBusFile] = React.useState(null)
+      // Which buses the renderer paints red: a lowercase `busN` -> true lookup built from the bus
+      // result table's `VoltMag` column. Empty (or null) means "nothing to annotate", which is
+      // also the state when the case has no results at all.
+      const [busAlerts, setBusAlerts] = React.useState(null)
       // Pan/zoom of the rendered pane: the visible rectangle in scene coordinates, or null
       // for "fit the whole diagram". Declared with the other state, above every reader.
       const [rect, setRect] = React.useState(null)
       const [dragging, setDragging] = React.useState(false)
       const [tip, setTip] = React.useState(null)
+      // Click selection (0.7.13). `selection` is the bus cell or branch pair the drawing marks,
+      // `pinnedTip` is its tooltip held at the click point after the hover tip goes away, and
+      // `hoverMark` is the light outline on whatever is under the cursor. All three are
+      // paint-time only, like the flags and the search: the .drawio never learns any of it.
+      const [selection, setSelection] = React.useState(null)
+      const [pinnedTip, setPinnedTip] = React.useState(null)
+      const [hoverMark, setHoverMark] = React.useState(null)
       // The "edit in the local draw.io app" button: in flight while the Host launches, and the
       // one-line outcome under the toolbar. Neither belongs to a case, so they are cleared when
       // a different diagram is opened.
       const [editBusy, setEditBusy] = React.useState(false)
       const [editMsg, setEditMsg] = React.useState(null)
+      // Search and filter (0.6.23). `dialog` is which modal is open; the dialog's own fields are
+      // separate from what is APPLIED, so Cancel really does cancel (the applied value is only
+      // written by OK). `busMeta` is the case's bus table (area/zone/name per bus), loaded on
+      // demand when a dialog opens -- the drawing path itself never waits for it.
+      const [dialog, setDialog] = React.useState(null)
+      const [searchText, setSearchText] = React.useState('')
+      const [searchQuery, setSearchQuery] = React.useState(null)
+      const [filterArea, setFilterArea] = React.useState('')
+      const [filterZone, setFilterZone] = React.useState('')
+      const [filterOutOfBand, setFilterOutOfBand] = React.useState(false)
+      // The two flow criteria (0.6.32): "only branches at or above a configured loading".
+      const [filterBasecaseLoading, setFilterBasecaseLoading] = React.useState(false)
+      const [filterContingencyLoading, setFilterContingencyLoading] = React.useState(false)
+      const [filterApplied, setFilterApplied] = React.useState(null)
+      const [busMeta, setBusMeta] = React.useState(null)
+      const [busMetaLoading, setBusMetaLoading] = React.useState(false)
+      // config/net_diagram.json (0.6.26): the flag thresholds and colours the Host hands back, the
+      // dialog's draft copy of them, and the flow tables the branch flags are read from. The config
+      // read never blocks the drawing: until it lands, the built-in defaults paint what 0.6.24 did.
+      const [netConfig, setNetConfig] = React.useState(DRAWIO_NET_DEFAULTS)
+      const [netConfigPath, setNetConfigPath] = React.useState('config/net_diagram.json')
+      const [netConfigWarning, setNetConfigWarning] = React.useState(null)
+      const [netConfigError, setNetConfigError] = React.useState(null)
+      const [netConfigSaving, setNetConfigSaving] = React.useState(false)
+      const [cfgForm, setCfgForm] = React.useState(null)
+      const [conFile, setConFile] = React.useState(null)
+      const [branchLoads, setBranchLoads] = React.useState(null)
+      const [conLoads, setConLoads] = React.useState(null)
+      // The two OptAdj result tables (`_DF_optadj_branch.csv`, `_DF_optadj_N1_branch.csv`), each an
+      // optional tooltip line: the file name the case's result folder declares, and its loading map.
+      const [optAdjFile, setOptAdjFile] = React.useState(null)
+      const [optAdjN1File, setOptAdjN1File] = React.useState(null)
+      const [optAdjLoads, setOptAdjLoads] = React.useState(null)
+      const [optAdjN1Loads, setOptAdjN1Loads] = React.useState(null)
       const canvasRef = React.useRef(null)
       const dragRef = React.useRef(null)
+      // The gesture that is currently on the canvas. A press that travels more than a few pixels
+      // is a pan, not a click, so the hit areas' onClick cannot select the element the drag
+      // started on: `pickRef` records where the press began and whether it moved.
+      const pickRef = React.useRef({ moved: false, x: 0, y: 0 })
       // Tooltip data keyed to the SELECTED case: the branch
       // table indexed by bus pair, the canonical BusN spelling the Host matches on, the bus
       // records `busConnections` hands back (filled lazily, one call per bus hovered), the
@@ -2706,7 +4044,15 @@ module.exports = {
         setFilesError(null)
         setResultDir(null)
         setBranchFile(null)
+        setBusFile(null)
+        setConFile(null)
+        setBusAlerts(null)
+        setBranchLoads(null)
+        setConLoads(null)
         setTip(null)
+        setSelection(null)
+        setPinnedTip(null)
+        setHoverMark(null)
         setPath('')
         setXml('')
         setScene(null)
@@ -2744,8 +4090,19 @@ module.exports = {
             if (seq !== diagramSeq) return
             if (res === null || res === undefined || res.ok !== true || res.exists !== true) return
             setResultDir(typeof res.resultDir === 'string' ? res.resultDir : null)
-            const name = (res.files || []).find((f) => String(f).indexOf('_DF_branch.csv') !== -1)
-            setBranchFile(name === undefined ? null : name)
+            const branch = (res.files || []).find((f) => String(f).indexOf('_DF_branch.csv') !== -1)
+            setBranchFile(branch === undefined ? null : branch)
+            const bus = (res.files || []).find((f) => String(f).indexOf('_DF_bus.csv') !== -1)
+            setBusFile(bus === undefined ? null : bus)
+            const con = (res.files || []).find((f) => String(f).indexOf('_DF_contingency.csv') !== -1)
+            setConFile(con === undefined ? null : con)
+            // The two OptAdj tables keep their own modes apart in their names (0.7.5), so each is
+            // found by its own full suffix -- neither is a substring of the other, nor of
+            // `_DF_branch.csv`.
+            const opt = (res.files || []).find((f) => String(f).indexOf('_DF_optadj_branch.csv') !== -1)
+            setOptAdjFile(opt === undefined ? null : opt)
+            const optN1 = (res.files || []).find((f) => String(f).indexOf('_DF_optadj_N1_branch.csv') !== -1)
+            setOptAdjN1File(optN1 === undefined ? null : optN1)
           },
           () => {},
         )
@@ -2763,12 +4120,14 @@ module.exports = {
         if (branchFile === null || resultDir === null) return undefined
         const pair = new Map()
         const canonical = {}
+        const allRows = []
         const page = (start, guard) => {
           if (guard > 20) return
           callRemote('readCsv', { path: resultDir + '/' + branchFile, sessionId: sessionId, start: start, limit: 5000 }).then(
             (res) => {
               if (res === null || res === undefined || res.ok !== true) return
               const rows = res.rows || []
+              for (const line of rows) allRows.push(line)
               for (const line of rows) {
                 const c = String(line).split(',')
                 const from = String(c[4] || '').trim()
@@ -2783,6 +4142,10 @@ module.exports = {
               if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
               dataRef.current.branch = pair
               dataRef.current.canonical = canonical
+              // The same page loop feeds the base-case flow flags: the percent column and the two
+              // bus columns are located by header NAME, so a reordered table cannot flag the wrong
+              // branches.
+              setBranchLoads(drawioBranchLoads(res.header, allRows))
             },
             () => {},
           )
@@ -2790,6 +4153,137 @@ module.exports = {
         page(0, 0)
         return undefined
       }, [branchFile, resultDir])
+
+      // The render-time voltage annotation: read `<case>/result/<stem>_DF_bus.csv` and keep the
+      // buses whose `VoltMag` is outside the band config/net_diagram.json sets (0.9-1.1 by default). The columns come from the file's own
+      // header (never by position), the ids are lowercased so they match the diagram's `busN`
+      // cells, and the paging stops early — a page that has answered for no bus the open scene
+      // draws is the common case, which is what keeps a 2000-bus (or 78k-bus) table cheap.
+      // Nothing in this path writes: the .drawio stays read-only for the whole feature.
+      React.useEffect(() => {
+        if (busFile === null || resultDir === null) { setBusAlerts(null); return undefined }
+        let alive = true
+        const wanted = {}
+        if (scene !== null) {
+          for (const n of scene.nodes) {
+            const id = drawioBusCellId(n)
+            if (id !== null) wanted[String(id).toLowerCase()] = true
+          }
+        }
+        const hits = {}
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + busFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!alive) return
+              if (res === null || res === undefined || res.ok !== true) { setBusAlerts(null); return }
+              const rows = res.rows || []
+              const found = drawioBusAlerts(res.header, rows, wanted,
+                [netConfig.Bus_flag_lower_limit, netConfig.Bus_flag_upper_limit])
+              for (const id of Object.keys(found)) hits[id] = true
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setBusAlerts(hits)
+            },
+            () => { if (alive) setBusAlerts(null) },
+          )
+        }
+        page(0, 0)
+        return () => { alive = false }
+      }, [busFile, resultDir, scene, netConfig.Bus_flag_lower_limit, netConfig.Bus_flag_upper_limit])
+
+      // config/net_diagram.json (0.6.26), read once per case. It lives at the workspace root and the
+      // Host hands back a sanitized copy, so this side never has to trust the file; a failure keeps
+      // the built-in defaults and the diagram still draws.
+      React.useEffect(() => {
+        let alive = true
+        callRemote('getNetDiagramOptions', { sessionId: sessionId }).then(
+          (res) => {
+            if (!alive) return
+            if (res === null || res === undefined || res.ok !== true) {
+              setNetConfigWarning(res && res.error ? String(res.error) : null)
+              return
+            }
+            setNetConfig(drawioNetConfig(res.config))
+            setNetConfigPath(typeof res.path === 'string' && res.path !== '' ? res.path : 'config/net_diagram.json')
+            setNetConfigWarning(res.warning ? String(res.warning) : null)
+          },
+          (err) => { if (alive) setNetConfigWarning(String(err && err.message ? err.message : err)) },
+        )
+        return () => { alive = false }
+      }, [caseInput])
+
+      // The contingency flow flags: the CA result table, when the case has one. Its BranchID is
+      // `Bus1001->Bus1064(1)`, so the pair is the head of the string; the loading column is located
+      // by name like every other table read here.
+      React.useEffect(() => {
+        if (conFile === null || resultDir === null) { setConLoads(null); return undefined }
+        let alive = true
+        const all = []
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + conFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!alive) return
+              if (res === null || res === undefined || res.ok !== true) { setConLoads(null); return }
+              const rows = res.rows || []
+              for (const line of rows) all.push(line)
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setConLoads(drawioContingencyLoads(res.header, all))
+            },
+            () => { if (alive) setConLoads(null) },
+          )
+        }
+        page(0, 0)
+        return () => { alive = false }
+      }, [conFile, resultDir])
+
+      // The OptAdj loadings, one effect per mode: the same paged read as the contingency table, with
+      // the map keyed by bus pair and carrying the worst post-redispatch loading. An absent file (or
+      // a failed read) simply leaves the map null, which is what keeps the tooltip line optional.
+      React.useEffect(() => {
+        if (optAdjFile === null || resultDir === null) { setOptAdjLoads(null); return undefined }
+        let alive = true
+        const all = []
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + optAdjFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!alive) return
+              if (res === null || res === undefined || res.ok !== true) { setOptAdjLoads(null); return }
+              const rows = res.rows || []
+              for (const line of rows) all.push(line)
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setOptAdjLoads(drawioOptAdjLoads(res.header, all))
+            },
+            () => { if (alive) setOptAdjLoads(null) },
+          )
+        }
+        page(0, 0)
+        return () => { alive = false }
+      }, [optAdjFile, resultDir])
+
+      // The N-1 pair: one row per (monitored branch, outage), so its max is the worst outage.
+      React.useEffect(() => {
+        if (optAdjN1File === null || resultDir === null) { setOptAdjN1Loads(null); return undefined }
+        let alive = true
+        const all = []
+        const page = (start, guard) => {
+          if (guard > 20) return
+          callRemote('readCsv', { path: resultDir + '/' + optAdjN1File, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (!alive) return
+              if (res === null || res === undefined || res.ok !== true) { setOptAdjN1Loads(null); return }
+              const rows = res.rows || []
+              for (const line of rows) all.push(line)
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setOptAdjN1Loads(drawioOptAdjLoads(res.header, all))
+            },
+            () => { if (alive) setOptAdjN1Loads(null) },
+          )
+        }
+        page(0, 0)
+        return () => { alive = false }
+      }, [optAdjN1File, resultDir])
 
       // The preview's read: fetch the .drawio, decode it
       // (plain or compressed) and resolve element -> branch once, not on every repaint.
@@ -2802,7 +4296,6 @@ module.exports = {
         setXml('')
         setScene(null)
         setError(null)
-        setView('rendered')
         setRect(null)
         setEditMsg(null)
         setLoading(true)
@@ -2831,7 +4324,7 @@ module.exports = {
         )
       }
 
-      // --- Tooltips -----------------------------------------------------------
+      // --- Tooltips and selection (0.7.13) ------------------------------------
       function branchPath() {
         return branchFile === null || resultDir === null ? null : resultDir + '/' + branchFile
       }
@@ -2842,8 +4335,15 @@ module.exports = {
       function moveTip(e) {
         setTip((t) => (t ? { text: t.text, x: e.clientX, y: e.clientY } : t))
       }
+      // Leaving the hit area ends the HOVER tip and its outline. The pinned tooltip of a
+      // selection is a different piece of state and comes back as soon as the hover tip goes.
       function hideTip() {
         setTip(null)
+        setHoverMark(null)
+      }
+      function clearSelection() {
+        setSelection(null)
+        setPinnedTip(null)
       }
 
       // Hand the open diagram to the local draw.io app. The browser cannot start a process, so
@@ -2871,43 +4371,113 @@ module.exports = {
         )
       }
 
-      // A cache hit answers instantly; otherwise the bus says who it is, one call fills the
-      // cache for it AND its branch neighbours, and the tip is rewritten only if that same
-      // bus is still under the cursor.
-      function diagramBusTip(nodeId, event) {
+      // The bus tooltip the connection diagram shows, plus the one line that explains a red bar.
+      // A colour alone is not accessible, and this is the surface a reader already opens for a bus.
+      function diagramBusText(record) {
+        const text = busTooltip(record)
+        if (busAlerts === null) return text
+        const id = record !== null && record !== undefined && record.id !== undefined ? String(record.id).toLowerCase() : ''
+        if (id === '' || busAlerts[id] !== true) return text
+        return text + '\n⚠ |V| outside ' + netConfig.Bus_flag_lower_limit + '\u2013' + netConfig.Bus_flag_upper_limit + ' pu'
+      }
+
+      // A cache hit answers immediately. Otherwise the bus identifies itself with the fallback
+      // text while one call fills the cache for it AND its branch neighbours; `then` is called
+      // again with the full record, and the third argument says which call it is so the caller
+      // can guard its own identity (what is under the cursor, or what is selected).
+      function loadBusText(nodeId, then) {
         const data = dataRef.current
         const busId = drawioCanonicalBusId(data.canonical, nodeId)
-        data.hovered = { kind: 'bus', id: busId }
         const known = data.busCache[busId]
         if (known !== undefined) {
-          showTip(busTooltip(known), event)
+          then(busId, diagramBusText(known), true)
           return
         }
-        showTip(drawioFallbackTip(String(busId), data.branch !== null), event)
+        then(busId, drawioFallbackTip(String(busId), data.branch !== null), true)
         const target = branchPath()
         if (target === null) return
         callRemote('busConnections', { busId: busId, path: target, sessionId: sessionId }).then(
           (res) => {
             if (res === null || res === undefined || res.ok !== true) return
             for (const rec of (res.busRecords || [])) data.busCache[rec.id] = rec
-            const now = data.hovered
             const filled = data.busCache[busId]
-            if (filled === undefined || now === null || now.kind !== 'bus' || now.id !== busId) return
-            setTip((t) => (t === null ? t : { text: busTooltip(filled), x: t.x, y: t.y }))
+            if (filled !== undefined) then(busId, diagramBusText(filled), false)
           },
           () => {},
         )
       }
 
-      // An edge, either half of a transformer chain, or the symbol itself. Parallel circuits
-      // between one bus pair all match and are rendered one block each.
-      function diagramBranchTip(key, event) {
+      // The hover tip: rewritten only while that same bus is still the one under the cursor.
+      function diagramBusTip(nodeId, event) {
         const data = dataRef.current
-        data.hovered = { kind: 'branch', key: key }
+        setHoverMark({ kind: 'bus', id: nodeId })
+        loadBusText(nodeId, (busId, text, immediate) => {
+          if (immediate) {
+            data.hovered = { kind: 'bus', id: busId }
+            showTip(text, event)
+            return
+          }
+          const now = data.hovered
+          if (now === null || now.kind !== 'bus' || now.id !== busId) return
+          setTip((t) => (t === null ? t : { text: text, x: t.x, y: t.y }))
+        })
+      }
+
+      // The branch tooltip: an edge, either half of a transformer chain, or the symbol itself.
+      // Parallel circuits between one bus pair all match and are rendered one block each.
+      function branchTipText(key) {
+        const data = dataRef.current
         const rows = data.branch === null || data.branch === undefined ? undefined : data.branch.get(key)
-        showTip(rows === undefined || rows.length === 0
+        const contingency = conLoads === null || conLoads === undefined ? null : conLoads[key]
+        const optAdj = optAdjLoads === null || optAdjLoads === undefined ? null : optAdjLoads[key]
+        const optAdjN1 = optAdjN1Loads === null || optAdjN1Loads === undefined ? null : optAdjN1Loads[key]
+        return rows === undefined || rows.length === 0
           ? drawioFallbackTip(drawioPairLabel(key), data.branch !== null)
-          : rows.map((r) => branchTooltip(r)).join('\n\n'), event)
+          : rows.map((r) => branchTooltip(r, {
+            contingencyLoading: contingency, optAdjLoading: optAdj, optAdjN1Loading: optAdjN1,
+          })).join('\n\n')
+      }
+
+      function diagramBranchTip(key, event) {
+        dataRef.current.hovered = { kind: 'branch', key: key }
+        setHoverMark({ kind: 'branch', key: key })
+        showTip(branchTipText(key), event)
+      }
+
+      // The click handlers. The pinned tip carries the selection's key, so a late bus answer can
+      // only rewrite the tip of the element that is still selected -- never one the user has
+      // already moved off. The click point is the anchor: the tip stays there while the hover tip
+      // follows the cursor, and comes back when the cursor leaves the drawing's elements.
+      function selectBus(nodeId, event) {
+        const key = String(nodeId)
+        const target = { kind: 'bus', id: nodeId }
+        setSelection(target)
+        setTip(null)
+        setHoverMark(target)
+        loadBusText(nodeId, (busId, text, immediate) => {
+          if (immediate) {
+            setPinnedTip({ key: key, text: text, x: event.clientX, y: event.clientY })
+            return
+          }
+          setPinnedTip((t) => (t === null || t.key !== key ? t : { key: key, text: text, x: t.x, y: t.y }))
+        })
+      }
+
+      function selectBranch(key, event) {
+        const target = { kind: 'branch', key: key }
+        setSelection(target)
+        setTip(null)
+        setHoverMark(target)
+        setPinnedTip({ key: key, text: branchTipText(key), x: event.clientX, y: event.clientY })
+      }
+
+      // A hit area's click. A press that travelled is a pan, never a selection; a real click
+      // selects the element and stops the event before the canvas's clear-on-click sees it.
+      function pickTarget(target, event) {
+        if (event !== null && event !== undefined && typeof event.stopPropagation === 'function') event.stopPropagation()
+        if (pickRef.current.moved) return
+        if (target.kind === 'bus') selectBus(target.id, event)
+        else if (target.kind === 'branch') selectBranch(target.key, event)
       }
 
       // --- Pan / zoom ---------------------------------------------------------
@@ -2948,6 +4518,24 @@ module.exports = {
         setRect(drawioZoomRect(r, factor, 0.5, 0.5, drawioZoomLimits(scene.viewBox)))
       }
 
+      // A percentage picked from the readout sets that zoom level about the centre of what is on
+      // screen. The height comes from the scene's own aspect (not the rect's), so a sequence of
+      // picks cannot drift the view into a letterbox, and the width is clamped by the same limits
+      // the wheel uses -- which is why an extreme pick lands on the limit and the readout then
+      // shows that limit rather than the number that was asked for.
+      function setZoomPercent(pct) {
+        if (scene === null || !Number.isFinite(pct) || pct <= 0) return
+        const r = currentRect()
+        if (r === null) return
+        const vb = scene.viewBox
+        const limits = drawioZoomLimits(vb)
+        const w = Math.min(limits.maxW, Math.max(limits.minW, vb.w * 100 / pct))
+        const h = w * (vb.h / vb.w)
+        const cx = r.x + r.w / 2
+        const cy = r.y + r.h / 2
+        setRect({ x: cx - w / 2, y: cy - h / 2, w: w, h: h })
+      }
+
       function fit() {
         setRect(null)
         dragRef.current = null
@@ -2968,14 +4556,19 @@ module.exports = {
         return () => el.removeEventListener('wheel', onWheel)
       }, [scene, rect])
 
-      // A tip must not outlive the diagram it describes.
+      // A tip must not outlive the diagram it describes, and neither may a selection: both are
+      // coordinates and cells of the file that is going away.
       React.useEffect(() => {
         setTip(null)
+        setSelection(null)
+        setPinnedTip(null)
+        setHoverMark(null)
         dataRef.current.hovered = null
         return undefined
       }, [path])
 
       function pointerDown(e) {
+        pickRef.current = { moved: false, x: e.clientX, y: e.clientY }
         const r = currentRect()
         if (r === null) return
         const m = metrics(r)
@@ -2986,6 +4579,10 @@ module.exports = {
       }
 
       function pointerMove(e) {
+        // A press that travels more than a few pixels is a pan: the click that ends it must not
+        // select whatever the drag happened to start on.
+        const pick = pickRef.current
+        if (pick !== null && (Math.abs(e.clientX - pick.x) > 4 || Math.abs(e.clientY - pick.y) > 4)) pick.moved = true
         const r = currentRect()
         const drag = dragRef.current
         if (r === null || drag === null) return
@@ -2998,6 +4595,16 @@ module.exports = {
       function pointerUp() {
         dragRef.current = null
         setDragging(false)
+      }
+
+      // A click on the paper (not on a hit area, which stops the event) clears the selection.
+      // Pressing Escape does the same, and both leave the diagram itself untouched.
+      function canvasClick() {
+        if (pickRef.current.moved) return
+        clearSelection()
+      }
+      function canvasKeyDown(e) {
+        if (e.key === 'Escape') clearSelection()
       }
 
       const fileCount = files === null ? 0 : files.length
@@ -3021,8 +4628,352 @@ module.exports = {
             'aria-label': 'Edit this diagram in the local draw.io app',
             style: { ...btn, padding: '4px 7px', display: 'inline-flex', alignItems: 'center', opacity: editBusy ? 0.6 : 1, cursor: editBusy ? 'progress' : 'pointer' },
           }, drawioAppIcon),
+          // The gear (0.6.26): config/net_diagram.json, the flag thresholds and colours the
+          // drawing below is painted with. It sits in this row, not the toolbar, so the toolbar's
+          // controls stay the ones the mock specifies.
+          React.createElement('button', {
+            onClick: openConfig,
+            title: 'One-line diagram config options',
+            'aria-label': 'One-line diagram config options',
+            style: { ...btn, padding: '4px 7px', display: 'inline-flex', alignItems: 'center' },
+          }, drawioGearIcon),
         )
         : null
+
+      // --- search and filter (0.6.23) -----------------------------------------
+      // Both dialogs need the case's bus table (area, zone, and a name to search on), so it is
+      // fetched once, on demand: opening either dialog starts the read and OK stays disabled until
+      // it lands. The drawing path itself never waits for it, so a 78k-bus case still opens fast.
+      function ensureBusMeta() {
+        if (busMeta !== null || busMetaLoading || busFile === null || resultDir === null) return
+        setBusMetaLoading(true)
+        let acc = { areas: [], zones: [], ofBus: {} }
+        const page = (start, guard) => {
+          if (guard > 20) {
+            setBusMeta(acc)
+            setBusMetaLoading(false)
+            return
+          }
+          callRemote('readCsv', { path: resultDir + '/' + busFile, sessionId: sessionId, start: start, limit: 5000 }).then(
+            (res) => {
+              if (res === null || res === undefined || res.ok !== true) { setBusMetaLoading(false); return }
+              const rows = res.rows || []
+              acc = drawioBusMeta(res.header, rows, acc)
+              if (res.hasMore === true) { page(start + rows.length, guard + 1); return }
+              setBusMeta(acc)
+              setBusMetaLoading(false)
+            },
+            () => setBusMetaLoading(false),
+          )
+        }
+        page(0, 0)
+      }
+
+      function openSearch() {
+        setSearchText(searchQuery === null ? '' : searchQuery)
+        setDialog('search')
+        ensureBusMeta()
+      }
+
+      function openFilter() {
+        const f = filterApplied === null
+          ? { area: '', zone: '', outOfBand: false, basecaseLoading: false, contingencyLoading: false }
+          : filterApplied
+        setFilterArea(f.area === undefined || f.area === null ? '' : String(f.area))
+        setFilterZone(f.zone === undefined || f.zone === null ? '' : String(f.zone))
+        setFilterOutOfBand(f.outOfBand === true)
+        setFilterBasecaseLoading(f.basecaseLoading === true)
+        setFilterContingencyLoading(f.contingencyLoading === true)
+        setDialog('filter')
+        ensureBusMeta()
+      }
+
+      function closeDialog() {
+        setDialog(null)
+      }
+
+      // OK is what applies: the dialog's fields are the draft, so closing with Cancel leaves the
+      // drawing exactly as it was.
+      function applySearch() {
+        const q = String(searchText).trim()
+        const next = q === '' ? null : q
+        setSearchQuery(next)
+        // 0.6.37: what the search selects comes to the middle of the view. Read here, on the
+        // deliberate act, and not in an effect keyed on the query -- an effect would re-centre on
+        // every later render and undo the pan the moment the user looked somewhere else. A FITTED
+        // view (`rect === null`) is left alone: the whole drawing is on screen, so there is nothing
+        // to move, and a window equal to the whole page would only cost the picker its `Fit` entry.
+        if (next !== null && scene !== null && rect !== null) {
+          const hits = drawioSearchHits(next, scene.nodes, scene.edges, busNames)
+          if (hits.nBus + hits.nBranch > 0) setRect(drawioCentreRect(scene, rect, hits))
+        }
+        setDialog(null)
+      }
+
+      function applyFilter() {
+        const next = { area: filterArea, zone: filterZone, outOfBand: filterOutOfBand,
+          basecaseLoading: filterBasecaseLoading, contingencyLoading: filterContingencyLoading }
+        setFilterApplied(next.area === '' && next.zone === '' && next.outOfBand !== true
+          && next.basecaseLoading !== true && next.contingencyLoading !== true ? null : next)
+        setDialog(null)
+      }
+
+      // The gear dialog (0.6.26). The form is a draft, like the filter's: only OK sanitizes and
+      // saves, and the drawing's flags follow the saved values when the Host answers.
+      function openConfig() {
+        setCfgForm(drawioNetConfig(netConfig))
+        setNetConfigError(null)
+        setDialog('config')
+      }
+
+      function applyConfig() {
+        const errors = drawioNetConfigErrors(cfgForm)
+        const keys = Object.keys(errors)
+        if (keys.length > 0) {
+          setNetConfigError('check ' + keys.length + (keys.length === 1 ? ' field: ' : ' fields: ') + keys.join(', '))
+          return
+        }
+        setNetConfigSaving(true)
+        setNetConfigError(null)
+        callRemote('saveNetDiagramOptions', { config: cfgForm, sessionId: sessionId }).then(
+          (res) => {
+            setNetConfigSaving(false)
+            if (res !== null && res !== undefined && res.ok === true) {
+              setNetConfig(drawioNetConfig(res.config === undefined ? cfgForm : res.config))
+              setNetConfigWarning(null)
+              setDialog(null)
+              return
+            }
+            setNetConfigError(res && res.error ? String(res.error) : 'failed to save ' + netConfigPath)
+          },
+          (err) => { setNetConfigSaving(false); setNetConfigError(String(err && err.message ? err.message : err)) },
+        )
+      }
+
+      function clearSearchFilter() {
+        setSearchQuery(null)
+        setSearchText('')
+        setFilterApplied(null)
+      }
+
+      // Both are pure functions of the scene plus the bus table, recomputed per render. Nothing
+      // here writes: the highlight and the hiding are paint-time, like the voltage alert.
+      const busNames = busMeta === null ? null : (function () {
+        const names = {}
+        for (const key of Object.keys(busMeta.ofBus)) names[key] = busMeta.ofBus[key].name
+        return names
+      })()
+      const searchHits = searchQuery === null || scene === null
+        ? null : drawioSearchHits(searchQuery, scene.nodes, scene.edges, busNames)
+      const filterHits = filterApplied === null || scene === null
+        ? null : drawioFilterHidden(filterApplied, scene.nodes, scene.edges, busMeta, busAlerts, netConfig,
+          branchLoads, conLoads)
+      // Everything that colours a cell, merged here rather than in the renderer, so precedence is
+      // one readable rule: the flags first (bus, then base case, then contingency -- the last wins
+      // inside drawioFlagPaint), and the search blue over the top, because a search is the
+      // deliberate act. The renderer only sees cell id -> colour.
+      const flagPaint = scene === null
+        ? null : drawioFlagPaint(scene.nodes, scene.edges, netConfig, busAlerts, branchLoads, conLoads)
+      const paintMap = drawioMergedPaint(flagPaint, searchHits, DRAWIO_MATCH_FILL)
+      // The status line's counts, per family, with the thresholds the config set.
+      // Built once per scene (not per zoom): two path strings for the whole drawing, or null when
+      // there is nothing to show.
+      const birdseyePaths = scene === null ? null : drawioBirdseyePaths(scene)
+      // A click or drag on the thumbnail puts the same-size window where it landed, held inside the
+      // drawing.
+      function centreFromBirdseye(e) {
+        if (scene === null || birdseyePaths === null) return
+        const el = e && e.currentTarget !== undefined && e.currentTarget !== null ? e.currentTarget : null
+        if (el === null || typeof el.getBoundingClientRect !== 'function') return
+        const box = el.getBoundingClientRect()
+        if (box.width <= 0 || box.height <= 0) return
+        const vb = scene.viewBox
+        // The svg meets the scene into its box, so the drawn area is inset when the aspects differ:
+        // measure the scene's own edges by where the viewBox corners land.
+        const scale = Math.min(box.width / vb.w, box.height / vb.h)
+        const drawW = vb.w * scale
+        const drawH = vb.h * scale
+        const left = box.left + (box.width - drawW) / 2
+        const top = box.top + (box.height - drawH) / 2
+        const fx = (e.clientX - left) / (drawW || 1)
+        const fy = (e.clientY - top) / (drawH || 1)
+        setRect(drawioBirdseyeRect(scene, currentRect(), fx, fy))
+      }
+
+      const flagCounts = (function () {
+        const buses = busAlerts === null ? 0 : Object.keys(busAlerts).length
+        const above = (loads, threshold) => (loads === null || loads === undefined ? 0
+          : Object.keys(loads).filter((k) => loads[k] >= threshold).length)
+        const base = above(branchLoads, netConfig.Basecase_branch_flow_flag_percent)
+        const cont = above(conLoads, netConfig.Contingency_branch_flow_flag_percent)
+        if (buses + base + cont === 0) return null
+        const parts = []
+        if (buses > 0) parts.push(buses + (buses === 1 ? ' bus ' : ' buses ') + netConfig.Bus_flag_lower_limit + '\u2013' + netConfig.Bus_flag_upper_limit + ' pu')
+        if (base > 0) parts.push(base + (base === 1 ? ' branch ' : ' branches ') + '\u2265' + netConfig.Basecase_branch_flow_flag_percent + '%')
+        if (cont > 0) parts.push(cont + ' contingency \u2265' + netConfig.Contingency_branch_flow_flag_percent + '%')
+        return 'flags: ' + parts.join(' \u00b7 ')
+      })()
+      // The dialog's own message previews the DRAFT, so changing Area or Zone updates it immediately
+      // (0.6.24). The drawing still waits for OK: only the sentence is live.
+      const draftHits = scene === null
+        ? null : drawioFilterHidden({ area: filterArea, zone: filterZone, outOfBand: filterOutOfBand,
+          basecaseLoading: filterBasecaseLoading, contingencyLoading: filterContingencyLoading },
+        scene.nodes, scene.edges, busMeta, busAlerts, netConfig, branchLoads, conLoads)
+      const statusText = searchHits !== null
+        ? (searchHits.nBus + searchHits.nBranch === 0
+          ? 'no match'
+          : searchHits.nBus + (searchHits.nBus === 1 ? ' bus' : ' buses')
+            + (searchHits.nBranch > 0
+              ? ', ' + searchHits.nBranch + (searchHits.nBranch === 1 ? ' branch' : ' branches') : ''))
+        : (filterHits !== null && filterHits.label !== '' ? 'filter: ' + filterHits.label : null)
+      // A filter that names an area or a zone cannot be applied before the bus table arrives.
+      const filterNeedsMeta = filterArea !== '' || filterZone !== ''
+
+      const dialogShell = (title, bodyEl, onOk, okDisabled) => React.createElement('div', {
+        style: { position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 50 },
+      }, React.createElement('div', {
+        role: 'dialog',
+        'aria-label': title,
+        style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '18px', width: '100%', maxWidth: '440px', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)' },
+      },
+        React.createElement('div', { style: { fontSize: '14px', fontWeight: 600 } }, title),
+        bodyEl,
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px' } },
+          React.createElement('button', { key: 'cancel', onClick: closeDialog, style: { ...btn, padding: '5px 14px' } }, 'Cancel'),
+          React.createElement('button', {
+            key: 'ok', onClick: onOk, disabled: okDisabled === true,
+            style: { ...btn, padding: '5px 14px', borderColor: 'var(--dsw-alias-brand-primary)', opacity: okDisabled === true ? 0.5 : 1 },
+          }, 'OK'),
+        ),
+      ))
+
+      const fieldRow = (label, control) => React.createElement('label', {
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', fontSize: '12px' },
+      }, React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, label), control)
+
+      const hintStyle = { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }
+      // The search dialog's help is about THIS case: how many buses it draws, the range, a branch
+      // example from its own bus ids, and a name to try when its result table carries names.
+      const searchHelp = drawioSearchHelp(scene, busMeta)
+      const cfgErrors = dialog === 'config' ? drawioNetConfigErrors(cfgForm) : {}
+      const cfgField = (field) => {
+        const raw = cfgForm === null || cfgForm === undefined ? '' : cfgForm[field.key]
+        const value = raw === null || raw === undefined ? '' : String(raw)
+        const bad = cfgErrors[field.key] !== undefined
+        const input = React.createElement('input', {
+          value: value,
+          'aria-label': field.label,
+          onChange: (e) => setCfgForm(Object.assign({}, cfgForm, { [field.key]: e.target.value })),
+          style: Object.assign({}, selectStyle, {
+            width: '150px', minWidth: '150px', maxWidth: '150px', height: '28px',
+            borderColor: bad ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-border-l1)',
+          }),
+        })
+        const control = field.kind === 'color'
+          ? React.createElement('span', { style: { display: 'flex', alignItems: 'center', gap: '6px' } }, input,
+            React.createElement('span', {
+              title: value,
+              style: { width: '14px', height: '14px', borderRadius: '3px', background: value === '' ? 'transparent' : value, border: '1px solid var(--dsw-alias-border-l1)' },
+            }))
+          : field.kind === 'boolean'
+            // A switch is a checkbox, not a text box: `true`/`false` typed by hand is a config-file
+            // job, and the sanitizer accepts both spellings for anyone who does it there.
+            ? React.createElement('input', {
+              type: 'checkbox',
+              checked: raw === true || String(raw).trim().toLowerCase() === 'true',
+              'aria-label': field.label,
+              onChange: (e) => setCfgForm(Object.assign({}, cfgForm, { [field.key]: e.target.checked })),
+              style: { width: '16px', height: '16px', margin: 0, cursor: 'pointer' },
+            })
+            : input
+        return React.createElement('div', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '2px' } },
+          fieldRow(field.label, control),
+          bad ? React.createElement('div', { style: { fontSize: '10px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
+      }
+      const cfgSection = (title, fields) => React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+        React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, title),
+        fields.map(cfgField))
+      const dialogEl = dialog === 'config'
+        ? dialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+          cfgSection('Bus flags', DRAWIO_NET_FIELDS.slice(0, 3)),
+          cfgSection('Branch flow flags', DRAWIO_NET_FIELDS.slice(3, 7)),
+          cfgSection('View', DRAWIO_NET_FIELDS.slice(7)),
+          React.createElement('div', { style: hintStyle },
+            'Writes ' + netConfigPath + ' \u2014 one flag style for every case. Flags are a preview: the .drawio keeps no colour.'),
+          netConfigWarning !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigWarning) : null,
+          netConfigError !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigError) : null,
+        ), applyConfig, netConfigSaving)
+        : dialog === 'search'
+        ? dialogShell('Search the diagram', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+          React.createElement('input', {
+            value: searchText,
+            onChange: (e) => setSearchText(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter') applySearch() },
+            placeholder: searchHelp.placeholder,
+            'aria-label': 'Search the diagram',
+            style: { ...selectStyle, width: '100%', maxWidth: 'none', height: '30px' },
+          }),
+          React.createElement('div', { style: hintStyle },
+            busMetaLoading ? 'Loading the case\u2019s bus table\u2026 ' + searchHelp.hint : searchHelp.hint),
+        ), applySearch, false)
+        : dialog === 'filter'
+          ? dialogShell('Filter the diagram', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
+            fieldRow('Area', React.createElement('select', {
+              value: filterArea,
+              'aria-label': 'Area',
+              onChange: (e) => { setFilterArea(e.target.value); setFilterZone('') },
+              style: { ...selectStyle, minWidth: '200px', maxWidth: '240px', height: '28px' },
+            }, [React.createElement('option', { key: 'all', value: '' }, 'All areas')].concat(
+              (busMeta === null ? [] : busMeta.areas).map((a) => React.createElement('option', { key: a.num, value: a.num }, a.num + '  ' + a.name))))),
+            fieldRow('Zone', React.createElement('select', {
+              value: filterZone,
+              'aria-label': 'Zone',
+              onChange: (e) => setFilterZone(e.target.value),
+              style: { ...selectStyle, minWidth: '200px', maxWidth: '240px', height: '28px' },
+            }, [React.createElement('option', { key: 'all', value: '' }, 'All zones')].concat(
+              (busMeta === null ? [] : busMeta.zones)
+                .filter((z) => filterArea === '' || String(z.area) === filterArea)
+                .map((z) => React.createElement('option', { key: z.num, value: z.num }, z.num + '  ' + z.name))))),
+            React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' } },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: filterOutOfBand,
+                'aria-label': 'Only buses outside the voltage band',
+                onChange: (e) => setFilterOutOfBand(e.target.checked),
+              }),
+              'Only buses with ' + drawioBandText(netConfig)),
+            React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px',
+              opacity: branchLoads === null ? 0.5 : 1 } },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: filterBasecaseLoading,
+                // No branch table in the result folder means no loading to compare: the criterion is
+                // offered but not tappable, rather than silently emptying the drawing (0.6.32).
+                disabled: branchLoads === null,
+                'aria-label': 'Only branches at or above the base-case flow flag',
+                onChange: (e) => setFilterBasecaseLoading(e.target.checked),
+              }),
+              'Only branches with ' + drawioLoadingThresholdText(netConfig, 'basecase')
+                + (branchLoads === null ? ' (no branch table yet)' : '')),
+            React.createElement('label', { style: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px',
+              opacity: conLoads === null ? 0.5 : 1 } },
+              React.createElement('input', {
+                type: 'checkbox',
+                checked: filterContingencyLoading,
+                disabled: conLoads === null,
+                'aria-label': 'Only branches at or above the contingency flow flag',
+                onChange: (e) => setFilterContingencyLoading(e.target.checked),
+              }),
+              'Only branches with ' + drawioLoadingThresholdText(netConfig, 'contingency')
+                + (conLoads === null ? ' (no CA table yet)' : '')),
+            React.createElement('div', { style: hintStyle },
+              busMetaLoading || (filterNeedsMeta && busMeta === null)
+                ? 'Loading the case\u2019s bus table\u2026'
+                : (draftHits !== null && draftHits.label !== ''
+                  ? draftHits.text
+                  : 'Anything that does not match is hidden, along with its branches and transformer symbols; a branch loading filter also hides the buses that are not an end of a branch that stays. All areas and All zones bring the whole diagram back.')),
+          ), applyFilter, busMetaLoading || (filterNeedsMeta && busMeta === null))
+          : null
 
       const caseRow = React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px' } },
         React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
@@ -3051,12 +5002,67 @@ module.exports = {
       const toolbar = (path !== '' || picker !== null)
         ? React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' } },
           picker,
-          path !== '' ? React.createElement('button', { onClick: () => setView('rendered'), style: { ...btn, padding: '4px 10px', borderColor: view === 'rendered' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Rendered') : null,
-          path !== '' ? React.createElement('button', { onClick: () => setView('source'), style: { ...btn, padding: '4px 10px', borderColor: view === 'source' ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-border-l1)' } }, 'Source') : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('span', { style: { fontSize: '12px', minWidth: '44px', textAlign: 'center', color: 'var(--dsw-alias-label-secondary)' } }, drawioZoomPercent(scene, rect) + '%') : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
-          path !== '' && view === 'rendered' && scene !== null ? React.createElement('button', { onClick: fit, title: 'Fit the whole diagram', style: { ...btn, padding: '4px 10px' } }, 'Fit') : null,
+          // The row is the drawing's controls. The `R` / `S` view toggle that used to lead it is
+          // gone (0.6.34): the tab always draws the rendered scene, so the zoom pair starts here.
+          path !== '' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1 / 1.25), title: 'Zoom out', style: { ...btn, padding: '4px 10px' } }, '\u2212') : null,
+          // The readout is the zoom picker (0.6.21): it shows the current level and sets it, and
+          // since 0.6.22 it carries **Fit** as its last entry, so the row is `−`, the picker, `+`
+          // and nothing else. A level reached with the wheel or a pinch is listed alongside the
+          // presets, so going to 100% and back to the old 745% is one click either way.
+          path !== '' && scene !== null
+            ? (function () {
+              const pctNow = drawioZoomPercent(scene, rect)
+              const fitted = rect === null
+              const pcts = DRAWIO_ZOOM_PRESETS.indexOf(pctNow) >= 0 || fitted
+                ? DRAWIO_ZOOM_PRESETS
+                : DRAWIO_ZOOM_PRESETS.concat([pctNow]).sort((a, b) => a - b)
+              const options = pcts.map((p) => React.createElement('option', { key: p, value: String(p) }, p + '%'))
+              // `Fit` shows the whole page from its origin; picking 100% only rescales about the
+              // current centre, which is a different view. While the view IS fitted (`rect === null`)
+              // this is the selected entry, and the readout says so instead of claiming 100%.
+              options.push(React.createElement('option', { key: 'fit', value: 'fit' }, 'Fit'))
+              return React.createElement('select', {
+                value: fitted ? 'fit' : String(pctNow),
+                onChange: (e) => (e.target.value === 'fit' ? fit() : setZoomPercent(Number(e.target.value))),
+                title: 'Zoom level',
+                'aria-label': 'Zoom level',
+                style: { ...selectStyle, height: '28px', minWidth: '78px', maxWidth: '96px', padding: '0 4px', textAlign: 'center', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
+              }, options)
+            })()
+            : null,
+          path !== '' && scene !== null ? React.createElement('button', { onClick: () => stepZoom(1.25), title: 'Zoom in', style: { ...btn, padding: '4px 10px' } }, '+') : null,
+          // Search and filter (0.6.23): two icon buttons after the zoom controls. Each opens a
+          // dialog whose OK applies and whose Cancel throws the draft away. The filter button stays
+          // lit while a filter is applied, and the status text clears both (a span, not a button --
+          // the row's controls are the ones the mock specifies).
+          path !== '' && scene !== null
+            ? React.createElement('button', {
+              onClick: openSearch, title: 'Search the diagram', 'aria-label': 'Search the diagram',
+              style: { ...btn, padding: '4px 8px', display: 'flex', alignItems: 'center' },
+            }, drawioSearchIcon)
+            : null,
+          path !== '' && scene !== null
+            ? React.createElement('button', {
+              onClick: openFilter, title: 'Filter the diagram', 'aria-label': 'Filter the diagram',
+              style: { ...btn, padding: '4px 8px', display: 'flex', alignItems: 'center', borderColor: filterApplied === null ? 'var(--dsw-alias-border-l1)' : 'var(--dsw-alias-brand-primary)' },
+            }, drawioFilterIcon)
+            : null,
+          path !== '' && scene !== null && statusText !== null
+            ? React.createElement('span', {
+              onClick: clearSearchFilter,
+              title: 'Clear the search and the filter',
+              style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' },
+            }, statusText + ' \u2715')
+            : null,
+          // The flag counts, tinted by the config's own colours and clickable to open the gear --
+          // so what the thresholds are doing is visible without opening the dialog.
+          path !== '' && scene !== null && flagCounts !== null
+            ? React.createElement('span', {
+              onClick: openConfig,
+              title: 'Flagged by config/net_diagram.json \u2014 click to change the thresholds',
+              style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' },
+            }, flagCounts)
+            : null,
         )
         : null
 
@@ -3076,8 +5082,6 @@ module.exports = {
                 ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading diagram…')
                 : error !== null
                   ? React.createElement('pre', { style: { ...mono, margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, error)
-                  : view === 'source'
-                    ? React.createElement('pre', { style: { ...mono, flex: '1 1 auto', overflow: 'auto', minHeight: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-word', margin: 0 } }, xml || '')
                     : scene !== null
                       ? React.createElement('div', {
                         ref: canvasRef,
@@ -3086,29 +5090,58 @@ module.exports = {
                         onPointerUp: pointerUp,
                         onPointerCancel: pointerUp,
                         onPointerLeave: pointerUp,
-                        style: { height: '70vh', minHeight: '320px', overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' },
+                        // A click on the paper clears the selection; a hit area stops the event
+                        // before it gets here. `tabIndex` lets Escape reach this element, and the
+                        // title says so without adding a toolbar control.
+                        onClick: canvasClick,
+                        onKeyDown: canvasKeyDown,
+                        tabIndex: 0,
+                        title: 'Wheel zooms, drag pans, click a bus or branch to select it, Esc clears',
+                        // `position: relative` so the birdseye can sit in the corner of the canvas.
+                        style: { position: 'relative', height: '70vh', minHeight: '320px', overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none', outline: 'none' },
                       }, React.createElement(DrawioDiagram, {
                         scene: scene,
                         view: rect,
+                        // Render-time only: neither the alert nor the search/filter overrides ever
+                        // reach the file.
+                        paint: paintMap,
+                        hidden: filterHits === null ? null : filterHits.ids,
+                        // The click selection (strong mark + pinned tip) and the element under
+                        // the cursor (light mark). Both are paint-time, and both need the
+                        // resolved pairs to turn a branch key into the cells to outline.
+                        selected: selection,
+                        hovered: hoverMark,
+                        pairs: dataRef.current.pairs,
                         hover: {
                           pairs: dataRef.current.pairs,
                           onBus: diagramBusTip,
                           onBranch: diagramBranchTip,
                           onMove: moveTip,
                           onLeave: hideTip,
+                          onPick: pickTarget,
                         },
-                      }))
+                      }), netConfig.Show_birdseye_view !== false ? React.createElement(DrawioBirdseye, {
+                        // The whole drawing, with the visible rectangle on it. Its pointer events
+                        // are stopped inside, so dragging the thumbnail never pans the canvas too.
+                        scene: scene,
+                        rect: currentRect(),
+                        paths: birdseyePaths,
+                        onCentre: centreFromBirdseye,
+                      }) : null)
                       : null
 
-      const tipEl = tip ? React.createElement('div', {
+      // The hover tip wins while the cursor is on an element; the pinned tip of the selection
+      // shows whenever the cursor is not, so a click's information is not lost on mouse-out.
+      const shownTip = tip || pinnedTip
+      const tipEl = shownTip ? React.createElement('div', {
         style: {
-          position: 'fixed', left: tip.x + 12, top: tip.y + 12,
+          position: 'fixed', left: shownTip.x + 12, top: shownTip.y + 12,
           background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '6px',
           padding: '8px 10px', fontSize: '11px', lineHeight: '1.5', whiteSpace: 'pre',
           color: 'var(--dsw-alias-label-primary)', zIndex: 10000, pointerEvents: 'none',
           boxShadow: '0 4px 16px rgba(0,0,0,0.4)', maxWidth: '320px',
         },
-      }, tip.text) : null
+      }, shownTip.text) : null
 
       // No title and no subtitle: the tab bar already names this view, and the first row
       // ("Simu Case <path>") says what is drawn. A heading here only pushed the diagram down.
@@ -3117,6 +5150,7 @@ module.exports = {
         toolbar,
         body,
         tipEl,
+        dialogEl,
       )
     }
 
@@ -3157,8 +5191,20 @@ module.exports = {
       }
     }
 
+    // The explorer resolves a kind to one of the files the tool reported, by suffix. OptAdj writes
+    // two pairs — basecase `_DF_optadj_gen.csv` / `_DF_optadj_branch.csv`, N-1
+    // `_DF_optadj_N1_gen.csv` / `_DF_optadj_N1_branch.csv` — so a kind also matches its own suffix
+    // with the mode infix in front of the last segment (guard §22 pins the rule against
+    // `OptAdjRunner` and the Host's `optAdjResultNames`).
+    function kindFileSuffixes(kind) {
+      const cut = kind.lastIndexOf('_')
+      if (cut < 0) return ['_DF_' + kind + '.csv']
+      return ['_DF_' + kind + '.csv', '_DF_' + kind.slice(0, cut) + '_N1' + kind.slice(cut) + '.csv']
+    }
+
     function explorerPathForKind(meta, kind) {
-      const name = meta.files.filter((f) => f.indexOf('_DF_' + kind + '.csv') !== -1)[0]
+      const suffixes = kindFileSuffixes(kind)
+      const name = meta.files.filter((f) => suffixes.some((s) => f.indexOf(s) !== -1))[0]
       return name === undefined ? null : meta.resultDir + '/' + name
     }
 
@@ -3241,6 +5287,55 @@ module.exports = {
         showReport: false,
         // Overload rows are only useful worst-first; the header stays clickable to flip it.
         defaultSort: 'LoadingPercent',
+        defaultSortDesc: true,
+        sessionId: props === null || props === undefined ? undefined : props.sessionId,
+        callRemote: props === null || props === undefined ? undefined : props.callRemote,
+        openFile: props === null || props === undefined ? undefined : props.openFile,
+      })
+    }
+
+    // The OptAdj card reuses the same explorer for its two result files: the per-generator
+    // adjustments and the per-branch before/after loadings. Both kinds are matched by the
+    // `_DF_<kind>.csv` suffix, so the file names are the client-side contract with
+    // `OptAdjRunner` (guard §22 pins the three places).
+    function optAdjCardMeta(block) {
+      if (block === null || block === undefined) return null
+      if (!('kind' in block)) return null
+      if (block.isError === true) return null
+      const meta = block.meta
+      if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return null
+      if (meta.ok !== true) return null
+      if (typeof meta.resultDir !== 'string' || meta.resultDir === '') return null
+      const gen = typeof meta.optadjGenCsv === 'string' ? meta.optadjGenCsv : ''
+      const branch = typeof meta.optadjBranchCsv === 'string' ? meta.optadjBranchCsv : ''
+      if (gen === '' || branch === '') return null
+      return {
+        case: typeof meta.case === 'string' ? meta.case : '',
+        resultDir: meta.resultDir,
+        files: [gen, branch],
+      }
+    }
+
+    const OPTADJ_EXPLORER_KINDS = [
+      { kind: 'optadj_gen', label: 'Gen adjustments' },
+      { kind: 'optadj_branch', label: 'Branch loading' },
+    ]
+
+    function OptAdjResultCard(props) {
+      const block = props === null || props === undefined ? null : props.block
+      const settled = block !== null && block !== undefined && ('kind' in block)
+      return React.createElement(AclfResultPanel, {
+        settled: settled,
+        isError: settled && block.isError === true,
+        meta: optAdjCardMeta(block),
+        args: aclfCallArgs(block),
+        text: toolResultText(block),
+        kinds: OPTADJ_EXPLORER_KINDS,
+        rowLabel: 'Explore results',
+        label: 'InterPSS generator redispatch',
+        showReport: false,
+        // The post-opt loading is the number the run is judged by; worst first.
+        defaultSort: 'loadingAfterPct',
         defaultSortDesc: true,
         sessionId: props === null || props === undefined ? undefined : props.sessionId,
         callRemote: props === null || props === undefined ? undefined : props.callRemote,
@@ -3626,6 +5721,15 @@ module.exports = {
     slots.inject('tool.call.toolview', () => slots.register(
       { name: 'tool.call.toolview', key: 'interpss_run_ca' },
       (props) => React.createElement(CaResultCard, {
+        block: props && props.block,
+        sessionId: props && props.sessionId,
+        callRemote: callRemote,
+        openFile: props && props.openFile,
+      }),
+    ))
+    slots.inject('tool.call.toolview', () => slots.register(
+      { name: 'tool.call.toolview', key: 'interpss_case_optadj' },
+      (props) => React.createElement(OptAdjResultCard, {
         block: props && props.block,
         sessionId: props && props.sessionId,
         callRemote: callRemote,

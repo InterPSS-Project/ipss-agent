@@ -1,8 +1,6 @@
 package org.interpss.agent.input;
 
-import static org.interpss.plugin.pssl.plugin.IpssAdapter.FileFormat.IEEECommonFormat;
-
-import org.interpss.plugin.pssl.plugin.IpssAdapter;
+import org.interpss.fadapter.ieeecdf.IeeeCDFDirectParser;
 
 import com.interpss.core.aclf.AclfNetwork;
 
@@ -15,9 +13,6 @@ public final class IeeeFileAdapter {
     }
 
     public static AclfNetwork createAclfNet(String filePath) throws Exception {
-        return IpssAdapter.importAclfNet(filePath)
-                .setFormat(IEEECommonFormat)
-                .load()
-                .getImportedObj();
+        return new IeeeCDFDirectParser().parse(filePath);
     }
 }

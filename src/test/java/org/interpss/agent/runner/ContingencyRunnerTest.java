@@ -6,8 +6,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import com.interpss.core.algo.dclf.BranchRatingProvider;
+import com.interpss.core.algo.dclf.DclfContingencyConfig;
+import com.interpss.core.algo.dclf.DclfIslandingTreatment;
+import com.interpss.core.algo.dclf.DclfMultiOutageReplayMode;
+import com.interpss.core.algo.dclf.solver.DclfContingencySolutionMethod;
+
 import org.interpss.agent.cli.CliArgs;
 import org.interpss.agent.input.IeeeFileAdapter;
+import org.interpss.agent.runner.config.CaRunConfig;
 import org.interpss.agent.support.AgentTestSupport;
 import org.interpss.agent.util.ProjectPaths;
 import org.junit.jupiter.api.BeforeEach;
@@ -231,6 +238,55 @@ class ContingencyRunnerTest {
         // 1 contingency / 3 monitored branches in the ieee14 fixtures.
         assertThat(summary.numCont()).isEqualTo(1);
         assertThat(summary.numMonitored()).isEqualTo(3);
+    }
+
+    /**
+     * The CA dialog's solver knobs reach the solver. The mapping is asserted field by field
+     * against {@code DclfContingencyConfig}'s own getters, because a knob the dialog writes
+     * and the runner forgets to copy is invisible in the CSV.
+     */
+    @Test
+    void dclfConfig_copiesEveryKnobOntoTheSolverConfig() {
+        CaRunConfig config = CaRunConfig.fromJson("{\"overloadThreshold\":75,\"dclfInclLoss\":false,"
+                + "\"dclfScreening\":true,\"dcLoadingCutoff\":0,\"dcFlowChangeCutoff\":250,"
+                + "\"solutionMethod\":\"WoodburyMatrixUpdate\",\"kluEndpointRhsBatchSize\":8,"
+                + "\"cacheViolationCombinedShiftFactors\":true,\"islandingTreatment\":\"SKIP\","
+                + "\"n1IslandingReplayEnabled\":true,\"multiOutageReplayMode\":\"HIGH_IMPEDANCE\","
+                + "\"highImpedanceReactancePu\":1234.5,\"turnOffIslandBus\":false,"
+                + "\"autoTurnLine2Xfr\":false,\"ratingProvider\":\"RATING_A\"}", "test");
+
+        DclfContingencyConfig dclf = ContingencyRunner.dclfConfig(config);
+
+        assertThat(dclf.getOverloadThreshold()).isEqualTo(75.0);
+        assertThat(dclf.isDclfInclLoss()).isFalse();
+        assertThat(dclf.isDclfScreening()).isTrue();
+        assertThat(dclf.getDcLoadingCutoff()).isZero();
+        assertThat(dclf.getDcFlowChangeCutoff()).isEqualTo(250.0);
+        assertThat(dclf.getSolutionMethod()).isEqualTo(DclfContingencySolutionMethod.WoodburyMatrixUpdate);
+        assertThat(dclf.getKluEndpointRhsBatchSize()).isEqualTo(8);
+        assertThat(dclf.isCacheViolationCombinedShiftFactors()).isTrue();
+        assertThat(dclf.getIslandingTreatment()).isEqualTo(DclfIslandingTreatment.SKIP);
+        assertThat(dclf.isN1IslandingReplayEnabled()).isTrue();
+        assertThat(dclf.getMultiOutageReplayMode()).isEqualTo(DclfMultiOutageReplayMode.HIGH_IMPEDANCE);
+        assertThat(dclf.getHighImpedanceReactancePu()).isEqualTo(1234.5);
+        assertThat(dclf.isTurnOffIslandBus()).isFalse();
+        assertThat(dclf.isAutoTurnLine2Xfr()).isFalse();
+        assertThat(dclf.getBranchRatingProvider()).isSameAs(BranchRatingProvider.RATING_A);
+    }
+
+    /**
+     * `default` is the library's own provider. Measured on ipss.core.lib 1.4.0 that provider
+     * *is* {@code RATING_B} (the branch's rating MVA 2 — 690 MVA on the IEEE 39 case, where
+     * RATING_A's 600 MVA reports five more overloads), so `default` never picks RATING_A.
+     */
+    @Test
+    void dclfConfig_keepsTheLibraryProviderForTheDefaultRatingChoice() {
+        DclfContingencyConfig dclf = ContingencyRunner.dclfConfig(CaRunConfig.DEFAULT);
+
+        assertThat(dclf.getBranchRatingProvider()).isNotSameAs(BranchRatingProvider.RATING_A);
+        assertThat(dclf.getBranchRatingProvider()).isSameAs(BranchRatingProvider.RATING_B);
+        assertThat(dclf.getOverloadThreshold()).isEqualTo(90.0);
+        assertThat(dclf.isDclfInclLoss()).isTrue();
     }
 
     /** Write the case {@code config/ca_run.json}; a null file key leaves the mode at {@code all}. */
