@@ -18,7 +18,7 @@
 //
 // Node has no DOMParser, so this file supplies a minimal one covering exactly what the
 // renderer uses. It has no dependencies and does not need a browser.
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -1773,7 +1773,12 @@ console.log('\n15. size limits (20000 cells, 4 MiB)');
 // Raising ONE limit would leave the others blocking the same file, so the three move together: the
 // preview's cell cap (client), the Host's read cap (both halves) and the generator's own self-check.
 // A 2000-bus case — Texas 2K, ~10.7k cells and ~3 MB — has to fit all three.
-const GENERATOR = join(ROOT, 'wspace', 'script', 'gen_oneline_diagram.py');
+// The diagram Python tooling lives under src/main/py/diagram (it moved out of wspace/script, which
+// keeps only the `.gvy` fixtures). `drawio_mcp.py` still sits beside the generator, which is how
+// `--open` finds it, so the two must move together.
+const PY_DIAGRAM = join(ROOT, 'src', 'main', 'py', 'diagram');
+const GENERATOR = join(PY_DIAGRAM, 'gen_oneline_diagram.py');
+const DRAWIO_MCP = join(PY_DIAGRAM, 'drawio_mcp.py');
 const generatorSrc = readFileSync(GENERATOR, 'utf8');
 check('the preview cap is 20000 cells', api.DRAWIO_MAX_CELLS === 20000, String(api.DRAWIO_MAX_CELLS));
 check('both hosts read up to 4 MiB of diagram',
@@ -3116,6 +3121,46 @@ if (scene) {
   check('the hover tip outranks the pinned one while the cursor is on an element',
     bothFlat.indexOf('HOVER TIP') >= 0 && bothFlat.indexOf('PINNED TIP') < 0);
 }
+
+// --- 24. the diagram Python tools live under src/main/py/diagram ------------
+// The generator and the draw.io MCP helper moved out of `wspace/script/` (which keeps only the
+// `.gvy` fixtures). Every living command in the skill and the guides names them, so a relocation
+// that missed one of those references sends a user to a file that is no longer there — the failure
+// is just ENOENT, with no code path in the plugin to catch it. Pin the new home, the co-location,
+// the empty old one, and the references themselves.
+console.log('\n24. the diagram Python tooling moved to src/main/py/diagram');
+check('the generator and the MCP helper live under src/main/py/diagram',
+  existsSync(GENERATOR) && existsSync(DRAWIO_MCP),
+  (existsSync(GENERATOR) ? '' : 'missing ' + GENERATOR + '; ')
+    + (existsSync(DRAWIO_MCP) ? '' : 'missing ' + DRAWIO_MCP));
+check('the old wspace/script copies are gone (that folder keeps only the .gvy fixtures)',
+  !existsSync(join(ROOT, 'wspace', 'script', 'gen_oneline_diagram.py'))
+    && !existsSync(join(ROOT, 'wspace', 'script', 'drawio_mcp.py')));
+check('the generator finds its MCP helper beside itself, not at a hard-coded path',
+  generatorSrc.indexOf('os.path.dirname(os.path.abspath(__file__)), "drawio_mcp.py"') >= 0);
+
+const diagramRefs = {
+  'the diagram skill': '.agents/skills/ipss-case-diagram/SKILL.md',
+  'the tools reference': 'docs/interpss-tools.md',
+  'the process guide': 'docs/oneline-diagram-process.md',
+  'the diagram user guide': 'docs/user_guide/oneline_diagram_user_guide.md',
+};
+const readDiagramRef = (rel) => readFileSync(join(ROOT, rel), 'utf8');
+const staleRefs = Object.keys(diagramRefs).filter((name) => {
+  const text = readDiagramRef(diagramRefs[name]);
+  return text.indexOf('wspace/script/gen_oneline_diagram.py') >= 0
+    || text.indexOf('wspace/script/drawio_mcp.py') >= 0;
+});
+check('no living doc or skill still names the old wspace/script python path',
+  staleRefs.length === 0, staleRefs.join(', '));
+check('the living docs and the skill name the new generator path',
+  Object.keys(diagramRefs).every((name) => readDiagramRef(diagramRefs[name])
+    .indexOf('src/main/py/diagram/gen_oneline_diagram.py') >= 0),
+  Object.keys(diagramRefs).filter((name) => readDiagramRef(diagramRefs[name])
+    .indexOf('src/main/py/diagram/gen_oneline_diagram.py') < 0).join(', '));
+check('the skill and the process guide name the new MCP helper path',
+  ['.agents/skills/ipss-case-diagram/SKILL.md', 'docs/oneline-diagram-process.md']
+    .every((rel) => readDiagramRef(rel).indexOf('src/main/py/diagram/drawio_mcp.py') >= 0));
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

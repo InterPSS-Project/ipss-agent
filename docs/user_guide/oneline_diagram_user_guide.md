@@ -109,7 +109,7 @@ executable for each OS:
 
 ## Generate a one-line diagram
 
-Diagrams are **generated, not hand-placed**, for cases larger than a small teaching example. The generator (`wspace/script/gen_oneline_diagram.py`) lays out buses and branches from ACLF CSVs in the style of `wspace/template/oneline-diagram.drawio`, then writes:
+Diagrams are **generated, not hand-placed**, for cases larger than a small teaching example. The generator (`src/main/py/diagram/gen_oneline_diagram.py`) lays out buses and branches from ACLF CSVs in the style of `wspace/template/oneline-diagram.drawio`, then writes:
 
 - `<case>/diagram/<stem>-oneline.drawio` — what the Diagram tab opens
 - `<stem>-oneline-preview.png` — optional Pillow preview (approximate)
@@ -143,7 +143,7 @@ Use the harness Python that has **numpy** and **Pillow** (a bare system `python3
 ```bash
 PY="${DSH_PYTHON:-$HOME/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3}"
 
-"$PY" wspace/script/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
+"$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
     --title "IEEE 118-Bus One-Line Diagram"
 ```
 
@@ -246,4 +246,4 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
 - Skills: `$ipss-case-diagram` (generate), `$ipss-case-aclf` (result CSVs), `$ipss-case-optadj`, `$ipss-case-load`
 - Template: `wspace/template/oneline-diagram.drawio`
-- Generator: `wspace/script/gen_oneline_diagram.py`
+- Generator: `src/main/py/diagram/gen_oneline_diagram.py`

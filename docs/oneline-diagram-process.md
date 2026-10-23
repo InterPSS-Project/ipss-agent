@@ -12,7 +12,7 @@ under the case's `diagram/` folder, where the **Diagram** tab previews it.
 |---------|------|-----------------|
 | Style reference | `wspace/template/oneline-diagram.drawio` | hand-laid IEEE 14-bus diagram, the visual contract for everything else |
 | Hand-laid cases | `wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio`, `wspace/data/ieee/Ieee14Bus_LargeLoadQ/diagram/ieee14-oneline*.drawio` | authored/edited in draw.io over the draw.io MCP, then repaired and saved page by page |
-| Generated cases | `wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio` | `wspace/script/gen_oneline_diagram.py` |
+| Generated cases | `wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio` | `src/main/py/diagram/gen_oneline_diagram.py` |
 
 Hand layout does not scale — the IEEE 118-bus case is 118 buses / 186 branches — so anything past a
 small teaching case takes the generated path below. Both paths produce the same shapes, sizes,
@@ -35,7 +35,7 @@ The two CSVs are written by an AC load flow, so run `$ipss-case-aclf` on the cas
 3. **Preview** in draw.io; export a PNG for review when geometry matters.
 4. **Iterate** on layout, labels and overlaps from review feedback.
 5. **Author/repair** with the official draw.io MCP (`@drawio/mcp` 1.6.1 — `open_drawio_xml` plus `list_pages` / `get_page` /
-   `set_page`, and `wspace/script/drawio_mcp.py` drives the same server from a shell); the community `next-ai-draw-io` connector was dropped early on.
+   `set_page`, and `src/main/py/diagram/drawio_mcp.py` drives the same server from a shell); the community `next-ai-draw-io` connector was dropped early on.
 6. **Deliver** the `.drawio` into the case's `diagram/` folder.
 
 This path is cell-by-cell XML editing with the draw.io MCP as the editor. It is how the template's
@@ -49,7 +49,7 @@ than reinventing.
 # `load_workspace_dependencies` reports, e.g.
 #   ~/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3);
 # a bare `python3` on this Mac has numpy but no Pillow, so pass --no-png there.
-"$PY" wspace/script/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
+"$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
     --title "IEEE 118-Bus One-Line Diagram"
 ```
 
@@ -137,7 +137,7 @@ when the row is healthy — and `Tool.listTools` should list the seven `mcp__dra
 | `open_drawio_csv` / `open_drawio_mermaid` | draw.io's importers, which auto-lay generic diagrams |
 | `search_shapes` | draw.io shape-library search (it does include `mxgraph.electrical.*`) |
 
-`wspace/script/drawio_mcp.py` speaks the same stdio protocol, so the round-trip also works from a host
+`src/main/py/diagram/drawio_mcp.py` speaks the same stdio protocol, so the round-trip also works from a host
 without the MCP tools (Codex, Claude Code, a plain shell): `list`, `get [--out PATH]`,
 `set --page N --content FILE|-`, `open`, `shapes`. Measured on a generated 14-bus diagram:
 `get_page` leaves the file byte-identical, a `set_page` of the same page returns identical page XML,

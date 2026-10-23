@@ -11,7 +11,7 @@ Draw the **one-line diagram** for a simulation case — vertical bus bars, undir
 two-ring transformer symbols and `Bus-N` labels — and write it into the case's own `diagram/` folder,
 where the **Diagram** tab previews it.
 
-The diagram is **generated, never hand-placed**. `wspace/script/gen_oneline_diagram.py` lays the
+The diagram is **generated, never hand-placed**. `src/main/py/diagram/gen_oneline_diagram.py` lays the
 network out from the case's result tables, routes every branch and writes both the `.drawio` and a
 raster preview. The hand-laid `wspace/template/oneline-diagram.drawio` (IEEE 14-bus) is the style
 contract that generator follows. Hand placement does not scale: the IEEE 118-bus case is 118 buses
@@ -35,7 +35,7 @@ Both CSVs are ACLF output, so a case with no `result/*_DF_bus.csv` must be solve
 # is available (its python/bin/python3); a bare system python3 has numpy but no Pillow.
 PY="${DSH_PYTHON:-$HOME/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3}"
 
-"$PY" wspace/script/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
+"$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
     --title "IEEE 118-Bus One-Line Diagram"
 ```
 
@@ -140,7 +140,7 @@ draw.io MCP server (`@drawio/mcp` 1.6.1, pinned at `$DSH_HOME/mcp-servers/drawio
 | Route | When |
 |---|---|
 | `mcp__drawio__*` tools | Preferred. DSH mounts the server from the profile's `mcp-drawio` row (`@deepseek-ai/dsh-mcp-client`, stdio), which must be written with `insert:` — a bare `- id:` patch targets an existing row and a target that matches no row is **skipped silently**, restart after restart. Profile rows are composed when the app starts, so a session that began before the row was added has none of them |
-| `python3 wspace/script/drawio_mcp.py …` | A host without the MCP tools (Codex, Claude Code, a plain shell). Same server, same tools: `list`, `get`, `set`, `open`, `shapes` |
+| `python3 src/main/py/diagram/drawio_mcp.py …` | A host without the MCP tools (Codex, Claude Code, a plain shell). Same server, same tools: `list`, `get`, `set`, `open`, `shapes` |
 | `gen_oneline_diagram.py <case> --open` | Generate, self-check and open the editor in one step |
 
 The **desktop app** is a separate route, no MCP involved: `open -a draw.io <file>` to look at it, or

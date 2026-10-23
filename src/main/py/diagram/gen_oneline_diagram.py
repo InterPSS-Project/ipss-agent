@@ -42,7 +42,7 @@ half of the job to the machinery that is good at it:
      (which cannot scale to 3000 long branches) is not needed.
 
 `--open` hands the finished diagram to the draw.io editor through the draw.io MCP server
-(`wspace/script/drawio_mcp.py`), which also round-trips hand edits back into the file.
+(`src/main/py/diagram/drawio_mcp.py`), which also round-trips hand edits back into the file.
 
 Deliverable, plus a raster preview built from the same geometry:
 
@@ -1243,7 +1243,7 @@ def main():
                     help="draw.io desktop executable used by --app-export")
     ap.add_argument("--open", action="store_true",
                     help="after a passing self-check, open the diagram in the draw.io editor "
-                         "through the draw.io MCP server (wspace/script/drawio_mcp.py)")
+                         "through the draw.io MCP server (src/main/py/diagram/drawio_mcp.py)")
     args = ap.parse_args()
 
     stem, buses, branches, anchor = read_case(args.case_dir)
