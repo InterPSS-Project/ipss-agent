@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.11**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+GUI (**0.7.13**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.11**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.13**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -71,7 +71,10 @@ parameters and results, no build-time Typert compiler required.
   thresholds and colours in `config/net_diagram.json` (0.6.26) and
   bus/branch tooltips (a branch quotes its base-case and contingency loadings, and — since 0.7.7 —
   the post-redispatch `Basecase OptAdj Loading(%)` / `Contingency OptAdj Loading(%)` from the case's
-  two OptAdj branch tables, each line only when its table exists and lists that branch), and
+  two OptAdj branch tables, each line only when its table exists and lists that branch), a
+  **click selection** with a blue outline and a pinned tooltip (0.7.13; a hovered element gets a
+  lighter outline, a bus marks its bar and `Bus-N` label, a branch marks its stubs, transformer
+  rings and parallel circuits, and empty-paper/Esc clears it — the `.drawio` stays untouched), and
   (0.6.12; at the right end of the top row since 0.6.15) a
   draw.io button that opens the file in the **local draw.io
   desktop app** to edit it. A bus whose solved `|V|` is outside **0.9–1.1 pu** is painted **red**

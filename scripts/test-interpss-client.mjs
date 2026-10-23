@@ -132,6 +132,8 @@ function build(overrides) {
       + ' drawioVoltOutsideBand: drawioVoltOutsideBand, drawioVoltColumns: drawioVoltColumns,'
       + ' DRAWIO_MAX_CELLS: DRAWIO_MAX_CELLS,'
       + ' DRAWIO_MATCH_FILL: DRAWIO_MATCH_FILL, DRAWIO_BIRDSEYE_FRAME: DRAWIO_BIRDSEYE_FRAME,'
+      + ' drawioSelectionMarks: drawioSelectionMarks, DRAWIO_SELECT_STROKE: DRAWIO_SELECT_STROKE,'
+      + ' DRAWIO_SELECT_PAD: DRAWIO_SELECT_PAD,'
       + ' drawioHitBounds: drawioHitBounds, drawioCentreRect: drawioCentreRect,'
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText,'
       + ' CASE_FORMATS: CASE_FORMATS, caseFormatOfPath: caseFormatOfPath, caseFormatEntry: caseFormatEntry,'
@@ -2933,6 +2935,187 @@ check('the OptAdj runner, bridge entry point and config path exist',
     .indexOf('public synchronized String runOptAdjWithConfig(') >= 0
   && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'util', 'ProjectPaths.java'))
     .indexOf('caseOptAdjRunConfig(') >= 0);
+
+// --- 23. click selection and its highlight (0.7.13) -------------------------
+// Selecting a bus or branch is a paint-time mark exactly like the flags and the search: it
+// names cells that are ALREADY drawn and outlines them, so the .drawio, the parsed scene and the
+// desktop app never learn about it. These checks pin the two halves that can regress silently —
+// which cells a selection resolves to, and that the renderer adds only an outline (never a
+// replacement fill) when asked.
+console.log('\n23. diagram selection highlight (0.7.13)');
+if (scene) {
+  const selPairs = api.drawioBranchPairs(scene);
+  const label5 = scene.nodes.find((n) => n.kind === 'text' && n.lines.join('') === 'Bus-5');
+  const bar5 = scene.nodes.find((n) => n.id === 'bus5');
+  const busMarks = api.drawioSelectionMarks(scene, selPairs, { kind: 'bus', id: 'bus5' });
+  check('a bus selection marks its bar and its Bus-N label',
+    bar5 !== undefined && label5 !== undefined
+      && busMarks.nodes.indexOf('bus5') >= 0 && busMarks.nodes.indexOf(label5.id) >= 0
+      && busMarks.edges.length === 0,
+    JSON.stringify(busMarks.nodes));
+  const labelTarget = label5 === undefined ? null : api.drawioHoverTarget(label5, selPairs);
+  check('clicking the label selects the same bus cell the mark uses',
+    labelTarget !== null && labelTarget.kind === 'bus' && labelTarget.id === 'bus5',
+    JSON.stringify(labelTarget));
+
+  const xfMarks = api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus4|bus7' });
+  check('a transformer branch marks both stubs and both rings',
+    ['e8a', 'e8b'].every((id) => xfMarks.edges.indexOf(id) >= 0)
+      && ['xf8', 'xf8b'].every((id) => xfMarks.nodes.indexOf(id) >= 0),
+    JSON.stringify(xfMarks));
+  check('an unknown bus, an unknown pair or no target marks nothing',
+    api.drawioSelectionMarks(scene, selPairs, { kind: 'bus', id: 'bus999' }).nodes.length === 0
+      && api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus1|bus999' }).edges.length === 0
+      && api.drawioSelectionMarks(scene, selPairs, null).nodes.length === 0
+      && api.drawioSelectionMarks(null, selPairs, { kind: 'bus', id: 'bus5' }).nodes.length === 0);
+
+  const snapshot = () => JSON.stringify({
+    nodes: scene.nodes.map((n) => [n.id, n.x, n.y, n.w, n.h, n.fill, n.stroke]),
+    edges: scene.edges.map((e) => [e.id, e.source, e.target]),
+    pairs: selPairs,
+  });
+  const beforeMark = snapshot();
+  api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus4|bus7' });
+  check('the mark helper only reads the scene and the pairs', beforeMark === snapshot());
+
+  // The renderer: with no target it must emit exactly the tree it always did.
+  const plainSvg = api.DrawioDiagram({ scene: scene });
+  const plainGroups = groupsOf(plainSvg);
+  check('with no selection or hover there is no mark group',
+    plainGroups.every((g) => String(g.props.key) !== 'sel' && String(g.props.key) !== 'hov')
+      && plainGroups.length === scene.nodes.length + scene.edges.length,
+    plainGroups.length + ' groups');
+
+  const selSvg = api.DrawioDiagram({ scene: scene, selected: { kind: 'bus', id: 'bus5' } });
+  const selGroups = groupsOf(selSvg);
+  const selGroup = selGroups.filter((g) => String(g.props.key) === 'sel')[0];
+  check('a selected bus adds one mark group over the drawing',
+    selGroup !== undefined && selGroups[selGroups.length - 1] === selGroup
+      && selGroup.props.pointerEvents === 'none');
+  const selOutlines = selGroup === undefined ? [] : partsOf(selGroup)
+    .filter((p) => p.type === 'rect' && String(p.props.key).indexOf('mn') === 0);
+  check('the selection outlines the bar and its label in the selection blue',
+    selOutlines.length === 2 && selOutlines.every((p) => p.props.stroke === api.DRAWIO_SELECT_STROKE
+      && p.props.strokeDasharray === '5 3'),
+    selOutlines.length + ' outlines');
+  check('the selection blue is the birdseye frame colour, not the search green',
+    api.DRAWIO_SELECT_STROKE === api.DRAWIO_BIRDSEYE_FRAME && api.DRAWIO_SELECT_STROKE !== api.DRAWIO_MATCH_FILL,
+    api.DRAWIO_SELECT_STROKE);
+
+  // A flagged bus keeps its flag colour underneath the outline.
+  const bus5Index = scene.nodes.findIndex((n) => n.id === 'bus5');
+  const flagSvg = api.DrawioDiagram({ scene: scene, paint: { bus5: '#C0392B' }, selected: { kind: 'bus', id: 'bus5' } });
+  const flagBar = (groupsOf(flagSvg).filter((g) => String(g.props.key) === 'n' + bus5Index)[0] || { kids: [] });
+  const flagShape = partsOf(flagBar).filter((p) => p.props.key === 's')[0];
+  check('the outline leaves a flagged bus its own fill and stroke',
+    flagShape !== undefined && flagShape.props.fill === '#C0392B' && flagShape.props.stroke === '#C0392B',
+    flagShape && flagShape.props.fill);
+
+  const xfSvg = api.DrawioDiagram({ scene: scene, pairs: selPairs, selected: { kind: 'branch', key: 'bus4|bus7' } });
+  const xfGroup = groupsOf(xfSvg).filter((g) => String(g.props.key) === 'sel')[0];
+  const xfParts = xfGroup === undefined ? [] : partsOf(xfGroup);
+  const halos = xfParts.filter((p) => p.type === 'polyline' && String(p.props.key).indexOf('mh') === 0);
+  const cores = xfParts.filter((p) => p.type === 'polyline' && String(p.props.key).indexOf('md') === 0);
+  const ringOutlines = xfParts.filter((p) => p.type === 'ellipse');
+  check('a selected transformer branch draws a halo and a dashed core on both stubs',
+    halos.length === 2 && cores.length === 2
+      && cores.every((p) => p.props.strokeDasharray === '6 3'),
+    halos.length + ' halos / ' + cores.length + ' cores');
+  check('and outlines both transformer rings', ringOutlines.length === 2, ringOutlines.length + ' rings');
+
+  const hovSvg = api.DrawioDiagram({ scene: scene, hovered: { kind: 'bus', id: 'bus5' } });
+  const hovGroup = groupsOf(hovSvg).filter((g) => String(g.props.key) === 'hov')[0];
+  const hovParts = hovGroup === undefined ? [] : partsOf(hovGroup);
+  check('a hovered element gets the lighter mark and no dashed core',
+    hovGroup !== undefined && hovParts.length === 2
+      && hovParts.every((p) => String(p.props.key).indexOf('md') !== 0)
+      && hovParts.every((p) => p.props.strokeDasharray !== '5 3'));
+
+  const sameSvg = api.DrawioDiagram({
+    scene: scene,
+    selected: { kind: 'bus', id: 'bus5' },
+    hovered: { kind: 'bus', id: 'bus5' },
+  });
+  check('an identical hover is not painted twice',
+    groupsOf(sameSvg).filter((g) => String(g.props.key) === 'sel' || String(g.props.key) === 'hov').length === 1);
+
+  const hiddenSelSvg = api.DrawioDiagram({
+    scene: scene,
+    hidden: { bus5: true, [label5.id]: true },
+    selected: { kind: 'bus', id: 'bus5' },
+  });
+  check('a filtered-out selection leaves no outline behind',
+    groupsOf(hiddenSelSvg).every((g) => String(g.props.key) !== 'sel'));
+
+  // The click wiring: the hit areas report the same targets the marks resolve, and pass the
+  // event through so the canvas's clear-on-click can be stopped.
+  const picked = [];
+  const forwarded = [];
+  const clickHover = {
+    pairs: selPairs,
+    onBus: () => {}, onBranch: () => {}, onMove: () => {}, onLeave: () => {},
+    onPick: (target, event) => { picked.push(target); forwarded.push(event) },
+  };
+  const clickSvg = api.DrawioDiagram({ scene: scene, hover: clickHover });
+  const clickParts = {};
+  for (const g of groupsOf(clickSvg)) clickParts[String(g.props.key)] = partsOf(g);
+  const busHit = (clickParts['n' + bus5Index] || []).filter((p) => p.props.key === 'h')[0];
+  const busEvent = { clientX: 1, clientY: 2 };
+  busHit.props.onClick(busEvent);
+  const e8aIndex = scene.edges.findIndex((e) => e.id === 'e8a');
+  const edgeHit = (clickParts['e' + e8aIndex] || []).filter((p) => p.props.key === 'h')[0];
+  const edgeEvent = { clientX: 3, clientY: 4 };
+  edgeHit.props.onClick(edgeEvent);
+  check('a click reports the bus cell and the resolved branch pair',
+    picked.length === 2 && picked[0].kind === 'bus' && picked[0].id === 'bus5'
+      && picked[1].kind === 'branch' && picked[1].key === 'bus4|bus7',
+    JSON.stringify(picked));
+  check('the hit areas pass their event through to the picker',
+    forwarded[0] === busEvent && forwarded[1] === edgeEvent);
+  check('the picker stops the event so the canvas cannot clear what it just selected',
+    /function pickTarget\(target, event\)[\s\S]{0,200}?event\.stopPropagation\(\)/.test(body));
+
+  // The view wires the renderer, guards the drag and clears the selection in all three ways.
+  check('the renderer receives the selection, the hover mark and the click handler',
+    body.indexOf('selected: selection') >= 0 && body.indexOf('hovered: hoverMark') >= 0
+      && body.indexOf('onPick: pickTarget') >= 0);
+  check('the canvas clears on a click and on Escape',
+    body.indexOf('onClick: canvasClick') >= 0 && body.indexOf('onKeyDown: canvasKeyDown') >= 0
+      && /function canvasClick\(\)[\s\S]{0,120}?clearSelection\(\)/.test(body)
+      && /function canvasKeyDown\(e\)[\s\S]{0,80}?Escape[\s\S]{0,40}?clearSelection\(\)/.test(body));
+  check('a drag is never a selection',
+    /pickRef\.current = \{ moved: false/.test(body)
+      && /Math\.abs\(e\.clientX - pick\.x\) > 4/.test(body)
+      && /if \(pickRef\.current\.moved\) return/.test(body));
+  check('the pinned tip is addressed by its selection key so a late answer cannot retarget it',
+    /setPinnedTip\(\(t\) => \(t === null \|\| t\.key !== key \? t : \{ key: key, text: text/.test(body));
+  check('a click on the birdseye does not reach the canvas clear',
+    /onPointerLeave: \(e\) => \{ e\.stopPropagation\(\); if \(grab\) setGrab\(false\) \},[\s\S]{0,200}?onClick: \(e\) => e\.stopPropagation\(\)/.test(body));
+
+  // The pinned tooltip outlives the hover tip; the hover tip wins while the cursor is on an
+  // element. Both are plain render states, so this is a render check like the rest of §12.
+  const openState = [
+    ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+    ['files', tabFiles(2)],
+    ['filesLoading', false],
+    ['path', 'wspace/data/c/diagram/d0.drawio'],
+    ['scene', scene],
+    ['loading', false],
+    ['error', null],
+  ];
+  const pinnedFlat = renderFlat(withState(openState.concat([
+    ['tip', null],
+    ['pinnedTip', { key: 'bus5', text: 'Bus Name: Bus5\nPinned selection', x: 10, y: 20 }],
+  ])));
+  check('a pinned selection tooltip renders after the hover tip is gone',
+    pinnedFlat.indexOf('THREW') < 0 && pinnedFlat.indexOf('Pinned selection') >= 0, pinnedFlat.slice(0, 120));
+  const bothFlat = renderFlat(withState(openState.concat([
+    ['tip', { text: 'HOVER TIP', x: 10, y: 20 }],
+    ['pinnedTip', { key: 'bus5', text: 'PINNED TIP', x: 10, y: 20 }],
+  ])));
+  check('the hover tip outranks the pinned one while the cursor is on an element',
+    bothFlat.indexOf('HOVER TIP') >= 0 && bothFlat.indexOf('PINNED TIP') < 0);
+}
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

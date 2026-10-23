@@ -1228,6 +1228,16 @@ module.exports = {
     // search highlight turned green — the frame answers "where am I looking", not "what did I find".
     const DRAWIO_BIRDSEYE_FRAME = '#1F6FEB'
 
+    // What a SELECTED (or hovered) bus/branch is marked with. Selection keeps the frame's blue --
+    // the same colour the draw.io app itself uses for its own selection, and deliberately neither
+    // the green search nor a config flag colour, because "this is what I picked" is a third thing.
+    // The mark is an OUTLINE painted over the cell, never a replacement for its fill: a red bus or
+    // a green search hit must stay readable underneath it.
+    const DRAWIO_SELECT_STROKE = DRAWIO_BIRDSEYE_FRAME
+    const DRAWIO_SELECT_PAD = 3
+    const DRAWIO_SELECT_FILL_OPACITY = 0.12
+    const DRAWIO_HOVER_FILL_OPACITY = 0.07
+
     const drawioIsBusCell = (id) => /^bus\d+$/i.test(String(id === null || id === undefined ? '' : id))
 
     // Which cells are a transformer's two rings, and which group holds them. The generated file
@@ -1772,6 +1782,9 @@ module.exports = {
         onPointerUp: (e) => { e.stopPropagation(); setGrab(false) },
         onPointerCancel: (e) => { e.stopPropagation(); setGrab(false) },
         onPointerLeave: (e) => { e.stopPropagation(); if (grab) setGrab(false) },
+        // A click on the thumbnail moves the view; it must not reach the canvas's
+        // clear-the-selection click (0.7.13).
+        onClick: (e) => e.stopPropagation(),
       },
         React.createElement('path', { key: 'e', d: props.paths.edges, fill: 'none', stroke: DRAWIO_INK, strokeWidth: 1, vectorEffect: 'non-scaling-stroke', opacity: 0.45 }),
         React.createElement('path', { key: 'b', d: props.paths.bars, fill: DRAWIO_INK, opacity: 0.7 }),
@@ -2184,6 +2197,42 @@ module.exports = {
       return String(nodeId).replace(/^bus/i, 'Bus')
     }
 
+    // Which cells a click on a bus or a branch should mark. `target` is exactly what the hit
+    // areas already report -- `{ kind: 'bus', id }` with a CELL id (`bus112`), from the bar or
+    // from its `Bus-N` label, or `{ kind: 'branch', key }` with the resolved pair key.
+    //
+    // A bus selection marks the bar AND its label, because either one is what the user clicked
+    // and the label is a separate draw.io cell. A branch selection marks every cell of the pair:
+    // both stub edges of a transformer and the two rings of its symbol, plus every parallel
+    // circuit between the same two buses (the tooltip already lists all of them).
+    //
+    // Pure and defensive: no scene, no target or an unknown target yields empty lists, and the
+    // scene/pairs objects are only read. The renderer calls this per repaint; the guard pins the
+    // bus/label and transformer behaviours down directly.
+    function drawioSelectionMarks(scene, pairs, target) {
+      const out = { nodes: [], edges: [] }
+      if (scene === null || scene === undefined || target === null || target === undefined) return out
+      if (target.kind === 'bus') {
+        const cell = String(target.id === undefined || target.id === null ? '' : target.id).toLowerCase()
+        if (cell === '') return out
+        for (const n of scene.nodes) {
+          if (String(n.id).toLowerCase() === cell || drawioLabelBusId(n.lines) === cell) out.nodes.push(n.id)
+        }
+        return out
+      }
+      if (target.kind === 'branch') {
+        const key = String(target.key === undefined || target.key === null ? '' : target.key)
+        if (key === '' || pairs === null || pairs === undefined) return out
+        for (const e of scene.edges) {
+          if (pairs.edgePair[e.id] === key) out.edges.push(e.id)
+        }
+        for (const n of scene.nodes) {
+          if (pairs.nodePair[n.id] === key) out.nodes.push(n.id)
+        }
+      }
+      return out
+    }
+
     // A bus-pair key back to something a person reads: bus4|bus7 -> Bus 4 to Bus 7.
     function drawioPairLabel(key) {
       const parts = String(key).split('|')
@@ -2209,12 +2258,21 @@ module.exports = {
       // Tooltips are opt-in: with no hover prop the renderer emits exactly what it always
       // did — no hit areas and no handlers — so a diagram still renders on its own.
       const hover = props.hover || null
+      // The resolved branch pairs. Normally they ride the hover object (they are what the hit
+      // areas need), but a selection mark needs them too, so a caller that only wants the mark
+      // can pass `pairs` on its own.
+      const pairs = props.pairs || (hover !== null && hover.pairs !== undefined ? hover.pairs : null)
       // `paint` (0.6.26) maps a cell id to the colour it should take -- the bus's flag colour from
       // config/net_diagram.json, a branch's flow-flag colour, or the search blue -- and `hidden`
       // (0.6.23) skips a whole cell. Both are paint-time only: with neither, every colour below is
       // exactly what it always was, and the .drawio on disk never learns any of it.
       const paint = props.paint || null
       const hidden = props.hidden || null
+      // The click selection and the transient hover mark (0.7.13). Both are targets in the shape
+      // `drawioHoverTarget` already produces; the renderer only outlines what they name, and with
+      // neither it emits exactly the tree it always did.
+      const selected = props.selected || null
+      const hovered = props.hovered || null
       // draw.io paints in the model's own document order, interleaving vertices and edges.
       // That order is load-bearing: this workspace's diagram declares `bg`, an opaque
       // 900x760 white rectangle, BEFORE its branches. Drawing every edge up front and every
@@ -2228,7 +2286,7 @@ module.exports = {
         const points = e.points.map((p) => p.x + ',' + p.y).join(' ')
         const parts = []
         // The invisible wide-stroke twin that makes a 1.5px branch hoverable.
-        if (hover !== null && hover.pairs !== undefined && hover.pairs.edgePair[e.id] !== undefined) {
+        if (hover !== null && pairs !== null && pairs.edgePair[e.id] !== undefined) {
           parts.push(React.createElement('polyline', {
             key: 'h',
             points: points,
@@ -2236,9 +2294,14 @@ module.exports = {
             stroke: 'transparent',
             strokeWidth: DRAWIO_HIT_STROKE,
             pointerEvents: 'stroke',
-            onMouseEnter: (ev) => hover.onBranch(hover.pairs.edgePair[e.id], ev),
+            onMouseEnter: (ev) => hover.onBranch(pairs.edgePair[e.id], ev),
             onMouseMove: hover.onMove,
             onMouseLeave: hover.onLeave,
+            // The click selects the pair. `onPick` owns the drag guard, so a pan that began on
+            // this line never turns into a selection.
+            onClick: (ev) => {
+              if (hover.onPick !== undefined) hover.onPick({ kind: 'branch', key: pairs.edgePair[e.id] }, ev)
+            },
           }))
         }
         parts.push(React.createElement('polyline', {
@@ -2304,9 +2367,10 @@ module.exports = {
         const labelNode = marked && !isBar ? Object.assign({}, n, { fontColor: colour }) : n
         const label = drawioLabel(labelNode, 't')
         if (label !== null) parts.push(label)
-        // A transparent padded rect, so a 6px bar or a 16px transformer ring is comfortable
-        // to hover. Added after the drawn geometry so it wins the hit test inside this group.
-        const target = hover === null ? null : drawioHoverTarget(n, hover.pairs === undefined ? null : hover.pairs)
+        // A transparent padded rect, so a 6px bus bar or a 16px transformer ring is comfortable
+        // to hover and to click. Added after the drawn geometry so it wins the hit test inside
+        // this group.
+        const target = hover === null ? null : drawioHoverTarget(n, pairs)
         if (target !== null) {
           parts.push(React.createElement('rect', {
             key: 'h',
@@ -2316,6 +2380,9 @@ module.exports = {
             onMouseEnter: (ev) => (target.kind === 'bus' ? hover.onBus(target.id, ev) : hover.onBranch(target.key, ev)),
             onMouseMove: hover.onMove,
             onMouseLeave: hover.onLeave,
+            onClick: (ev) => {
+              if (hover.onPick !== undefined) hover.onPick(target, ev)
+            },
           }))
         }
         painted.push({ order: n.order === undefined ? i : n.order, el: React.createElement('g', { key: 'n' + i }, parts) })
@@ -2323,6 +2390,81 @@ module.exports = {
       // A stable sort, so a model with no order recorded keeps edges before vertices.
       painted.sort((a, b) => a.order - b.order)
       const children = painted.map((p) => p.el)
+      // The selection/hover mark (0.7.13): outlines painted LAST, over the finished drawing, so a
+      // mark reads on top of a red flag fill or a green search hit without replacing either. The
+      // scene is only read; the .drawio on disk never learns any of it. With no target this whole
+      // block is skipped and the tree is exactly what it was.
+      const sameTarget = hovered !== null && selected !== null && (
+        hovered.kind === selected.kind && (hovered.kind === 'bus'
+          ? String(hovered.id).toLowerCase() === String(selected.id).toLowerCase()
+          : hovered.key === selected.key))
+      const markSets = []
+      if (hovered !== null && !sameTarget) markSets.push({ target: hovered, selected: false })
+      if (selected !== null) markSets.push({ target: selected, selected: true })
+      if (markSets.length > 0) {
+        const edgeById = {}
+        const nodeById = {}
+        for (const e of scene.edges) edgeById[e.id] = e
+        for (const n of scene.nodes) nodeById[n.id] = n
+        for (const set of markSets) {
+          const marks = drawioSelectionMarks(scene, pairs, set.target)
+          const parts = []
+          const pad = DRAWIO_SELECT_PAD
+          const fillOpacity = set.selected ? DRAWIO_SELECT_FILL_OPACITY : DRAWIO_HOVER_FILL_OPACITY
+          for (const id of marks.edges) {
+            // A filtered-out cell is not painted, so it must not be outlined either.
+            if (hidden !== null && hidden[id] === true) continue
+            const e = edgeById[id]
+            if (e === undefined) continue
+            const points = e.points.map((p) => p.x + ',' + p.y).join(' ')
+            parts.push(React.createElement('polyline', {
+              key: 'mh' + id, points: points, fill: 'none', stroke: DRAWIO_SELECT_STROKE,
+              strokeWidth: e.strokeWidth + (set.selected ? 5 : 3),
+              strokeOpacity: set.selected ? 0.3 : 0.18,
+              strokeLinecap: 'round', strokeLinejoin: 'round',
+            }))
+            // The dashed core is what keeps a selected branch readable at `Fit`, where a 1.5px
+            // line is a hair. A hovered branch gets the halo only.
+            if (set.selected) {
+              parts.push(React.createElement('polyline', {
+                key: 'md' + id, points: points, fill: 'none', stroke: DRAWIO_SELECT_STROKE,
+                strokeWidth: 2, strokeDasharray: '6 3', strokeLinecap: 'round', strokeLinejoin: 'round',
+              }))
+            }
+          }
+          for (const id of marks.nodes) {
+            if (hidden !== null && hidden[id] === true) continue
+            const n = nodeById[id]
+            if (n === undefined) continue
+            const base = {
+              key: 'mn' + id,
+              fill: n.kind === 'text' ? 'none' : DRAWIO_SELECT_STROKE,
+              fillOpacity: n.kind === 'text' ? undefined : fillOpacity,
+              stroke: DRAWIO_SELECT_STROKE,
+              strokeWidth: set.selected ? 2 : 1.5,
+              strokeDasharray: set.selected ? '5 3' : (n.kind === 'text' ? '3 3' : undefined),
+            }
+            if (n.kind === 'ellipse') {
+              parts.push(React.createElement('ellipse', Object.assign({}, base, {
+                cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2 + pad, ry: n.h / 2 + pad,
+              })))
+            } else {
+              // A rect bus bar, a paper label box, or a `text` cell — which draws no box of its
+              // own, so the outline is drawn around the box its glyphs occupy.
+              parts.push(React.createElement('rect', Object.assign({}, base, {
+                x: n.x - pad, y: n.y - pad, width: n.w + pad * 2, height: n.h + pad * 2,
+                rx: n.kind === 'rect' && n.rounded
+                  ? Math.min(n.w, n.h) * (Number.isFinite(n.arcSize) ? n.arcSize : 0.15) : 0,
+              })))
+            }
+          }
+          if (parts.length > 0) {
+            children.push(React.createElement('g', {
+              key: set.selected ? 'sel' : 'hov', pointerEvents: 'none',
+            }, parts))
+          }
+        }
+      }
       return React.createElement('svg', {
         viewBox: vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h,
         preserveAspectRatio: 'xMidYMid meet',
@@ -3813,6 +3955,13 @@ module.exports = {
       const [rect, setRect] = React.useState(null)
       const [dragging, setDragging] = React.useState(false)
       const [tip, setTip] = React.useState(null)
+      // Click selection (0.7.13). `selection` is the bus cell or branch pair the drawing marks,
+      // `pinnedTip` is its tooltip held at the click point after the hover tip goes away, and
+      // `hoverMark` is the light outline on whatever is under the cursor. All three are
+      // paint-time only, like the flags and the search: the .drawio never learns any of it.
+      const [selection, setSelection] = React.useState(null)
+      const [pinnedTip, setPinnedTip] = React.useState(null)
+      const [hoverMark, setHoverMark] = React.useState(null)
       // The "edit in the local draw.io app" button: in flight while the Host launches, and the
       // one-line outcome under the toolbar. Neither belongs to a case, so they are cleared when
       // a different diagram is opened.
@@ -3854,6 +4003,10 @@ module.exports = {
       const [optAdjN1Loads, setOptAdjN1Loads] = React.useState(null)
       const canvasRef = React.useRef(null)
       const dragRef = React.useRef(null)
+      // The gesture that is currently on the canvas. A press that travels more than a few pixels
+      // is a pan, not a click, so the hit areas' onClick cannot select the element the drag
+      // started on: `pickRef` records where the press began and whether it moved.
+      const pickRef = React.useRef({ moved: false, x: 0, y: 0 })
       // Tooltip data keyed to the SELECTED case: the branch
       // table indexed by bus pair, the canonical BusN spelling the Host matches on, the bus
       // records `busConnections` hands back (filled lazily, one call per bus hovered), the
@@ -3897,6 +4050,9 @@ module.exports = {
         setBranchLoads(null)
         setConLoads(null)
         setTip(null)
+        setSelection(null)
+        setPinnedTip(null)
+        setHoverMark(null)
         setPath('')
         setXml('')
         setScene(null)
@@ -4168,7 +4324,7 @@ module.exports = {
         )
       }
 
-      // --- Tooltips -----------------------------------------------------------
+      // --- Tooltips and selection (0.7.13) ------------------------------------
       function branchPath() {
         return branchFile === null || resultDir === null ? null : resultDir + '/' + branchFile
       }
@@ -4179,8 +4335,15 @@ module.exports = {
       function moveTip(e) {
         setTip((t) => (t ? { text: t.text, x: e.clientX, y: e.clientY } : t))
       }
+      // Leaving the hit area ends the HOVER tip and its outline. The pinned tooltip of a
+      // selection is a different piece of state and comes back as soon as the hover tip goes.
       function hideTip() {
         setTip(null)
+        setHoverMark(null)
+      }
+      function clearSelection() {
+        setSelection(null)
+        setPinnedTip(null)
       }
 
       // Hand the open diagram to the local draw.io app. The browser cannot start a process, so
@@ -4218,48 +4381,103 @@ module.exports = {
         return text + '\n⚠ |V| outside ' + netConfig.Bus_flag_lower_limit + '\u2013' + netConfig.Bus_flag_upper_limit + ' pu'
       }
 
-      // A cache hit answers instantly; otherwise the bus says who it is, one call fills the
-      // cache for it AND its branch neighbours, and the tip is rewritten only if that same
-      // bus is still under the cursor.
-      function diagramBusTip(nodeId, event) {
+      // A cache hit answers immediately. Otherwise the bus identifies itself with the fallback
+      // text while one call fills the cache for it AND its branch neighbours; `then` is called
+      // again with the full record, and the third argument says which call it is so the caller
+      // can guard its own identity (what is under the cursor, or what is selected).
+      function loadBusText(nodeId, then) {
         const data = dataRef.current
         const busId = drawioCanonicalBusId(data.canonical, nodeId)
-        data.hovered = { kind: 'bus', id: busId }
         const known = data.busCache[busId]
         if (known !== undefined) {
-          showTip(diagramBusText(known), event)
+          then(busId, diagramBusText(known), true)
           return
         }
-        showTip(drawioFallbackTip(String(busId), data.branch !== null), event)
+        then(busId, drawioFallbackTip(String(busId), data.branch !== null), true)
         const target = branchPath()
         if (target === null) return
         callRemote('busConnections', { busId: busId, path: target, sessionId: sessionId }).then(
           (res) => {
             if (res === null || res === undefined || res.ok !== true) return
             for (const rec of (res.busRecords || [])) data.busCache[rec.id] = rec
-            const now = data.hovered
             const filled = data.busCache[busId]
-            if (filled === undefined || now === null || now.kind !== 'bus' || now.id !== busId) return
-            setTip((t) => (t === null ? t : { text: diagramBusText(filled), x: t.x, y: t.y }))
+            if (filled !== undefined) then(busId, diagramBusText(filled), false)
           },
           () => {},
         )
       }
 
-      // An edge, either half of a transformer chain, or the symbol itself. Parallel circuits
-      // between one bus pair all match and are rendered one block each.
-      function diagramBranchTip(key, event) {
+      // The hover tip: rewritten only while that same bus is still the one under the cursor.
+      function diagramBusTip(nodeId, event) {
         const data = dataRef.current
-        data.hovered = { kind: 'branch', key: key }
+        setHoverMark({ kind: 'bus', id: nodeId })
+        loadBusText(nodeId, (busId, text, immediate) => {
+          if (immediate) {
+            data.hovered = { kind: 'bus', id: busId }
+            showTip(text, event)
+            return
+          }
+          const now = data.hovered
+          if (now === null || now.kind !== 'bus' || now.id !== busId) return
+          setTip((t) => (t === null ? t : { text: text, x: t.x, y: t.y }))
+        })
+      }
+
+      // The branch tooltip: an edge, either half of a transformer chain, or the symbol itself.
+      // Parallel circuits between one bus pair all match and are rendered one block each.
+      function branchTipText(key) {
+        const data = dataRef.current
         const rows = data.branch === null || data.branch === undefined ? undefined : data.branch.get(key)
         const contingency = conLoads === null || conLoads === undefined ? null : conLoads[key]
         const optAdj = optAdjLoads === null || optAdjLoads === undefined ? null : optAdjLoads[key]
         const optAdjN1 = optAdjN1Loads === null || optAdjN1Loads === undefined ? null : optAdjN1Loads[key]
-        showTip(rows === undefined || rows.length === 0
+        return rows === undefined || rows.length === 0
           ? drawioFallbackTip(drawioPairLabel(key), data.branch !== null)
           : rows.map((r) => branchTooltip(r, {
             contingencyLoading: contingency, optAdjLoading: optAdj, optAdjN1Loading: optAdjN1,
-          })).join('\n\n'), event)
+          })).join('\n\n')
+      }
+
+      function diagramBranchTip(key, event) {
+        dataRef.current.hovered = { kind: 'branch', key: key }
+        setHoverMark({ kind: 'branch', key: key })
+        showTip(branchTipText(key), event)
+      }
+
+      // The click handlers. The pinned tip carries the selection's key, so a late bus answer can
+      // only rewrite the tip of the element that is still selected -- never one the user has
+      // already moved off. The click point is the anchor: the tip stays there while the hover tip
+      // follows the cursor, and comes back when the cursor leaves the drawing's elements.
+      function selectBus(nodeId, event) {
+        const key = String(nodeId)
+        const target = { kind: 'bus', id: nodeId }
+        setSelection(target)
+        setTip(null)
+        setHoverMark(target)
+        loadBusText(nodeId, (busId, text, immediate) => {
+          if (immediate) {
+            setPinnedTip({ key: key, text: text, x: event.clientX, y: event.clientY })
+            return
+          }
+          setPinnedTip((t) => (t === null || t.key !== key ? t : { key: key, text: text, x: t.x, y: t.y }))
+        })
+      }
+
+      function selectBranch(key, event) {
+        const target = { kind: 'branch', key: key }
+        setSelection(target)
+        setTip(null)
+        setHoverMark(target)
+        setPinnedTip({ key: key, text: branchTipText(key), x: event.clientX, y: event.clientY })
+      }
+
+      // A hit area's click. A press that travelled is a pan, never a selection; a real click
+      // selects the element and stops the event before the canvas's clear-on-click sees it.
+      function pickTarget(target, event) {
+        if (event !== null && event !== undefined && typeof event.stopPropagation === 'function') event.stopPropagation()
+        if (pickRef.current.moved) return
+        if (target.kind === 'bus') selectBus(target.id, event)
+        else if (target.kind === 'branch') selectBranch(target.key, event)
       }
 
       // --- Pan / zoom ---------------------------------------------------------
@@ -4338,14 +4556,19 @@ module.exports = {
         return () => el.removeEventListener('wheel', onWheel)
       }, [scene, rect])
 
-      // A tip must not outlive the diagram it describes.
+      // A tip must not outlive the diagram it describes, and neither may a selection: both are
+      // coordinates and cells of the file that is going away.
       React.useEffect(() => {
         setTip(null)
+        setSelection(null)
+        setPinnedTip(null)
+        setHoverMark(null)
         dataRef.current.hovered = null
         return undefined
       }, [path])
 
       function pointerDown(e) {
+        pickRef.current = { moved: false, x: e.clientX, y: e.clientY }
         const r = currentRect()
         if (r === null) return
         const m = metrics(r)
@@ -4356,6 +4579,10 @@ module.exports = {
       }
 
       function pointerMove(e) {
+        // A press that travels more than a few pixels is a pan: the click that ends it must not
+        // select whatever the drag happened to start on.
+        const pick = pickRef.current
+        if (pick !== null && (Math.abs(e.clientX - pick.x) > 4 || Math.abs(e.clientY - pick.y) > 4)) pick.moved = true
         const r = currentRect()
         const drag = dragRef.current
         if (r === null || drag === null) return
@@ -4368,6 +4595,16 @@ module.exports = {
       function pointerUp() {
         dragRef.current = null
         setDragging(false)
+      }
+
+      // A click on the paper (not on a hit area, which stops the event) clears the selection.
+      // Pressing Escape does the same, and both leave the diagram itself untouched.
+      function canvasClick() {
+        if (pickRef.current.moved) return
+        clearSelection()
+      }
+      function canvasKeyDown(e) {
+        if (e.key === 'Escape') clearSelection()
       }
 
       const fileCount = files === null ? 0 : files.length
@@ -4853,8 +5090,15 @@ module.exports = {
                         onPointerUp: pointerUp,
                         onPointerCancel: pointerUp,
                         onPointerLeave: pointerUp,
+                        // A click on the paper clears the selection; a hit area stops the event
+                        // before it gets here. `tabIndex` lets Escape reach this element, and the
+                        // title says so without adding a toolbar control.
+                        onClick: canvasClick,
+                        onKeyDown: canvasKeyDown,
+                        tabIndex: 0,
+                        title: 'Wheel zooms, drag pans, click a bus or branch to select it, Esc clears',
                         // `position: relative` so the birdseye can sit in the corner of the canvas.
-                        style: { position: 'relative', height: '70vh', minHeight: '320px', overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none' },
+                        style: { position: 'relative', height: '70vh', minHeight: '320px', overflow: 'hidden', background: DRAWIO_PAPER, borderRadius: '6px', cursor: dragging ? 'grabbing' : 'grab', touchAction: 'none', outline: 'none' },
                       }, React.createElement(DrawioDiagram, {
                         scene: scene,
                         view: rect,
@@ -4862,12 +5106,19 @@ module.exports = {
                         // reach the file.
                         paint: paintMap,
                         hidden: filterHits === null ? null : filterHits.ids,
+                        // The click selection (strong mark + pinned tip) and the element under
+                        // the cursor (light mark). Both are paint-time, and both need the
+                        // resolved pairs to turn a branch key into the cells to outline.
+                        selected: selection,
+                        hovered: hoverMark,
+                        pairs: dataRef.current.pairs,
                         hover: {
                           pairs: dataRef.current.pairs,
                           onBus: diagramBusTip,
                           onBranch: diagramBranchTip,
                           onMove: moveTip,
                           onLeave: hideTip,
+                          onPick: pickTarget,
                         },
                       }), netConfig.Show_birdseye_view !== false ? React.createElement(DrawioBirdseye, {
                         // The whole drawing, with the visible rectangle on it. Its pointer events
@@ -4879,15 +5130,18 @@ module.exports = {
                       }) : null)
                       : null
 
-      const tipEl = tip ? React.createElement('div', {
+      // The hover tip wins while the cursor is on an element; the pinned tip of the selection
+      // shows whenever the cursor is not, so a click's information is not lost on mouse-out.
+      const shownTip = tip || pinnedTip
+      const tipEl = shownTip ? React.createElement('div', {
         style: {
-          position: 'fixed', left: tip.x + 12, top: tip.y + 12,
+          position: 'fixed', left: shownTip.x + 12, top: shownTip.y + 12,
           background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '6px',
           padding: '8px 10px', fontSize: '11px', lineHeight: '1.5', whiteSpace: 'pre',
           color: 'var(--dsw-alias-label-primary)', zIndex: 10000, pointerEvents: 'none',
           boxShadow: '0 4px 16px rgba(0,0,0,0.4)', maxWidth: '320px',
         },
-      }, tip.text) : null
+      }, shownTip.text) : null
 
       // No title and no subtitle: the tab bar already names this view, and the first row
       // ("Simu Case <path>") says what is drawn. A heading here only pushed the diagram down.
