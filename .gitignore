@@ -15,7 +15,6 @@
 .DS_Store
 
 /wspace/**/result/
-/config/config.json
 
 /CLAUDE.md
 /GEMINI.md
