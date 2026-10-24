@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.7.13.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.15.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.13.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.15.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 389 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 407 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,

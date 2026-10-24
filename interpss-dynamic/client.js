@@ -764,7 +764,7 @@ return {
     // the harness forbids frames (`frame-src 'none'` in the preview CSP) and the app
     // page CSP cannot be assumed, so an embedded draw.io viewer is not an option. It
     // covers the subset these workspaces' diagrams use — rounded rectangles, ellipses,
-    // text labels, groups and orthogonal edges — and degrades an unknown shape to a
+    // triangles, text labels, groups and orthogonal edges — and degrades an unknown shape to a
     // rectangle instead of failing.
 
     // draw.io stores a diagram either as plain XML or as base64(raw-deflate(uri-encoded
@@ -1834,7 +1834,12 @@ return {
         const w = Math.max(1, numOr(g.getAttribute('width'), 0) || 120)
         const h = Math.max(1, numOr(g.getAttribute('height'), 0) || 60)
         const style = st
-        const kind = style.ellipse !== undefined || style.shape === 'ellipse' ? 'ellipse' : (style.text !== undefined ? 'text' : 'rect')
+        // draw.io's `triangle` (0.7.14): the generator's load arrow is one. `direction` picks
+        // the apex; mxGraph's default is east, so an absent key must not flip a hand-drawn one.
+        const isTriangle = style.shape === 'triangle' || style.triangle !== undefined
+        const kind = isTriangle ? 'triangle'
+          : (style.ellipse !== undefined || style.shape === 'ellipse' ? 'ellipse'
+            : (style.text !== undefined ? 'text' : 'rect'))
         const node = {
           id: cell.getAttribute('id'),
           // The parent cell. A transformer symbol is two ellipses inside a `style=group`
@@ -1843,6 +1848,9 @@ return {
           // Document position. The renderer paints in this order — see DrawioDiagram.
           order: i,
           kind: kind,
+          // Only a triangle reads it; the other kinds ignore the field.
+          direction: style.direction === 'west' || style.direction === 'north'
+            || style.direction === 'south' ? style.direction : 'east',
           x: x, y: y, w: w, h: h,
           // `rounded` carries a VALUE, and draw.io's default (and this workspace's every file) is
           // `rounded=0`: the presence of the key used to mean "round", which turned every 6x52 bus
@@ -1904,11 +1912,17 @@ return {
               pts.push({ x: numOr(ps[p].getAttribute('x'), 0), y: numOr(ps[p].getAttribute('y'), 0) })
             }
           }
-          if (from === null) {
+          // A FREE end is a sourcePoint/targetPoint on its own. Either end can be free while
+          // the other is a CELL (draw.io leaves it that way when a stub is dragged off its
+          // terminal), so each point must be read independently -- gating both on `from`
+          // dropped the edge when only the target was free, and the preview then showed a
+          // transformer with one side detached while draw.io drew both stubs.
+          if (from === null || to === null) {
             const sp = g.getElementsByTagName('mxPoint')
             for (let p = 0; p < sp.length; p += 1) {
-              if (sp[p].getAttribute('as') === 'sourcePoint') from = { x: numOr(sp[p].getAttribute('x'), 0), y: numOr(sp[p].getAttribute('y'), 0) }
-              else if (sp[p].getAttribute('as') === 'targetPoint') to = { x: numOr(sp[p].getAttribute('x'), 0), y: numOr(sp[p].getAttribute('y'), 0) }
+              const kind = sp[p].getAttribute('as')
+              if (kind === 'sourcePoint' && from === null) from = { x: numOr(sp[p].getAttribute('x'), 0), y: numOr(sp[p].getAttribute('y'), 0) }
+              else if (kind === 'targetPoint' && to === null) to = { x: numOr(sp[p].getAttribute('x'), 0), y: numOr(sp[p].getAttribute('y'), 0) }
             }
           }
         }
@@ -2223,6 +2237,17 @@ return {
       return Number.isFinite(pct) && pct > 0 ? pct : 100
     }
 
+    // A draw.io `triangle`'s three corners, its apex on the `direction` side. Kept apart from the
+    // renderer so the guard can pin the orientation without building a tree.
+    function drawioTrianglePoints(n) {
+      const x = n.x, y = n.y, w = n.w, h = n.h
+      const p = n.direction === 'west' ? [[x + w, y], [x + w, y + h], [x, y + h / 2]]
+        : n.direction === 'north' ? [[x, y + h], [x + w, y + h], [x + w / 2, y]]
+          : n.direction === 'south' ? [[x, y], [x + w, y], [x + w / 2, y + h]]
+            : [[x, y], [x, y + h], [x + w, y + h / 2]]
+      return p.map((q) => q[0] + ',' + q[1]).join(' ')
+    }
+
     function DrawioDiagram(props) {
       const scene = props.scene
       const vb = props.view || scene.viewBox
@@ -2320,6 +2345,17 @@ return {
             rx: n.rounded ? Math.min(n.w, n.h) * (Number.isFinite(n.arcSize) ? n.arcSize : 0.15) : 0,
             fill: marked && isBar ? colour : (n.fill === null ? 'none' : drawioThemeColor(n.fill)),
             stroke: marked && isBar ? colour : drawioThemeColor(n.stroke),
+            strokeWidth: n.strokeWidth,
+            strokeDasharray: n.dashed ? '6 4' : undefined,
+          }))
+        } else if (n.kind === 'triangle') {
+          // draw.io's `triangle` (the generator's load arrow, 0.7.14). A closed three-point
+          // polygon, so the outline and the fill are the author's like any other cell.
+          parts.push(React.createElement('polygon', {
+            key: 's',
+            points: drawioTrianglePoints(n),
+            fill: n.fill === null ? 'none' : drawioThemeColor(n.fill),
+            stroke: marked ? colour : drawioThemeColor(n.stroke),
             strokeWidth: n.strokeWidth,
             strokeDasharray: n.dashed ? '6 4' : undefined,
           }))

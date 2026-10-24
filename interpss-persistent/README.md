@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.13**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+GUI (**0.7.15**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.13**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.15**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -81,7 +81,10 @@ parameters and results, no build-time Typert compiler required.
   (bar and `Bus-N` text, with the violation spelled out in its tooltip; the band and colour come from the gear dialog's
   `config/net_diagram.json` since 0.6.26, which also paints branch flow flags) — at render time only,
   since 0.6.18: the `.drawio` file, the desktop app and the generator's PNG preview stay exactly as
-  authored. It reuses `listDrawioFiles`, `readDrawio`, `readCsv` (bus / branch / contingency / OptAdj
+  authored. The generator can also add optional **generator / load symbols** per bus (`--symbols`,
+  from the case's `_DF_gen.csv` / `_DF_load.csv`); the tab paints their load arrows as draw.io
+  `triangle` cells since **0.7.14** (before that the arrow degraded to a black box). It reuses
+  `listDrawioFiles`, `readDrawio`, `readCsv` (bus / branch / contingency / OptAdj
   branch tables — OptAdj families since 0.7.7), `checkResult` and
   `busConnections`, and the launcher is the one new endpoint (`openDrawio`, over the sandbox-aware
   `subprocess` service — no `node:child_process`, since the dynamic half has no imports). Which

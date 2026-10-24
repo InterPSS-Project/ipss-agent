@@ -24,13 +24,12 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BODY = join(ROOT, 'interpss-dynamic', 'client-body.js');
-// The live per-case diagram the Diagram button loads (0.6.6 moved diagrams under the case),
-// plus the result table the tooltips quote.
-const DIAGRAM = join(ROOT, 'wspace', 'data', 'ieee', 'Ieee14Bus', 'diagram', 'ieee14-oneline.drawio');
-// The style reference the case diagrams are copies of. It was renamed from
-// `ieee14-oneline.drawio` (commit e1075429), and draw.io re-serialises a file it touches,
-// so the two are no longer byte-identical — §11 compares what they PARSE to instead.
+// The hand-laid style reference. The per-case diagram under `Ieee14Bus/diagram` is now a
+// USER-EDITABLE working file (it can carry the generated equipment symbols, moved buses or
+// hand-adjusted stubs), so the guard reads the stable template for the hand-laid contract;
+// the live file is only read where a test explicitly targets user content.
 const TEMPLATE_DIAGRAM = join(ROOT, 'wspace', 'template', 'oneline-diagram.drawio');
+const DIAGRAM = TEMPLATE_DIAGRAM;
 const BRANCH_CSV = join(ROOT, 'wspace', 'data', 'ieee', 'Ieee14Bus', 'result', 'ieee14_DF_branch.csv');
 
 let failures = 0;
@@ -134,6 +133,7 @@ function build(overrides) {
       + ' DRAWIO_MATCH_FILL: DRAWIO_MATCH_FILL, DRAWIO_BIRDSEYE_FRAME: DRAWIO_BIRDSEYE_FRAME,'
       + ' drawioSelectionMarks: drawioSelectionMarks, DRAWIO_SELECT_STROKE: DRAWIO_SELECT_STROKE,'
       + ' DRAWIO_SELECT_PAD: DRAWIO_SELECT_PAD,'
+      + ' drawioTrianglePoints: drawioTrianglePoints,'
       + ' drawioHitBounds: drawioHitBounds, drawioCentreRect: drawioCentreRect,'
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText,'
       + ' CASE_FORMATS: CASE_FORMATS, caseFormatOfPath: caseFormatOfPath, caseFormatEntry: caseFormatEntry,'
@@ -308,6 +308,20 @@ if (scene) {
   check('that fallback covers vertices too',
     bareScene.nodes.length === 1 && bareScene.nodes[0].stroke === '#000000',
     bareScene.nodes.length ? bareScene.nodes[0].stroke : 'no node parsed');
+}
+
+// A draw.io edge can keep ONE end on a cell and leave the other as a bare sourcePoint/targetPoint
+// (a stub dragged off its terminal). Both points must be read independently of the cell ends;
+// gating the target point on a missing source dropped the edge, and a hand-adjusted transformer
+// then showed only one stub in the preview while draw.io drew both.
+{
+  const mixed = '<mxfile><diagram><mxGraphModel><root>'
+    + '<mxCell id="b1" vertex="1" parent="1" style="rounded=0;fillColor=#666666;strokeColor=#333333;"><mxGeometry x="10" y="10" width="6" height="52" as="geometry"/></mxCell>'
+    + '<mxCell id="e1" edge="1" parent="1" source="b1" style="endArrow=none;strokeColor=#000000"><mxGeometry relative="1" as="geometry"><mxPoint x="86" y="28" as="targetPoint"/></mxGeometry></mxCell>'
+    + '</root></mxGraphModel></diagram></mxfile>';
+  const flat = JSON.stringify(api.DrawioDiagram({ scene: api.parseDrawioScene(mixed) }));
+  check('an edge with a cell end plus a free targetPoint is still drawn',
+    flat.indexOf('13,36') >= 0 && flat.indexOf('86,28') >= 0, flat.slice(0, 200));
 }
 
 // The preview must follow the app theme. Its models are ink-on-paper, so the grayscale
@@ -1786,7 +1800,9 @@ check('both hosts read up to 4 MiB of diagram',
   && rd(DYN_HOST).indexOf('MAX_DRAWIO_BYTES = 4 * 1024 * 1024') >= 0
   && rd(LIB_HOST).indexOf('MAX_DRAWIO_BYTES = 2 * 1024 * 1024') < 0);
 check('the generator self-check allows 20000 cells',
-  generatorSrc.indexOf('len(cells) > 20000') >= 0 && generatorSrc.indexOf('more than 2000 cells') < 0);
+  generatorSrc.indexOf('PREVIEW_MAX_CELLS = 20000') >= 0
+  && generatorSrc.indexOf('len(cells) > PREVIEW_MAX_CELLS') >= 0
+  && generatorSrc.indexOf('more than 2000 cells') < 0);
 
 // The boundary, both sides. The cells are geometry-less on purpose: the cap is counted before any
 // geometry is resolved, so this stays a ~0.5 MB string instead of a 20k-shape model. At the cap the
@@ -1994,7 +2010,7 @@ check('the search highlight is the mid-luminance green, not a flag colour',
 // 0.6.37: what a search selects is brought to the middle of the view. The window keeps its SIZE --
 // the zoom stays the one the user chose -- and is centred on the union of the hit boxes, so a pair
 // frames between its two bars and a name that found several buses frames all of them. The numbers
-// below are the fixture's own: Bus-5's bar+label box (120..190, 174..252) centres on 155,213, and
+// below are the template's own: Bus-5's bar+label box (100..170, 168..252) centres on 135,210, and
 // the 1->2 pair (48..298, 22..102) on 173,62 -- whose y cannot be honoured, because centring a
 // 200-tall window there would hang it 38 units above the paper, so the clamp pins it to the top.
 const centreProbe = { x: scene.viewBox.x + 100, y: scene.viewBox.y + 80, w: scene.viewBox.w / 4, h: scene.viewBox.h / 4 };
@@ -2002,7 +2018,7 @@ const centred5 = api.drawioCentreRect(scene, centreProbe, hit('5'));
 const centredPair = api.drawioCentreRect(scene, centreProbe, hit('1->2'));
 check('a search centres the view on the bus it found, keeping the zoom',
   centred5.w === centreProbe.w && centred5.h === centreProbe.h
-  && centred5.x + centred5.w / 2 === 155 && centred5.y + centred5.h / 2 === 213,
+  && Math.round(centred5.x + centred5.w / 2) === 135 && Math.round(centred5.y + centred5.h / 2) === 210,
   JSON.stringify(centred5));
 check('a branch pair frames between its two bars, with the window held on the paper',
   centredPair.w === centreProbe.w && centredPair.x + centredPair.w / 2 === 173
@@ -2406,7 +2422,7 @@ check('labelBackgroundColor paints the mask, and only where the file asks for it
 // masked by labelBackgroundColor, square bars, and a left-aligned header -- so they are asserted
 // directly rather than only through a fixture.
 const refScene = (rel) => api.parseDrawioScene(readFileSync(join(ROOT, rel), 'utf8'));
-const ref14 = refScene('wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio');
+const ref14 = refScene('wspace/template/oneline-diagram.drawio');
 const ref14Labels = ref14.nodes.filter((n) => /^nm\d+$/.test(n.id));
 const ref14Bars = ref14.nodes.filter((n) => api.drawioIsBusId(n.id));
 check('the reference diagram\'s labels are masked text cells, and its bars are square',
@@ -2435,6 +2451,37 @@ check('the other reference diagram\'s title is left-aligned with a wide box, so 
   ref39Title !== undefined && ref39Title.align === 'left' && ref39Title.vAlign === 'middle'
   && ref39Title.w > 400,
   ref39Title === undefined ? 'no title' : ref39Title.w + ' wide');
+
+// draw.io's `triangle` (0.7.14) — the generator's load arrow. The preview used to have no such
+// kind and drew an unknown shape as a rect, which would have turned every arrow into a black box.
+const triXml = '<mxfile><diagram><mxGraphModel><root>'
+  + '<mxCell id="ld7" value="" style="shape=triangle;direction=east;fillColor=#000000;strokeColor=#000000;strokeWidth=1.5;" vertex="1" parent="1">'
+  + '<mxGeometry x="10" y="20" width="10" height="12" as="geometry"/></mxCell>'
+  + '<mxCell id="ld8" value="" style="shape=triangle;" vertex="1" parent="1">'
+  + '<mxGeometry x="30" y="20" width="10" height="12" as="geometry"/></mxCell>'
+  + '</root></mxGraphModel></diagram></mxfile>';
+const triScene = api.parseDrawioScene(triXml);
+const triNode = triScene.nodes.filter((n) => n.id === 'ld7')[0];
+const triDefault = triScene.nodes.filter((n) => n.id === 'ld8')[0];
+check('a triangle vertex parses as a triangle with its direction',
+  triNode !== undefined && triNode.kind === 'triangle' && triNode.direction === 'east',
+  triNode && triNode.kind + '/' + triNode.direction);
+check('a triangle without a direction defaults to east, like mxGraph',
+  triDefault !== undefined && triDefault.kind === 'triangle' && triDefault.direction === 'east',
+  triDefault && triDefault.direction);
+check('the triangle points east, and west when asked',
+  api.drawioTrianglePoints(triNode) === '10,20 10,32 20,26'
+  && api.drawioTrianglePoints({ x: 10, y: 20, w: 10, h: 12, direction: 'west' }) === '20,20 20,32 10,26',
+  api.drawioTrianglePoints(triNode));
+const triSvg = api.DrawioDiagram({ scene: triScene });
+const triPart = partsOf(groupsOf(triSvg).filter((g) => String(g.props.key) === 'n0')[0])
+  .filter((part) => part.type === 'polygon')[0];
+check('the renderer draws the triangle as a filled three-point polygon',
+  triPart !== undefined && triPart.props.points === '10,20 10,32 20,26'
+  && triPart.props.fill === 'var(--dsw-alias-label-primary)',
+  triPart && triPart.props.points);
+check('a triangle is not a bus or branch hover target',
+  api.drawioHoverTarget(triNode, api.drawioBranchPairs(triScene)) === null);
 
 // --- 20. the case file types the picker offers (0.7.1) ---------------------
 console.log('\n20. the case file types the picker offers (BPA Dat, 0.7.1)');
@@ -3161,6 +3208,74 @@ check('the living docs and the skill name the new generator path',
 check('the skill and the process guide name the new MCP helper path',
   ['.agents/skills/ipss-case-diagram/SKILL.md', 'docs/oneline-diagram-process.md']
     .every((rel) => readDiagramRef(rel).indexOf('src/main/py/diagram/drawio_mcp.py') >= 0));
+
+// --- 25. generator bus symbols (--symbols, 0.7.14) -------------------------
+// The generator's optional equipment symbols are driven by the equipment tables. Both hang off
+// the RIGHT edge of the bar on short leads (a generator lead + `~` circle, a load lead + drop +
+// down arrow) and must stay inside the bus footprint, which is what keeps the page and the
+// layout unchanged. These are source pins: the feature needs numpy and Pillow, so the guard
+// cannot run it, but the contract it must keep is visible in the code.
+console.log('\n25. generator bus symbols (--symbols, 0.7.14)');
+check('the generator offers --symbols none|gen|load|both, default none',
+  generatorSrc.indexOf('ap.add_argument("--symbols", choices=("none", "gen", "load", "both"), default="none"') >= 0);
+check('bus status comes from the gen/load tables, by BusID, with no InService or MW filter',
+  generatorSrc.indexOf('equipment = {"gen": gen_csv, "load": load_csv}') >= 0
+    && generatorSrc.indexOf('mark_equipment(buses, by_id, gen_csv, "has_gen")') >= 0
+    && generatorSrc.indexOf('mark_equipment(buses, by_id, load_csv, "has_load")') >= 0
+    && generatorSrc.indexOf('row["InService"]') < 0 && generatorSrc.indexOf('row.get("InService")') < 0);
+check('a generator is a `~` ellipse and a load a south-pointing triangle, each in a group',
+  generatorSrc.indexOf('GEN_STYLE = ("ellipse;') >= 0
+    && generatorSrc.indexOf('LOAD_STYLE = ("shape=triangle;direction=south;') >= 0
+    && generatorSrc.indexOf('"value": "~"') >= 0
+    && generatorSrc.indexOf('"id": "gg%d" % b.num') >= 0
+    && generatorSrc.indexOf('"id": "lg%d" % b.num') >= 0
+    && generatorSrc.indexOf('"style": "group"') >= 0
+    && generatorSrc.indexOf('"id": "gen%d" % b.num') >= 0
+    && generatorSrc.indexOf('"id": "ld%d" % b.num') >= 0);
+check('each symbol is ANCHORED to its bus by a lead edge (source bus, target symbol)',
+  generatorSrc.indexOf('"id": "sg%d" % b.num') >= 0
+    && generatorSrc.indexOf('"id": "sl%d" % b.num') >= 0
+    && generatorSrc.indexOf('"source": "bus%d" % b.num, "target": "gen%d" % b.num') >= 0
+    && generatorSrc.indexOf('"source": "bus%d" % b.num, "target": "ld%d" % b.num') >= 0
+    && generatorSrc.indexOf('endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=%g;') >= 0
+    && generatorSrc.indexOf('if sy.get("entry") is not None:') >= 0
+    && generatorSrc.indexOf('"points": [(x + BUS_W + SYM_STEM, ey)]') >= 0);
+check('each symbol group owns its circle/triangle, so the symbol moves as one object',
+  generatorSrc.indexOf('"parent": "gg%d" % b.num') >= 0
+    && generatorSrc.indexOf('"parent": "lg%d" % b.num') >= 0
+    && generatorSrc.indexOf('groups[parent]["x"], groups[parent]["y"]') >= 0);
+check('both symbols hang off the right edge and stay inside the footprint',
+  generatorSrc.indexOf('gx, gy = x + BUS_W + SYM_STEM, cy - GEN_R') >= 0
+    && generatorSrc.indexOf('tx = x + BUS_W + SYM_STEM - LOAD_W / 2.0') >= 0
+    && generatorSrc.indexOf('SYM_STEM = 6.0') >= 0
+    && generatorSrc.indexOf('GEN_R = 6.5') >= 0
+    && generatorSrc.indexOf('LOAD_W, LOAD_H = 6.5, 13.0') >= 0
+    && generatorSrc.indexOf('LOAD_DROP = 9.0') >= 0);
+check('the equipment symbols cannot inflate the transformer ring count',
+  generatorSrc.indexOf('re.fullmatch(r"xf\\d+b?", c.get("id")') >= 0);
+check('the 20000-cell cap is shared by the self-check and the pre-layout --symbols check',
+  generatorSrc.indexOf('PREVIEW_MAX_CELLS = 20000') >= 0
+    && generatorSrc.indexOf('len(cells) > PREVIEW_MAX_CELLS') >= 0
+    && generatorSrc.indexOf('estimate > PREVIEW_MAX_CELLS') >= 0
+    && generatorSrc.indexOf('3 * n_gen + 3 * n_load') >= 0);
+check('a requested family with no equipment table is refused with the missing path',
+  generatorSrc.indexOf('--symbols %s needs %s') >= 0
+    && generatorSrc.indexOf('drop %s from --symbols') >= 0);
+check('a symbol file is validated against the tables, and a symbol-less file still passes',
+  generatorSrc.indexOf('want_gen = {"gen%d" % b.num for b in buses if b.has_gen}') >= 0
+    && generatorSrc.indexOf('have_gen = {i for i in sym_cells if re.fullmatch(r"gen\\d+", i)}') >= 0
+    && generatorSrc.indexOf('is not a `~` generator ellipse') >= 0
+    && generatorSrc.indexOf('load triangle pointing south') >= 0
+    && generatorSrc.indexOf('is not a symbol group cell') >= 0
+    && generatorSrc.indexOf('is not a child of %s') >= 0
+    && generatorSrc.indexOf('is not anchored bus%s -> %s') >= 0
+    && generatorSrc.indexOf('leaves its bus%d footprint') >= 0);
+check('a hand-added draw.io edge is rejected by --check (editor/tab drift)',
+  generatorSrc.indexOf('is not a generated edge') >= 0
+    && generatorSrc.indexOf('connects no bus') >= 0);
+check('the legend names only the families actually drawn',
+  generatorSrc.indexOf('if any(s["kind"] == "gen" for s in bus_symbols)') >= 0
+    && generatorSrc.indexOf('if any(s["kind"] == "load" for s in bus_symbols)') >= 0);
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);
