@@ -83,13 +83,14 @@ from collections import defaultdict, deque
 import numpy as np
 
 # --- template geometry ------------------------------------------------------
-BUS_W, BUS_H = 6.0, 52.0
+BUS_W, BUS_H = 4.0, 52.0     # the generated bar is 4 wide; the hand-laid template keeps 6
 LABEL_W, LABEL_H = 46.0, 18.0
+LABEL_FONT = 10        # px; the template uses 11, the generated diagrams read better at 10
 LABEL_GAP = 2.0
 BOX_W = 52.0
 BOX_H = LABEL_H + LABEL_GAP + BUS_H          # 72, exactly label + gap + bar
 GRID = 10.0
-BAND_H = 170.0                                # title/legend band above the network
+BAND_H = 90.0                                 # title/subtitle band above the network
 XF_R = 16.0                                   # one transformer ring
 XF_OVERLAP = 8.0                              # ring centre offset (rings interlock)
 LINE_W = 1.5
@@ -98,7 +99,7 @@ BAR_STYLE = "rounded=0;fillColor={fill};strokeColor={stroke};"
 EDGE_STYLE = "endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=%g;" % LINE_W
 XF_STYLE = "ellipse;fillColor=none;strokeColor=#000000;strokeWidth=%g;aspect=fixed;" % LINE_W
 LABEL_STYLE = ("rounded=0;fillColor=#FFFFFF;strokeColor=none;html=1;align=center;verticalAlign=middle;"
-               "fontSize=11;fontStyle=1;fontColor=#000000;")
+               "fontSize=%d;fontStyle=1;fontColor=#000000;" % LABEL_FONT)
 TEXT_STYLE = "text;html=1;fontSize=%d;%sfontColor=%s;align=%s;verticalAlign=%s;"
 
 # --- optional bus equipment symbols (--symbols) -----------------------------
@@ -281,10 +282,11 @@ def mark_equipment(buses, by_id, path, attr):
 def bus_symbols(buses, want):
     """The optional generator/load symbols, each ANCHORED to its bus with a real edge.
 
-    `want` is `{"gen": bool, "load": bool}`. Both families hang off the RIGHT edge of the bar:
+    `want` is `{"gen": bool, "load": bool}`. The generator hangs off the LEFT edge of the bar,
+    the load off the RIGHT (a fixed layout rule), so a bus with both reads `○~ | Bar | ↓`:
 
       * generator (`ggN`) -- a `style=group` cell holding the `genN` ellipse whose own label is
-        `~`; a lead edge `sgN` runs from the bus's right edge into the circle, with
+        `~`; a lead edge `sgN` runs from the bus's left edge into the circle, with
         `endArrow=none` (draw.io centres a vertex label, and the app preview draws an ellipse
         node's label too);
       * load (`lgN`) -- a group cell holding the `ldN` triangle pointing south; the lead edge
@@ -305,7 +307,7 @@ def bus_symbols(buses, want):
         x, y = b.bar_xy
         if want.get("gen") and b.has_gen:
             cy = y + BUS_H * GEN_FRAC
-            gx, gy = x + BUS_W + SYM_STEM, cy - GEN_R
+            gx, gy = x - SYM_STEM - 2 * GEN_R, cy - GEN_R
             out.append({"id": "gg%d" % b.num, "kind": "group", "num": b.num,
                         "x": gx, "y": gy, "w": 2 * GEN_R, "h": 2 * GEN_R,
                         "style": "group", "value": "", "parent": "1"})
@@ -314,10 +316,12 @@ def bus_symbols(buses, want):
                         "style": GEN_STYLE, "value": "~", "parent": "gg%d" % b.num})
             out.append({"id": "sg%d" % b.num, "kind": "lead", "num": b.num,
                         "source": "bus%d" % b.num, "target": "gen%d" % b.num,
-                        "exit": (1.0, GEN_FRAC),
+                        "exit": (0.0, GEN_FRAC),
                         "points": [],
-                        "draw": [(x + BUS_W, cy), (gx, cy)]})
+                        "draw": [(x, cy), (gx + 2 * GEN_R, cy)]})
         if want.get("load") and b.has_load:
+            # The generator sits on the LEFT of the bar, the load on the RIGHT (a user rule):
+            # both still fit in the bar's own footprint, whose label is centred over the bar.
             ey = y + BUS_H * LOAD_FRAC
             tx = x + BUS_W + SYM_STEM - LOAD_W / 2.0
             ty = ey + LOAD_DROP
@@ -1098,39 +1102,16 @@ def write_drawio(path, stem, title, subtitle, buses, symbols, edges, page_w, pag
     add('            <root>\n                <mxCell id="0"/>\n                <mxCell id="1" parent="0"/>\n')
     add('                <mxCell id="bg" value="" style="rounded=0;fillColor=#FFFFFF;strokeColor=none;locked=1;" parent="1" vertex="1">\n'
         '                    <mxGeometry width="%g" height="%g" as="geometry"/>\n                </mxCell>\n' % (page_w, page_h))
-    # Header: title and subtitle on the left, legend on the right -- but a narrow page has no
-    # room for the two side by side, and draw.io paints the legend box over the title text
-    # (the exporter then widens the page to fit the overflowing cells). So the legend stacks
-    # under the subtitle whenever the title column would come out too thin.
-    lw = min(360.0, page_w - 80.0)
-    # A symbol line names only the families actually drawn -- a legend entry for a symbol that
-    # does not occur would be a lie -- and it needs one more line of box height.
-    sym_parts = []
-    if any(s["kind"] == "gen" for s in bus_symbols):
-        sym_parts.append("\u25cb~ generator")
-    if any(s["kind"] == "load" for s in bus_symbols):
-        sym_parts.append("\u2193 load")
-    sym_line = ("<br>" + "      ".join(sym_parts)) if sym_parts else ""
-    lx, ly, lh = page_w - 40.0 - lw, 20.0, (86.0 if sym_line else 66.0)
-    title_w = lx - 60.0
-    if title_w < 340.0:
-        lx, ly, title_w = 40.0, 88.0, page_w - 80.0
-    sub_w = title_w
+    # Header: just the title and the subtitle. The old legend box (symbol key + hover hint) is
+    # gone -- the Diagram tab documents the interaction -- so the title column gets the full
+    # page width and the band above the network is only as tall as the two text cells.
+    title_w = page_w - 80.0
     add('                <mxCell id="title" value="%s" style="%s" parent="1" vertex="1">\n'
         '                    <mxGeometry x="40" y="20" width="%g" height="30" as="geometry"/>\n                </mxCell>\n'
         % (esc(title), TEXT_STYLE % (20, "fontStyle=1;", "#000000", "left", "middle"), title_w))
     add('                <mxCell id="subtitle" value="%s" style="%s" parent="1" vertex="1">\n'
         '                    <mxGeometry x="40" y="52" width="%g" height="18" as="geometry"/>\n                </mxCell>\n'
-        % (esc(subtitle), TEXT_STYLE % (11, "", "#666666", "left", "middle"), sub_w))
-    add('                <mxCell id="legend" value="" style="rounded=0;fillColor=#F7F7F7;strokeColor=#CCCCCC;" parent="1" vertex="1">\n'
-        '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n' % (lx, ly, lw, lh))
-    add('                <mxCell id="legendText" value="%s" style="%s" parent="1" vertex="1">\n'
-        '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n'
-        # draw.io collapses a literal newline in an html label, so the line break is a <br>
-        # (escaped here); the plugin preview turns the same <br> back into a newline.
-        % (esc("\u2503 vertical bus      \u2500 branch      \u25cb\u25cb transformer<br>"
-               "Bus-N  id only \u2014 hover a bar, a label or a branch" + sym_line),
-           TEXT_STYLE % (10, "", "#000000", "left", "top") + "spacing=6;", lx, ly, lw, lh))
+        % (esc(subtitle), TEXT_STYLE % (11, "", "#666666", "left", "middle"), title_w))
     def add_buses():
         for b in buses:
             add('                <mxCell id="bus%d" value="" style="%s" parent="1" vertex="1">\n'
@@ -1230,7 +1211,7 @@ def write_png(path, title, subtitle, buses, symbols, edges, page_w, page_h, scal
         for ox, oy in offs:
             x, y = s["gx"] + ox, s["gy"] + oy
             d.ellipse([x * S, y * S, (x + XF_R) * S, (y + XF_R) * S], outline="#000000", width=w)
-    f = _font(max(7, int(11 * S)), bold=True)
+    f = _font(max(7, int(LABEL_FONT * S)), bold=True)
     for b in buses:
         x, y = b.bar_xy
         d.rectangle([x * S, y * S, (x + BUS_W) * S, (y + BUS_H) * S], fill=b.fill, outline=b.stroke)
@@ -1585,13 +1566,13 @@ def main():
     # The preview caps a diagram at PREVIEW_MAX_CELLS; each symbol adds 3 cells (a group, its
     # single body vertex, and the lead edge anchored to the bus), so check the ceiling BEFORE
     # the (possibly minutes-long) layout rather than writing a file the app cannot open. The
-    # count is exact: 2 root cells + 5 header cells + 2 per bus + 1 per edge + 3 per transformer.
+    # count is exact: 2 root cells + 3 header cells + 2 per bus + 1 per edge + 3 per transformer.
     n_gen = sum(1 for b in buses if b.has_gen) if want["gen"] else 0
     n_load = sum(1 for b in buses if b.has_load) if want["load"] else 0
     n_sym = 3 * n_gen + 3 * n_load
     if n_sym:
         n_xf = sum(1 for br in branches if br.is_xfmr)
-        estimate = 7 + 2 * len(buses) + len(branches) + 4 * n_xf + n_sym
+        estimate = 5 + 2 * len(buses) + len(branches) + 4 * n_xf + n_sym
         if estimate > PREVIEW_MAX_CELLS:
             sys.exit("--symbols would make this diagram %d cells; the preview limit is %d -- "
                      "re-run without --symbols or on a smaller case" % (estimate, PREVIEW_MAX_CELLS))

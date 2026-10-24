@@ -44,8 +44,9 @@ footprints, then reads the file back and prints its self-check. A non-zero exit 
 failed.
 
 Add **`--symbols both`** (or `gen` / `load`) when the user wants the equipment marks: a `○~`
-generator circle from the right of every bus that has a row in `result/<stem>_DF_gen.csv`, and a
-`↓` load arrow at the end of a lead-and-drop from the right of every bus in `_DF_load.csv`. Each
+generator circle from the **left** of every bus that has a row in `result/<stem>_DF_gen.csv`, and a
+`↓` load arrow at the end of a lead-and-drop from the **right** of every bus in `_DF_load.csv`
+(the generator always sits on the left, the load on the right). Each
 hangs on a lead **edge anchored to its bus** (source = the bus, target = the symbol), so moving
 the bus or the symbol in draw.io keeps the lead connected. Off by default, so an ordinary request
 draws topology only.
@@ -69,23 +70,23 @@ draws topology only.
 
 | Element | Detail |
 |---|---|
-| Buses | one vertical bar per bus (6 x 52) with its `Bus-N` label above |
+| Buses | one vertical bar per bus (4 x 52; the hand-laid template keeps 6) with its `Bus-N` label above |
 | Branches | one line per `_DF_branch` row, undirected; parallel circuits bow slightly apart |
 | Transformers | `IsXfmr = true` rows as two interlocking rings in one group cell, inline on the branch and clear of every bar and label |
-| Loads / generators | **optional**, `--symbols gen|load|both` (default none). A bus gets the generator symbol iff it has **a row** in `result/<stem>_DF_gen.csv`, and the load symbol iff it has one in `_DF_load.csv` — status is row presence only, `InService` and the MW columns are ignored. One symbol per family per bus, both hanging off the **right** edge of the bar: the generator as a `○~` circle, the load as a lead-then-drop ending in a `↓` arrow. Each lead is an **edge anchored to the bus** (`sgN` / `slN`, `endArrow=none`, source = the bus, target = the symbol), like a branch stub, so the connection survives moving either end. Both stay inside the bar's own footprint, so the page size does not change |
+| Loads / generators | **optional**, `--symbols gen|load|both` (default none). A bus gets the generator symbol iff it has **a row** in `result/<stem>_DF_gen.csv`, and the load symbol iff it has one in `_DF_load.csv` — status is row presence only, `InService` and the MW columns are ignored. One symbol per family per bus, on fixed sides of the bar: the generator (`○~` circle) on the **left**, the load (lead-then-drop ending in a `↓` arrow) on the **right**. Each lead is an **edge anchored to the bus** (`sgN` / `slN`, `endArrow=none`, source = the bus, target = the symbol), like a branch stub, so the connection survives moving either end. Both stay inside the bar's own footprint, so the page size does not change |
 | Voltage | Not drawn **in the file**: every bar uses the template's single grey. The Diagram tab paints a bus whose solved `|V|` is outside **0.9–1.1 pu** red when it renders (0.6.18) — render-time only, so never bake a colour in for it. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix, else the bus table's `NomVolt` when that is a real voltage, else nothing |
 | Orientation | the case's first bus (**Bus 1**) is the top-left-most bus: the layout is rotated, then eased, until every other bar is right of and below it |
-| Header | title, subtitle (counts and voltage levels), and a symbol legend box |
+| Header | title and subtitle only (counts and voltage levels) — no legend box |
 
 ## Style rules (the template contract)
 
 | Rule | Detail |
 |---|---|
-| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus |
-| Labels | `Bus-N` only (no name, no data), centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
+| Bus shape | vertical bar **4 x 52** (the hand-laid template keeps 6 x 52), fill `#666666`, stroke `#333333` — the same grey for every bus |
+| Labels | `Bus-N` only (no name, no data), **10 px bold**, centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
 | Branches | black `strokeWidth 1.5`, `endArrow=none`, no edge text; staggered taps so parallel lines leave a bar at different heights |
 | Transformers | two 16 x 16 ellipses, `fillColor=none`, centres 8 px apart, inside **one** `style=group` cell, sitting inline on the branch |
-| Equipment symbols (`--symbols`) | both hang off the bar's **right** edge. The body is a `style=group` cell around one vertex (`<i>ggN</i>`/`<i>genN</i>` `ellipse` labelled `~`; `<i>lgN</i>`/`<i>ldN</i>` `shape=triangle;direction=south`), so draw.io moves it as one object; the lead is a real EDGE `<i>sgN</i>`/`<i>slN</i>` (`endArrow=none`, source the bus, target the symbol) with the bus's right edge as its exit and **no fixed entry** (draw.io maps a pinned entry through the triangle's unrotated box, which lands the wire on the arrow's side — leaving it to draw.io attaches at the actual top-centre) — anchored at both ends like a branch stub, so moving either end keeps the connection. The load lead carries one waypoint for its lead-then-drop shape. Every part stays inside the 52 x 72 footprint; the legend gets a line only for a family actually drawn |
+| Equipment symbols (`--symbols`) | the generator hangs off the bar's **left** edge, the load off its **right** (fixed rule). The body is a `style=group` cell around one vertex (`<i>ggN</i>`/`<i>genN</i>` `ellipse` labelled `~`; `<i>lgN</i>`/`<i>ldN</i>` `shape=triangle;direction=south`), so draw.io moves it as one object; the lead is a real EDGE `<i>sgN</i>`/`<i>slN</i>` (`endArrow=none`, source the bus, target the symbol) with the bar's left edge as the generator's exit and its right edge as the load's, and **no fixed entry** (draw.io maps a pinned entry through the triangle's unrotated box, which lands the wire on the arrow's side — leaving it to draw.io attaches at the actual top-centre) — anchored at both ends like a branch stub, so moving either end keeps the connection. The load lead carries one waypoint for its lead-then-drop shape. Every part stays inside the 52 x 72 footprint |
 | Routing | straight by default; one short local hop around a bar only when a straight line would cross one. Explicit waypoints and no `edgeStyle`, so draw.io and the app preview draw the same polyline. With `--symbols` the force path also hops round the symbols (the lattice path draws wires under them, like it does under bars) |
 | Annotations | none: no bus data, no branch P/Q, no voltage colours (the `--symbols` equipment marks are the only optional mark) |
 
@@ -138,7 +139,7 @@ draws topology only.
 | `--scale N` | preview scale factor (default 1.0; use 2 for a closer look) |
 | `--seed N` | layout seed (default 11) |
 | `--layout auto\|force\|lattice` | placement strategy. `auto` (default) = the force pipeline up to 250 buses, the lattice above; `force` = always the original pipeline; `lattice` = always one cell per bus with the branches drawn under the bars. A large case **must** use the lattice path — the force one cannot separate it |
-| `--symbols none\|gen\|load\|both` | optional bus equipment symbols, default **none**: `gen` draws a `○~` circle on a short lead from the right of every bar with a row in `result/<stem>_DF_gen.csv`, `load` a `↓` arrow at the end of a lead-and-drop from the right of every bar with a row in `_DF_load.csv`, `both` draws both. Status is **row presence only** (`InService`/MW ignored), one symbol per family per bus; every part sits inside the bus footprint (page size unchanged) and each symbol is one `style=group` cell (`ggN` / `lgN`) around a single body, with a lead **edge** anchored bus→symbol, so it moves as one object and never detaches — 3 cells each — and the arrow needs plugin 0.7.14+ in the Diagram tab. Without the needed table the run exits with the missing path |
+| `--symbols none\|gen\|load\|both` | optional bus equipment symbols, default **none**: `gen` draws a `○~` circle on a short lead from the **left** of every bar with a row in `result/<stem>_DF_gen.csv`, `load` a `↓` arrow at the end of a lead-and-drop from the **right** of every bar with a row in `_DF_load.csv`, `both` draws both. Status is **row presence only** (`InService`/MW ignored), one symbol per family per bus; every part sits inside the bus footprint (page size unchanged) and each symbol is one `style=group` cell (`ggN` / `lgN`) around a single body, with a lead **edge** anchored bus→symbol, so it moves as one object and never detaches — 3 cells each — and the arrow needs plugin 0.7.14+ in the Diagram tab. Without the needed table the run exits with the missing path |
 | `--check FILE` | validate an existing diagram against the same case, writing nothing. A file with symbols is checked against the equipment tables; a symbol-less file still passes |
 | `--open` | after a passing self-check, hand the diagram to the draw.io editor through the draw.io MCP server |
 | `--app-export [PNG]` | render it with the local draw.io **desktop app** (authoritative output; default `<stem>-oneline-drawio.png`). `--app PATH` points at another install |
@@ -228,7 +229,7 @@ resources.
   branches are drawn *under* the bars (the bars mask the wires, so no hop is needed), which is what
   makes 2000 bars and 3220 branches legible. Small cases keep the force look unchanged.
 - **The preview is approximate** — no orthogonal auto-routing, no arrowheads, one font size — and a
-  fitted 1900 x 1700 page makes 11 px labels small until you zoom. Open the file in draw.io when
+  fitted 1900 x 1700 page makes 10 px labels small until you zoom. Open the file in draw.io when
   exact geometry matters.
 - **The PNG is not a diagrams.net export**; it is a Pillow re-render of the same geometry, for a
   quick look.

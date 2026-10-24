@@ -3239,13 +3239,15 @@ check('each symbol is ANCHORED to its bus by a lead edge (source bus, target sym
     && generatorSrc.indexOf('"source": "bus%d" % b.num, "target": "ld%d" % b.num') >= 0
     && generatorSrc.indexOf('endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=%g;') >= 0
     && generatorSrc.indexOf('if sy.get("entry") is not None:') >= 0
+    && generatorSrc.indexOf('"exit": (0.0, GEN_FRAC)') >= 0
+    && generatorSrc.indexOf('"exit": (1.0, LOAD_FRAC)') >= 0
     && generatorSrc.indexOf('"points": [(x + BUS_W + SYM_STEM, ey)]') >= 0);
 check('each symbol group owns its circle/triangle, so the symbol moves as one object',
   generatorSrc.indexOf('"parent": "gg%d" % b.num') >= 0
     && generatorSrc.indexOf('"parent": "lg%d" % b.num') >= 0
     && generatorSrc.indexOf('groups[parent]["x"], groups[parent]["y"]') >= 0);
-check('both symbols hang off the right edge and stay inside the footprint',
-  generatorSrc.indexOf('gx, gy = x + BUS_W + SYM_STEM, cy - GEN_R') >= 0
+check('the generator hangs off the left edge, the load off the right, both inside the footprint',
+  generatorSrc.indexOf('gx, gy = x - SYM_STEM - 2 * GEN_R, cy - GEN_R') >= 0
     && generatorSrc.indexOf('tx = x + BUS_W + SYM_STEM - LOAD_W / 2.0') >= 0
     && generatorSrc.indexOf('SYM_STEM = 6.0') >= 0
     && generatorSrc.indexOf('GEN_R = 6.5') >= 0
@@ -3273,9 +3275,10 @@ check('a symbol file is validated against the tables, and a symbol-less file sti
 check('a hand-added draw.io edge is rejected by --check (editor/tab drift)',
   generatorSrc.indexOf('is not a generated edge') >= 0
     && generatorSrc.indexOf('connects no bus') >= 0);
-check('the legend names only the families actually drawn',
-  generatorSrc.indexOf('if any(s["kind"] == "gen" for s in bus_symbols)') >= 0
-    && generatorSrc.indexOf('if any(s["kind"] == "load" for s in bus_symbols)') >= 0);
+check('the header carries only the title and subtitle (no legend box)',
+  generatorSrc.indexOf('id="legend"') < 0
+    && generatorSrc.indexOf('legendText') < 0
+    && generatorSrc.indexOf('BAND_H = 90.0') >= 0);
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);
