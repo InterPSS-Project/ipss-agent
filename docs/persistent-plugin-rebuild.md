@@ -565,7 +565,7 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 407 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 409 checks; non-zero exit on failure
 ```
 
 It reads `interpss-dynamic/client-body.js`,

@@ -56,7 +56,7 @@ size do not change.
 
 Deliverable, plus a raster preview built from the same geometry:
 
-  <stem>-oneline.drawio         the diagram (draw.io / the InterPSS preview)
+  <stem>-oneline-generate.drawio  the diagram (draw.io / the InterPSS preview)
   <stem>-oneline-preview.png    approximate Pillow render for a quick look
 
 Bus cells are `busN` and bus labels read `Bus-N` -- the two spellings the
@@ -1520,7 +1520,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("case_dir", help="case folder holding result/<stem>_DF_bus.csv")
-    ap.add_argument("--out", help="output .drawio (default <case_dir>/diagram/<stem>-oneline.drawio)")
+    ap.add_argument("--out", help="output .drawio (default <case_dir>/diagram/<stem>-oneline-generate.drawio)")
     ap.add_argument("--title", help="diagram title")
     ap.add_argument("--png", help="preview PNG (default alongside the .drawio)")
     ap.add_argument("--no-png", action="store_true", help="skip the preview PNG")
@@ -1532,6 +1532,8 @@ def main():
                          "`force` = always the original pipeline; `lattice` = always one cell per "
                          "bus, branches drawn under the bars" % FORCE_MAX_BUSES)
     ap.add_argument("--check", metavar="DRAWIO", help="only validate an existing diagram")
+    ap.add_argument("--no-anchor", action="store_true",
+                    help="skip the Bus-1 top-left rule (for a hand-adjusted classic layout)")
     ap.add_argument("--symbols", choices=("none", "gen", "load", "both"), default="none",
                     help="optional bus equipment symbols, driven by the result tables: `gen` "
                          "draws a generator circle on a lead edge from the right of every bar "
@@ -1554,7 +1556,8 @@ def main():
 
     stem, buses, branches, anchor, equipment = read_case(args.case_dir)
     if args.check:
-        sys.exit(0 if validate(args.check, buses, branches, anchor=anchor,
+        sys.exit(0 if validate(args.check, buses, branches,
+                               anchor=None if args.no_anchor else anchor,
                                equipment=equipment) else 1)
     want = {"gen": args.symbols in ("gen", "both"),
             "load": args.symbols in ("load", "both")}
@@ -1600,7 +1603,7 @@ def main():
     subtitle = ("%d buses, %d branches (%d transformers)%s - axes are layout, not geography"
                 % (len(buses), len(branches), sum(1 for br in branches if br.is_xfmr),
                    (", voltage levels " + volts) if volts else ""))
-    out = args.out or os.path.join(args.case_dir, "diagram", "%s-oneline.drawio" % stem)
+    out = args.out or os.path.join(args.case_dir, "diagram", "%s-oneline-generate.drawio" % stem)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     write_drawio(out, stem, title, subtitle, buses, symbols, edges, page_w, page_h,
                  edges_first=kind == "lattice", bus_symbols=bus_syms)
@@ -1625,7 +1628,8 @@ def main():
     print("wrote %s (%gx%g, %d buses, %d branches, %d edges, %d hopped, %d overlapping footprints)"
           % (out, page_w, page_h, len(buses), len(branches), len(edges), detours,
              crowded(np.array([b.xy for b in buses]) / np.array([BOX_W, BOX_H]), HARD)))
-    ok = validate(out, buses, branches, anchor=anchor, equipment=equipment)
+    ok = validate(out, buses, branches,
+                  anchor=None if args.no_anchor else anchor, equipment=equipment)
     if not args.no_png:
         png = args.png or os.path.splitext(out)[0] + "-preview.png"
         write_png(png, title, subtitle, buses, symbols, edges, page_w, page_h, args.scale,

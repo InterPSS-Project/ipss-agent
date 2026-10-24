@@ -1,6 +1,6 @@
 ---
 name: ipss-case-diagram
-description: Use when asked to draw, create, regenerate or refresh a one-line diagram for an InterPSS simulation case — "draw the one-line diagram for this case", "make a diagram like the template", "put it in the case's diagram folder" — writing <case>/diagram/<stem>-oneline.drawio plus a PNG preview from the case's ACLF result CSVs, in the style of wspace/template/oneline-diagram.drawio.
+description: Use when asked to draw, create, regenerate or refresh a one-line diagram for an InterPSS simulation case — "draw the one-line diagram for this case", "make a diagram like the template", "put it in the case's diagram folder" — writing <case>/diagram/<stem>-oneline-generate.drawio plus a PNG preview from the case's ACLF result CSVs, in the style of wspace/template/oneline-diagram.drawio.
 metadata:
   short-description: Generate a case one-line diagram
 ---
@@ -132,7 +132,7 @@ draws topology only.
 
 | Flag | Detail |
 |---|---|
-| `--out PATH` | write elsewhere (default `<case>/diagram/<stem>-oneline.drawio`) |
+| `--out PATH` | write elsewhere (default `<case>/diagram/<stem>-oneline-generate.drawio`) |
 | `--title TEXT` | page title and diagram name |
 | `--no-png` | skip the PNG preview — the only part that needs Pillow |
 | `--png PATH` | write the preview elsewhere |

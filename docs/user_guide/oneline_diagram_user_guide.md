@@ -111,7 +111,7 @@ executable for each OS:
 
 Diagrams are **generated, not hand-placed**, for cases larger than a small teaching example. The generator (`src/main/py/diagram/gen_oneline_diagram.py`) lays out buses and branches from ACLF CSVs in the style of `wspace/template/oneline-diagram.drawio`, then writes:
 
-- `<case>/diagram/<stem>-oneline.drawio` — what the Diagram tab opens
+- `<case>/diagram/<stem>-oneline-generate.drawio` — the default generated file the Diagram tab lists
 - `<stem>-oneline-preview.png` — optional Pillow preview (approximate)
 
 ### From Chat (recommended)
@@ -235,7 +235,7 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 | Layout still ugly after generate | Try another `--seed`; for tiny teaching cases, prefer hand layout in draw.io |
 | “too large to preview” / “diagram too large” | The ceilings are **20000 cells** and **4 MiB** since **0.6.20** (they were 2000 cells / 2 MiB before 0.6.19, and 5 MiB in 0.6.19). **The byte ceiling is a Host limit, so it only changes after an app restart** — until then the running app keeps refusing with its old number. A 2000-bus case like Texas 2K now fits (~10.7k cells, ~3 MB); something far bigger — `OpenEInterconnect` is 78k buses — still will not, and is unreadable as one page anyway. The Host cap needs an app restart to take effect |
 | Generating a large case is slow or the self-check fails on overlaps | Use `--layout lattice` (or leave it `auto`, which switches at 250 buses). The force pipeline cannot separate a few thousand footprints: on Texas 2K it wrote a 4000 x 4 907 300 px page with 2193 overlapping footprints, while the lattice path writes an 8000 x 6000 page with none, in about 18 seconds. A large drawing is legible block by block but its long-range tie lines cross the page — that is the case's own structure, not a defect you can fix with another seed |
-| Hand edits disappeared | Regenerating overwrites the default `<stem>-oneline.drawio` — use a separate filename |
+| Hand edits disappeared | Regenerating overwrites the default `<stem>-oneline-generate.drawio` — use a separate filename |
 
 
 ---

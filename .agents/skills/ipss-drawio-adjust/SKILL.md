@@ -105,17 +105,20 @@ Follow `gen_oneline_diagram.plan()`:
 PY="${DSH_PYTHON:-$HOME/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3}"
 
 "$PY" src/main/py/diagram/gen_oneline_diagram.py <case_dir> \
-  --check <case>/diagram/<stem>-oneline-symbols.drawio \
-  --symbols both
+  --check <case>/diagram/<stem>-oneline-generate.drawio \
+  --symbols both --no-anchor
 
 # Authoritative raster (sandbox needs --no-sandbox)
 /Applications/draw.io.app/Contents/MacOS/draw.io --no-sandbox --export --format png \
   --output <case>/diagram/<stem>-oneline-symbols-preview.png \
-  <case>/diagram/<stem>-oneline-symbols.drawio
+  <case>/diagram/<stem>-oneline-generate.drawio
 ```
 
 Crop the PNG around problem buses to confirm stubs hit ring edges and do not
 merge with gen/load leads.
+
+`--no-anchor` is required for a hand-adjusted classic layout: the generated-diagram rule
+"Bus-1 is top-left-most" does not apply once the buses follow a reference schematic.
 
 ## IEEE 39 reference (classic New England)
 

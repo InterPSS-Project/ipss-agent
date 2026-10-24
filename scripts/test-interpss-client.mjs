@@ -3275,6 +3275,11 @@ check('a symbol file is validated against the tables, and a symbol-less file sti
 check('a hand-added draw.io edge is rejected by --check (editor/tab drift)',
   generatorSrc.indexOf('is not a generated edge') >= 0
     && generatorSrc.indexOf('connects no bus') >= 0);
+check('the default output is <stem>-oneline-generate.drawio',
+  generatorSrc.indexOf('"%s-oneline-generate.drawio" % stem') >= 0);
+check('--check can skip the Bus-1 corner rule for a hand-adjusted layout',
+  generatorSrc.indexOf('"--no-anchor"') >= 0
+    && generatorSrc.indexOf('anchor=None if args.no_anchor else anchor') >= 0);
 check('the header carries only the title and subtitle (no legend box)',
   generatorSrc.indexOf('id="legend"') < 0
     && generatorSrc.indexOf('legendText') < 0
