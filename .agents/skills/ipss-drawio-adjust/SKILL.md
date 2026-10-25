@@ -6,9 +6,10 @@ description: >-
   place gens on the bus side with fewer branch connections, rewire transformer
   stub edges to ring outer edges, and convert straight bus–bus branches to
   stubbed H–diag–H multilines. Use when the user asks to adjust bus locations,
-  flip gen side away from crowded branches, fix transformer connections, apply
-  branch multilines, align a diagram to a reference one-line (e.g. IEEE 39), or
-  edit ieee*-oneline*.drawio without regenerating from the force/lattice layout.
+  flip gen side away from crowded branches, uncross same-side branch anchors by
+  peer Y (including XF stubs), fix transformer connections, apply branch
+  multilines, align a diagram to a reference one-line (e.g. IEEE 39), or edit
+  ieee*-oneline*.drawio without regenerating from the force/lattice layout.
 metadata:
   short-description: Hand-adjust case one-line drawio layout
 ---
@@ -27,6 +28,7 @@ For a fresh diagram from result CSVs, use `$ipss-case-diagram` instead.
 - “Put the gen on the side with fewer branch connections”
 - “Transformer connections are wrong / lines go through the rings”
 - “Convert straight branches to stubbed multilines” / H–diag–H routing
+- “Branches cross at the bus — fix anchor points” / uncross same-side exits
 - Any edit to `<case>/diagram/*-oneline*.drawio` that must preserve topology
   and equipment symbols
 
@@ -77,8 +79,8 @@ right → `exitX=1;exitY=GEN_FRAC;entryX=0;entryY=0.5`.
 2. For each bus, set geometry of `busN`, `nmN`, and if present `ggN` / `lgN`
    from the formulas above — **recompute**, do not only translate by delta if
    the relative offsets might already be wrong.
-3. Refresh `slN` waypoints; clear stale `eM` branch waypoints (or re-run §3
-   after moves). Finish with §4 once branch/XF ports are known.
+3. Refresh `slN` waypoints; clear stale `eM` branch waypoints (or re-run §3 /
+   §3b after moves). Finish with §4 once branch/XF ports are known.
 4. Keep footprints clear: ≈52×72 boxes must not overlap (self-check
    `overlapping bus footprints`).
 5. Fit the page (§1b) whenever content grows past the current sheet.
@@ -164,9 +166,7 @@ Concrete rules:
    - **Rewrite** otherwise (0 waypoints or 1 degenerate point).
 3. Facing sides from relative bus centres: left bus exits right (`exitX=1`);
    right bus enters left (`entryX=0`); swap when the source is on the right.
-4. Prefer **side ports** only: `exitX/entryX ∈ {0,1}`. Stagger `exitY/entryY`
-   in ≈`[0.2, 0.8]` when multiple edges leave/enter the same bus on the same
-   side (sort by edge id).
+4. Prefer **side ports** only: `exitX/entryX ∈ {0,1}`. Then **uncross** (§3b).
 5. Insert **two** waypoints in `<Array as="points">`:
    - WP1 ≈ `BRANCH_STUB` px past the source bar at exit height
    - WP2 ≈ `BRANCH_STUB` px before the target bar at entry height  
@@ -175,10 +175,33 @@ Concrete rules:
 6. Style: keep `endArrow=none`, `rounded=0`, `strokeWidth=1.5`. **No**
    `edgeStyle=orthogonalEdgeStyle` — explicit waypoints only (Diagram-tab /
    generator contract).
-7. Do not touch `xfg*` / `xf*` / `sg*` / `sl*` / labels.
+7. Do not touch `xfg*` / `xf*` / `sg*` / `sl*` / labels (except XF `exitY`
+   when §3b restaggers a shared face).
 
 One-shot Python edit of the drawio XML (same family as bus-move / xf-fix
 scripts) — not a generator change.
+
+### 3b. Uncross same-side anchors (by peer Y)
+
+When two or more attachments share one L/R face of a bus, sorting by edge id
+leaves X-crossings (e.g. IEEE 39 Bus-14, Bus-10). Order ports by the **peer’s
+vertical position** so the upper peer uses the upper tap.
+
+1. Build each face `(busN, side∈{0,1})` from:
+   - bus–bus `eM` exits and entries on that side
+   - XF stubs `bus→xf*` with `exitX∈{0,1}` (use `xfgK` centre Y as peer Y)  
+   Exclude `sgN` / `slN` and T/B XF exits (`exitX=0.5`).
+2. Sort attachments on the face by peer Y ascending (top → bottom). Assign
+   `exitY` / `entryY` spaced across `[0.2, 0.8]`:
+   - one attachment → `0.5`
+   - `n≥2` → `0.2 + 0.6 * i / (n-1)` for `i = 0 … n-1`
+3. **Exit and entry on the same face share one ordering** — do not stagger
+   them in separate lists (that left Bus-14 both at 0.5).
+4. Rebuild H–diag–H waypoints after changing Y; for XF stubs, move the
+   leave-from-bus waypoint to the new exit height (keep ring entry).
+
+Canonical checks: Bus-14 right (15 above @0.2, 13 below @0.8); Bus-10 right
+(13 above @0.2, XF→32 below @0.8).
 
 ### 4. Place gen on the lighter branch side
 
@@ -226,6 +249,7 @@ Crop the PNG around problem buses / former diagonals / flipped gens
 
 - XF stubs hit ring **outer** edges (no line through the OO); clear gen/load leads
 - Bus–bus edges show short horizontal stubs at both ends, then a diagonal trunk
+- Same-side taps ordered by peer Y (no local X at the bar; XF stubs included)
 - Gen sits on the lighter L/R face (not stacked on the XF/branch stub side)
 - All bars/symbols sit inside the page grid (`bg` size matches `pageWidth`×`pageHeight`)
 
@@ -271,6 +295,7 @@ Gen lighter-side flips on the generate file: `gg32`–`gg38` on the **right**;
 | Entry on ring **outer** edge; nearer `g0`→`xfK` | Inner-face / swapped rings (line through OO) |
 | Grow `pageWidth`/`pageHeight` **and** `bg` together | Leave `bg` at the old generate size |
 | Side ports + 2-waypoint H–diag–H on diagonals | Full Manhattan / `orthogonalEdgeStyle` on bus–bus |
+| Same-face taps by peer Y (include XF stubs) | Stagger by edge id only / ignore XF on that face |
 | Keep hand-tuned ≥2-waypoint polylines | Force stubs onto pure H/V collinear edges |
 | Keep `busN` / `Bus-N` / `xfg` group ownership | Rename ids or ungroup xf rings |
 | Export PNG after substantive edits | Rely only on the Pillow generator preview |
