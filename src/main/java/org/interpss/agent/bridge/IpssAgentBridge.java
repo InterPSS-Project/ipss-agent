@@ -131,11 +131,11 @@ public final class IpssAgentBridge {
     }
 
     /**
-     * Generator redispatch (OptAdj) for thermal limits, driven by the whole
-     * {@code config/opt_adj_run.json} payload as JSON: the mode (basecase or N-1), the SSA scan and
-     * LP thresholds, the optional {@code custom} contingency file and the worker count. A blank
-     * payload means the defaults, and an unusable value is rejected with the reason instead of
-     * being silently ignored.
+     * Generator redispatch (OptAdj) for thermal limits. {@code optAdjType} selects the mode
+     * ({@code genAdjBaseCase} or {@code genAdjCA_N-1}); {@code optAdjConfigJson} is the
+     * {@code config/opt_adj_run.json} payload (thresholds, contingency input, sparse flag, worker
+     * count) — the mode is <em>not</em> a config-file key. A blank config means the defaults, and
+     * an unusable value is rejected with the reason instead of being silently ignored.
      * <p>
      * {@code reload} re-parses the case first, because the run overwrites the held model's
      * generator P ({@code AclfNetSsaHelper} + the optimizer redispatch the cached network).
@@ -145,9 +145,11 @@ public final class IpssAgentBridge {
      */
     public synchronized String runOptAdjWithConfig(String format, String absoluteCasePath,
             String absoluteContPath, String absoluteResultsDir, String stem, boolean reload,
-            String optAdjConfigJson) {
+            String optAdjType, String optAdjConfigJson) {
+        String type;
         OptAdjRunConfig config;
         try {
+            type = OptAdjRunConfig.parseType(optAdjType, "optAdjType");
             config = OptAdjRunConfig.fromJson(optAdjConfigJson, "the run configuration");
         } catch (RuntimeException e) {
             return error(e);
@@ -157,7 +159,7 @@ public final class IpssAgentBridge {
             Path resultsDir = Paths.get(absoluteResultsDir);
             Files.createDirectories(resultsDir);
             OptAdjRunner.OptAdjSummary summary = OptAdjRunner.runOnNet(net, resultsDir, stem,
-                    optionalPath(absoluteContPath), config);
+                    optionalPath(absoluteContPath), type, config);
             JsonObject o = new JsonObject();
             o.addProperty("ok", true);
             o.addProperty("format", format);

@@ -12,7 +12,7 @@ under the case's `diagram/` folder, where the **Diagram** tab previews it.
 |---------|------|-----------------|
 | Style reference | `wspace/template/oneline-diagram.drawio` | hand-laid IEEE 14-bus diagram, the visual contract for everything else |
 | Hand-laid cases | `wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio`, `wspace/data/ieee/Ieee14Bus_LargeLoadQ/diagram/ieee14-oneline*.drawio` | authored/edited in draw.io over the draw.io MCP, then repaired and saved page by page |
-| Generated cases | `wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio` | `wspace/script/gen_oneline_diagram.py` |
+| Generated cases | `wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio` | `src/main/py/diagram/gen_oneline_diagram.py` |
 
 Hand layout does not scale — the IEEE 118-bus case is 118 buses / 186 branches — so anything past a
 small teaching case takes the generated path below. Both paths produce the same shapes, sizes,
@@ -24,7 +24,7 @@ palette and cell conventions.
 |-------|------|
 | `<case>/result/<stem>_DF_bus.csv` | buses: id, number, name, type, load, generation |
 | `<case>/result/<stem>_DF_branch.csv` | lines and transformers: from–to, `IsXfmr`, `Circuit` |
-| `wspace/template/oneline-diagram.drawio` | style reference (geometry, styles, legend wording) |
+| `wspace/template/oneline-diagram.drawio` | style reference (geometry, styles) |
 
 The two CSVs are written by an AC load flow, so run `$ipss-case-aclf` on the case first.
 
@@ -35,7 +35,7 @@ The two CSVs are written by an AC load flow, so run `$ipss-case-aclf` on the cas
 3. **Preview** in draw.io; export a PNG for review when geometry matters.
 4. **Iterate** on layout, labels and overlaps from review feedback.
 5. **Author/repair** with the official draw.io MCP (`@drawio/mcp` 1.6.1 — `open_drawio_xml` plus `list_pages` / `get_page` /
-   `set_page`, and `wspace/script/drawio_mcp.py` drives the same server from a shell); the community `next-ai-draw-io` connector was dropped early on.
+   `set_page`, and `src/main/py/diagram/drawio_mcp.py` drives the same server from a shell); the community `next-ai-draw-io` connector was dropped early on.
 6. **Deliver** the `.drawio` into the case's `diagram/` folder.
 
 This path is cell-by-cell XML editing with the draw.io MCP as the editor. It is how the template's
@@ -49,20 +49,21 @@ than reinventing.
 # `load_workspace_dependencies` reports, e.g.
 #   ~/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3);
 # a bare `python3` on this Mac has numpy but no Pillow, so pass --no-png there.
-"$PY" wspace/script/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
+"$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
     --title "IEEE 118-Bus One-Line Diagram"
 ```
 
 | Step | Detail |
 |------|--------|
 | Layout | **up to 250 buses** (`--layout force`, the default for small cases): all-pairs hop distances from the branch list -> stress majorization (SMACOF); a scale search with neighbour attraction and footprint collision repair compacts it; the drawing is reshaped towards a page-friendly aspect, oriented so the case's first bus sits at the upper-left corner, and snapped to a 10 px grid. **Above 250 buses** (`--layout lattice`, and `auto` above the threshold): the graph is partitioned into connected clusters of at most 48 buses, each cluster is laid out with that same pipeline at a size it is proven at, the clusters' blocks are shelf-packed (adjacency-ordered, tall blocks first, one cell of gutter), and every bus then takes its own 90 x 110 px lattice cell -- so separation, the page bound and the top-left anchor hold by construction rather than by a repair loop that can give up. Two cells are 1.73 x 1.53 footprints apart, which is why no two buses can overlap |
-| Footprint | one bus = bar 6x52 with its `Bus-N` label above; footprints never overlap (the repair enforces it on the force path, the lattice makes it structural on the lattice path), and the self-check now fails on an overlap instead of only printing the count |
+| Footprint | one bus = bar 4x52 with its `Bus-N` label above; footprints never overlap (the repair enforces it on the force path, the lattice makes it structural on the lattice path), and the self-check now fails on an overlap instead of only printing the count |
 | Branches | straight black lines with staggered taps per bar side; on the force path a short local hop around a bar when a straight line would cut through one, and on the lattice path the branches are emitted **before** the bars so the bars mask the wires (no hop search over 3000 long lines) |
 | Transformers | `IsXfmr` branches -> two interlocking 16x16 rings inside **one** `style=group` cell, placed on the branch trunk -- along it first, then stepped aside -- so the pair stays inline and clear of every bar and label, chained by two stub edges |
-| Annotations | none: no bus data, no branch P/Q, no voltage colours |
+| Symbols (`--symbols`) | optional equipment marks, default none. A bus carries the generator symbol iff `result/<stem>_DF_gen.csv` has **a row** for it, and the load symbol iff `_DF_load.csv` does -- row presence only, `InService` and MW are ignored. The generator hangs off the **left** edge of the bar, the load off the **right**. The body is a `style=group` cell around one vertex (`ggN`/`genN` `ellipse` labelled `~`, or `lgN`/`ldN` `shape=triangle;direction=south`), so it moves as one object; the lead is a real EDGE `sgN` / `slN` anchored at both ends -- `endArrow=none`, source the bus, target the symbol, with one waypoint for the load's lead-then-drop -- exactly like a branch stub, so moving either end keeps the connection. That is 3 cells per symbol. Every part stays inside the 52 x 72 footprint (the layout and page never change). The force path routes branches around them; the lattice path draws wires under them, as it does under bars. The self-check compares the cell set (leads included) with the tables, and the 20000-cell cap is checked before the layout |
+| Annotations | none: no bus data, no branch P/Q, no voltage colours (the `--symbols` equipment marks are the only optional mark) |
 | Outputs | `<case>/diagram/<stem>-oneline.drawio` and `<stem>-oneline-preview.png` (a Pillow re-render of the same geometry) |
-| Self-check | the run reads the file back and checks `busN` ids, `Bus-N` labels, no arrowheads, one ring pair per transformer clear of every bar and label, the first bus at the upper-left corner, and that every branch resolves to a hover pair — the way the plugin's preview reads it |
-| Flags | `--out`, `--title`, `--png` / `--no-png`, `--scale`, `--seed`, `--open` (hand the result to the draw.io editor); `--check FILE` re-runs just the self-check |
+| Self-check | the run reads the file back and checks `busN` ids, `Bus-N` labels, no arrowheads, one ring pair per transformer clear of every bar and label, the first bus at the upper-left corner, and that every branch resolves to a hover pair — the way the plugin's preview reads it. A file with `genN` / `ldN` cells is also checked against the equipment tables (missing/orphan symbols fail) |
+| Flags | `--out`, `--title`, `--png` / `--no-png`, `--scale`, `--seed`, `--symbols none\|gen\|load\|both`, `--open` (hand the result to the draw.io editor); `--check FILE` re-runs just the self-check |
 
 Result for the reference case: `wspace/data/ieee/Ieee118Bus/diagram/ieee118-oneline.drawio` —
 1900 x 1700, 465 cells, 118 bus bars, 186 branches (177 lines + 9 transformer symbols), 195 edges,
@@ -137,7 +138,7 @@ when the row is healthy — and `Tool.listTools` should list the seven `mcp__dra
 | `open_drawio_csv` / `open_drawio_mermaid` | draw.io's importers, which auto-lay generic diagrams |
 | `search_shapes` | draw.io shape-library search (it does include `mxgraph.electrical.*`) |
 
-`wspace/script/drawio_mcp.py` speaks the same stdio protocol, so the round-trip also works from a host
+`src/main/py/diagram/drawio_mcp.py` speaks the same stdio protocol, so the round-trip also works from a host
 without the MCP tools (Codex, Claude Code, a plain shell): `list`, `get [--out PATH]`,
 `set --page N --content FILE|-`, `open`, `shapes`. Measured on a generated 14-bus diagram:
 `get_page` leaves the file byte-identical, a `set_page` of the same page returns identical page XML,
@@ -153,13 +154,13 @@ bus/branch tooltips resolve against.
 
 | Rule | Detail |
 |------|--------|
-| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus **in the file**, whatever its voltage. The Diagram tab paints an out-of-band bus red *while it renders* (0.6.18, see "Diagram tab — SVG viewer ↔ selected case data") — that colour is never written to the `.drawio` |
+| Bus shape | vertical bar **4 x 52** (the hand-laid template keeps 6 x 52), fill `#666666`, stroke `#333333` — the same grey for every bus **in the file**, whatever its voltage. The Diagram tab paints an out-of-band bus red *while it renders* (0.6.18, see "Diagram tab — SVG viewer ↔ selected case data") — that colour is never written to the `.drawio` |
 | Labels | `Bus-N` only (no name, no data), centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
 | Branches | thin black (`strokeWidth 1.5`), **undirected** (`endArrow=none`), no edge text, staggered taps so parallel lines leave a bar at different heights |
 | Transformers | two interlocking 16 x 16 rings (`fillColor=none`, centres 8 px apart) inside one `style=group` cell, sitting inline on the branch |
 | Routing | straight by default; a short local hop around a bar only when a straight line would cross one. Explicit waypoints, no `edgeStyle` — so draw.io and the in-app preview draw the same polyline |
 | Orientation | the case's **first bus (Bus 1)** sits in the **upper-left corner**: it is the leftmost *and* topmost bar, every other bus is right of and below it |
-| Page | white background rect over the page, title and subtitle top-left, legend box top-right listing only the symbols |
+| Page | white background rect over the page, title and subtitle top-left |
 | Voltage | not drawn. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix when present (`V1` 345 kV, `V2` 138 kV, `V3` 161 kV), else the bus table's `NomVolt` when that is a real voltage (`132000` -> 132 kV), else no voltage text at all |
 
 ## Diagram tab — SVG viewer ↔ selected case data
@@ -292,8 +293,6 @@ are written back to the `.drawio`.
 | Force-directed spreading flattened the topology into a hairball | Layout is stress majorization on hop distances; force spreading is only used to compact it |
 | Transformer symbols floated up to ~160 px off their branch | Each symbol is placed on the branch trunk and slid along that line when the spot is taken; both stubs stay straight and collinear |
 | Voltage colours (tried in the generator, then removed on request) | The file keeps one grey per bar and the `Vn` suffix feeds only the subtitle. Since 0.6.18 the **Diagram tab** overlays the one colour that earns its keep — a bus whose solved `|V|` is outside **0.9–1.1 pu** is red at render time (bar, outline and `Bus-N`), with the violation spelled out in its tooltip. Nothing is baked into the `.drawio`, so the desktop app and the PNG preview stay as generated |
-| Legend collapsed to one long line in draw.io | The legend used a literal newline in an `html=1` label; draw.io treats that as a space, so the two lines merged. The break is now an escaped `<br>`, which both draw.io and the plugin preview render as a line break |
-| Legend painted over the title, page widened by 441 units | On the 600-unit pages the legend sat at `page_w - 370` and the title/subtitle cells were a fixed 800/1000 wide, so they ran under the legend and past the page edge; the exporter then widened the page to fit. Header cells are now measured against the page and the legend stacks under the subtitle when the title column would be under 340 units |
 | Transformer symbol clipped by a bus label | Labels paint last, so a symbol that overlapped one lost part of a ring (the Bus-7 cluster in the 14-bus cases). Placement now searches outward from the branch trunk -- along it, then stepping aside, avoiding bars **and** labels -- and the self-check fails on any overlap that remains |
 | Bus 1 landed wherever the layout put it (middle-right on the 14-bus cases) | The finished layout is rotated rigidly -- a sweep picks the angle that brings Bus 1 closest to the corner, which costs no distance -- and a pinned pass then eases any bus still above or left of it into its lower-right quadrant, so Bus 1 is the clear top-left-most bus. The self-check fails if it is not |
 | Subtitle claimed a voltage the case does not have | The `Vn` suffix convention is IEEE-118-specific; cases without it (the 14-bus CDF files) fell back to a made-up `138 kV`. The subtitle now uses the suffix, else `NomVolt` when it is a real voltage, else nothing |
@@ -323,7 +322,7 @@ are written back to the `.drawio`.
   median 4 cells, p95 71 (the long tail is the tie lines between the case's many small islands,
   which no placement can shorten).
 - **The preview is approximate.** No orthogonal auto-routing, no arrowheads, single font size; open
-  the file in draw.io when exact geometry matters. A fitted 1900 x 1700 drawing makes 11 px labels
+  the file in draw.io when exact geometry matters. A fitted 1900 x 1700 drawing makes 10 px labels
   small until you zoom in.
 - **The preview PNG is not a diagrams.net export** — it is a Pillow re-render of the same geometry,
   for a quick look and for review before opening draw.io.

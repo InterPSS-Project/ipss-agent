@@ -18,19 +18,18 @@
 //
 // Node has no DOMParser, so this file supplies a minimal one covering exactly what the
 // renderer uses. It has no dependencies and does not need a browser.
-import { readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BODY = join(ROOT, 'interpss-dynamic', 'client-body.js');
-// The live per-case diagram the Diagram button loads (0.6.6 moved diagrams under the case),
-// plus the result table the tooltips quote.
-const DIAGRAM = join(ROOT, 'wspace', 'data', 'ieee', 'Ieee14Bus', 'diagram', 'ieee14-oneline.drawio');
-// The style reference the case diagrams are copies of. It was renamed from
-// `ieee14-oneline.drawio` (commit e1075429), and draw.io re-serialises a file it touches,
-// so the two are no longer byte-identical — §11 compares what they PARSE to instead.
+// The hand-laid style reference. The per-case diagram under `Ieee14Bus/diagram` is now a
+// USER-EDITABLE working file (it can carry the generated equipment symbols, moved buses or
+// hand-adjusted stubs), so the guard reads the stable template for the hand-laid contract;
+// the live file is only read where a test explicitly targets user content.
 const TEMPLATE_DIAGRAM = join(ROOT, 'wspace', 'template', 'oneline-diagram.drawio');
+const DIAGRAM = TEMPLATE_DIAGRAM;
 const BRANCH_CSV = join(ROOT, 'wspace', 'data', 'ieee', 'Ieee14Bus', 'result', 'ieee14_DF_branch.csv');
 
 let failures = 0;
@@ -132,6 +131,9 @@ function build(overrides) {
       + ' drawioVoltOutsideBand: drawioVoltOutsideBand, drawioVoltColumns: drawioVoltColumns,'
       + ' DRAWIO_MAX_CELLS: DRAWIO_MAX_CELLS,'
       + ' DRAWIO_MATCH_FILL: DRAWIO_MATCH_FILL, DRAWIO_BIRDSEYE_FRAME: DRAWIO_BIRDSEYE_FRAME,'
+      + ' drawioSelectionMarks: drawioSelectionMarks, DRAWIO_SELECT_STROKE: DRAWIO_SELECT_STROKE,'
+      + ' DRAWIO_SELECT_PAD: DRAWIO_SELECT_PAD,'
+      + ' drawioTrianglePoints: drawioTrianglePoints,'
       + ' drawioHitBounds: drawioHitBounds, drawioCentreRect: drawioCentreRect,'
       + ' busTooltip: busTooltip, branchTooltip: branchTooltip, loadingText: loadingText,'
       + ' CASE_FORMATS: CASE_FORMATS, caseFormatOfPath: caseFormatOfPath, caseFormatEntry: caseFormatEntry,'
@@ -306,6 +308,20 @@ if (scene) {
   check('that fallback covers vertices too',
     bareScene.nodes.length === 1 && bareScene.nodes[0].stroke === '#000000',
     bareScene.nodes.length ? bareScene.nodes[0].stroke : 'no node parsed');
+}
+
+// A draw.io edge can keep ONE end on a cell and leave the other as a bare sourcePoint/targetPoint
+// (a stub dragged off its terminal). Both points must be read independently of the cell ends;
+// gating the target point on a missing source dropped the edge, and a hand-adjusted transformer
+// then showed only one stub in the preview while draw.io drew both.
+{
+  const mixed = '<mxfile><diagram><mxGraphModel><root>'
+    + '<mxCell id="b1" vertex="1" parent="1" style="rounded=0;fillColor=#666666;strokeColor=#333333;"><mxGeometry x="10" y="10" width="6" height="52" as="geometry"/></mxCell>'
+    + '<mxCell id="e1" edge="1" parent="1" source="b1" style="endArrow=none;strokeColor=#000000"><mxGeometry relative="1" as="geometry"><mxPoint x="86" y="28" as="targetPoint"/></mxGeometry></mxCell>'
+    + '</root></mxGraphModel></diagram></mxfile>';
+  const flat = JSON.stringify(api.DrawioDiagram({ scene: api.parseDrawioScene(mixed) }));
+  check('an edge with a cell end plus a free targetPoint is still drawn',
+    flat.indexOf('13,36') >= 0 && flat.indexOf('86,28') >= 0, flat.slice(0, 200));
 }
 
 // The preview must follow the app theme. Its models are ink-on-paper, so the grayscale
@@ -860,7 +876,8 @@ if (scene) {
     if (m === null) return null;
     try { return new Function('return ' + m[1])(); } catch (e) { return null; }
   };
-  const RESULT_TABLES = ['bus', 'branch', 'gen', 'load', 'contingency', 'optadj_branch', 'optadj_N1_branch'];
+  const RESULT_TABLES = ['bus', 'branch', 'gen', 'load', 'contingency', 'optadj_branch', 'optadj_N1_branch',
+    'optadj_gen', 'optadj_N1_gen'];
   check('every result family the tab reads passes the Host\'s readCsv allow-list',
     HOST_HALVES.every((p) => {
       const rx = readCsvPattern(p);
@@ -870,6 +887,16 @@ if (scene) {
         && !rx.test('data/ieee/ieee39/result/../../etc/passwd_DF_branch.csv');
     }),
     HOST_HALVES.map((p) => (readCsvPattern(p) === null ? 'no pattern' : String(readCsvPattern(p)))).join(' || '));
+  // Discovery must name the same families the reader allows, or a card can find nothing to ask for
+  // (or ask for something the gate then rejects). The OptAdj *gen* tables are the ones a card's
+  // "Gen adjustments" button reads, and they were missing from both the pattern and this list.
+  check('every Host half lists every OptAdj table it lets the client read',
+    HOST_HALVES.every((p) => {
+      const src = rd(join(ROOT, p));
+      return RESULT_TABLES.filter((f) => f.indexOf('optadj') === 0)
+        .every((f) => src.indexOf("stem + '_DF_" + f + ".csv'") >= 0);
+    }),
+    RESULT_TABLES.filter((f) => f.indexOf('optadj') === 0).join(', '));
 }
 
 // --- 12. the Diagram tab (a second conversation view, order 2) --------------
@@ -1760,7 +1787,12 @@ console.log('\n15. size limits (20000 cells, 4 MiB)');
 // Raising ONE limit would leave the others blocking the same file, so the three move together: the
 // preview's cell cap (client), the Host's read cap (both halves) and the generator's own self-check.
 // A 2000-bus case — Texas 2K, ~10.7k cells and ~3 MB — has to fit all three.
-const GENERATOR = join(ROOT, 'wspace', 'script', 'gen_oneline_diagram.py');
+// The diagram Python tooling lives under src/main/py/diagram (it moved out of wspace/script, which
+// keeps only the `.gvy` fixtures). `drawio_mcp.py` still sits beside the generator, which is how
+// `--open` finds it, so the two must move together.
+const PY_DIAGRAM = join(ROOT, 'src', 'main', 'py', 'diagram');
+const GENERATOR = join(PY_DIAGRAM, 'gen_oneline_diagram.py');
+const DRAWIO_MCP = join(PY_DIAGRAM, 'drawio_mcp.py');
 const generatorSrc = readFileSync(GENERATOR, 'utf8');
 check('the preview cap is 20000 cells', api.DRAWIO_MAX_CELLS === 20000, String(api.DRAWIO_MAX_CELLS));
 check('both hosts read up to 4 MiB of diagram',
@@ -1768,7 +1800,9 @@ check('both hosts read up to 4 MiB of diagram',
   && rd(DYN_HOST).indexOf('MAX_DRAWIO_BYTES = 4 * 1024 * 1024') >= 0
   && rd(LIB_HOST).indexOf('MAX_DRAWIO_BYTES = 2 * 1024 * 1024') < 0);
 check('the generator self-check allows 20000 cells',
-  generatorSrc.indexOf('len(cells) > 20000') >= 0 && generatorSrc.indexOf('more than 2000 cells') < 0);
+  generatorSrc.indexOf('PREVIEW_MAX_CELLS = 20000') >= 0
+  && generatorSrc.indexOf('len(cells) > PREVIEW_MAX_CELLS') >= 0
+  && generatorSrc.indexOf('more than 2000 cells') < 0);
 
 // The boundary, both sides. The cells are geometry-less on purpose: the cap is counted before any
 // geometry is resolved, so this stays a ~0.5 MB string instead of a 20k-shape model. At the cap the
@@ -1976,7 +2010,7 @@ check('the search highlight is the mid-luminance green, not a flag colour',
 // 0.6.37: what a search selects is brought to the middle of the view. The window keeps its SIZE --
 // the zoom stays the one the user chose -- and is centred on the union of the hit boxes, so a pair
 // frames between its two bars and a name that found several buses frames all of them. The numbers
-// below are the fixture's own: Bus-5's bar+label box (120..190, 174..252) centres on 155,213, and
+// below are the template's own: Bus-5's bar+label box (100..170, 168..252) centres on 135,210, and
 // the 1->2 pair (48..298, 22..102) on 173,62 -- whose y cannot be honoured, because centring a
 // 200-tall window there would hang it 38 units above the paper, so the clamp pins it to the top.
 const centreProbe = { x: scene.viewBox.x + 100, y: scene.viewBox.y + 80, w: scene.viewBox.w / 4, h: scene.viewBox.h / 4 };
@@ -1984,7 +2018,7 @@ const centred5 = api.drawioCentreRect(scene, centreProbe, hit('5'));
 const centredPair = api.drawioCentreRect(scene, centreProbe, hit('1->2'));
 check('a search centres the view on the bus it found, keeping the zoom',
   centred5.w === centreProbe.w && centred5.h === centreProbe.h
-  && centred5.x + centred5.w / 2 === 155 && centred5.y + centred5.h / 2 === 213,
+  && Math.round(centred5.x + centred5.w / 2) === 135 && Math.round(centred5.y + centred5.h / 2) === 210,
   JSON.stringify(centred5));
 check('a branch pair frames between its two bars, with the window held on the paper',
   centredPair.w === centreProbe.w && centredPair.x + centredPair.w / 2 === 173
@@ -2388,7 +2422,7 @@ check('labelBackgroundColor paints the mask, and only where the file asks for it
 // masked by labelBackgroundColor, square bars, and a left-aligned header -- so they are asserted
 // directly rather than only through a fixture.
 const refScene = (rel) => api.parseDrawioScene(readFileSync(join(ROOT, rel), 'utf8'));
-const ref14 = refScene('wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio');
+const ref14 = refScene('wspace/template/oneline-diagram.drawio');
 const ref14Labels = ref14.nodes.filter((n) => /^nm\d+$/.test(n.id));
 const ref14Bars = ref14.nodes.filter((n) => api.drawioIsBusId(n.id));
 check('the reference diagram\'s labels are masked text cells, and its bars are square',
@@ -2417,6 +2451,37 @@ check('the other reference diagram\'s title is left-aligned with a wide box, so 
   ref39Title !== undefined && ref39Title.align === 'left' && ref39Title.vAlign === 'middle'
   && ref39Title.w > 400,
   ref39Title === undefined ? 'no title' : ref39Title.w + ' wide');
+
+// draw.io's `triangle` (0.7.14) — the generator's load arrow. The preview used to have no such
+// kind and drew an unknown shape as a rect, which would have turned every arrow into a black box.
+const triXml = '<mxfile><diagram><mxGraphModel><root>'
+  + '<mxCell id="ld7" value="" style="shape=triangle;direction=east;fillColor=#000000;strokeColor=#000000;strokeWidth=1.5;" vertex="1" parent="1">'
+  + '<mxGeometry x="10" y="20" width="10" height="12" as="geometry"/></mxCell>'
+  + '<mxCell id="ld8" value="" style="shape=triangle;" vertex="1" parent="1">'
+  + '<mxGeometry x="30" y="20" width="10" height="12" as="geometry"/></mxCell>'
+  + '</root></mxGraphModel></diagram></mxfile>';
+const triScene = api.parseDrawioScene(triXml);
+const triNode = triScene.nodes.filter((n) => n.id === 'ld7')[0];
+const triDefault = triScene.nodes.filter((n) => n.id === 'ld8')[0];
+check('a triangle vertex parses as a triangle with its direction',
+  triNode !== undefined && triNode.kind === 'triangle' && triNode.direction === 'east',
+  triNode && triNode.kind + '/' + triNode.direction);
+check('a triangle without a direction defaults to east, like mxGraph',
+  triDefault !== undefined && triDefault.kind === 'triangle' && triDefault.direction === 'east',
+  triDefault && triDefault.direction);
+check('the triangle points east, and west when asked',
+  api.drawioTrianglePoints(triNode) === '10,20 10,32 20,26'
+  && api.drawioTrianglePoints({ x: 10, y: 20, w: 10, h: 12, direction: 'west' }) === '20,20 20,32 10,26',
+  api.drawioTrianglePoints(triNode));
+const triSvg = api.DrawioDiagram({ scene: triScene });
+const triPart = partsOf(groupsOf(triSvg).filter((g) => String(g.props.key) === 'n0')[0])
+  .filter((part) => part.type === 'polygon')[0];
+check('the renderer draws the triangle as a filled three-point polygon',
+  triPart !== undefined && triPart.props.points === '10,20 10,32 20,26'
+  && triPart.props.fill === 'var(--dsw-alias-label-primary)',
+  triPart && triPart.props.points);
+check('a triangle is not a bus or branch hover target',
+  api.drawioHoverTarget(triNode, api.drawioBranchPairs(triScene)) === null);
 
 // --- 20. the case file types the picker offers (0.7.1) ---------------------
 console.log('\n20. the case file types the picker offers (BPA Dat, 0.7.1)');
@@ -2658,7 +2723,7 @@ check('the Java OptAdj record is the runner-config record the plugin mirrors',
   OPTADJ_JAVA_FOUND.length + ' OptAdjRunConfig.java under src/main/java: '
   + (optAdjJavaPath === null ? 'none or ambiguous' : optAdjJavaPath.slice(ROOT.length + 1)));
 
-// The Host's six-key config block, parsed out of each half (see `hostCaDefaults` for the rules).
+// The Host's seven-key config block, parsed out of each half (see `hostCaDefaults` for the rules).
 const hostOptAdjDefaults = (path) => {
   const src = rd(path);
   const start = src.indexOf('const DEFAULT_OPTADJ_CONFIG = {');
@@ -2672,27 +2737,49 @@ const hostOptAdjDefaults = (path) => {
 };
 const optAdjLibDefaults = hostOptAdjDefaults(LIB_HOST);
 const optAdjDynDefaults = hostOptAdjDefaults(DYN_HOSTB);
-check('the six OptAdj keys are the same in all three host halves',
+check('the six OptAdj file keys are the same in all three host halves',
   optAdjLibDefaults !== null && Object.keys(optAdjLibDefaults).length === 6
+  && !Object.prototype.hasOwnProperty.call(optAdjLibDefaults, 'optAdjType')
   && optAdjDynDefaults !== null
   && Object.keys(optAdjLibDefaults).every((k) => Object.prototype.hasOwnProperty.call(optAdjDynDefaults, k)),
   optAdjLibDefaults === null ? 'no DEFAULT_OPTADJ_CONFIG' : Object.keys(optAdjLibDefaults).join(', '));
 check('the Java OptAdj defaults and mode tokens are the Host\'s',
   optAdjJava.indexOf('GEN_ADJ_BASE_CASE = "genAdjBaseCase"') >= 0
-  && optAdjJava.indexOf('GEN_ADJ_CA_N1 = "genAdjCaN_1"') >= 0
+  && optAdjJava.indexOf('GEN_ADJ_CA_N1 = "genAdjCA_N-1"') >= 0
   && optAdjJava.indexOf('List.of(GEN_ADJ_BASE_CASE, GEN_ADJ_CA_N1)') >= 0
   && optAdjJava.indexOf('DEFAULT_SCAN_BASE_CASE = 50.0') >= 0
   && optAdjJava.indexOf('DEFAULT_SCAN_CA_N1 = 90.0') >= 0
   && optAdjJava.indexOf('DEFAULT_OPT_ADJ_THRESHOLD = 100.0') >= 0
+  && optAdjJava.indexOf('DEFAULT_SPARSE_SEN_MATRIX = true') >= 0
   && optAdjJava.indexOf('DEFAULT_THREADS = 0') >= 0
-  && optAdjLibDefaults.optAdjType === "'genAdjBaseCase'"
+  && optAdjJava.indexOf('sparseSenMatrixOrDefault()') >= 0
+  && optAdjJava.indexOf('parseType(') >= 0
+  && optAdjJava.indexOf('scanLoadingThresholdOrDefault(String') >= 0
   && String(optAdjLibDefaults.optAdjLoadingThreshold) === '100'
   && String(optAdjLibDefaults.threads) === '0'
   && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
     const s = rd(p);
-    return s.indexOf("const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCaN_1']") >= 0
-      && s.indexOf('const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, genAdjCaN_1: 90 }') >= 0;
+    return s.indexOf("const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']") >= 0
+      && s.indexOf("const OPTADJ_DEFAULT_TYPE = 'genAdjBaseCase'") >= 0
+      && s.indexOf('function resolveOptAdjType(') >= 0
+      && s.indexOf("const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }") >= 0;
   }));
+// The sparse/dense knob is one field per half plus the Java record, and the runner must actually
+// hand it to both optimizers; a half that dropped the key, or a runner that kept the old literal
+// `true`, would silently run the other sensitivity setting.
+check('the sparse-sensitivity knob reaches both Java optimizers from every host half',
+  optAdjJava.indexOf('Boolean sparseSenMatrix, Integer threads') >= 0
+  && optAdjJava.indexOf('DEFAULT_SPARSE_SEN_MATRIX = true') >= 0
+  && optAdjJava.indexOf('sparseSenMatrixOrDefault()') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('new AclfNetContigencyOptimizer(sparseSenMatrix)') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('new AclfNetLoadFlowOptimizer(sparseSenMatrix)') >= 0
+  && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => /sparseSenMatrix: true/.test(rd(p)))
+  && rd(LIB_HOST).indexOf('sparseSenMatrix must be true or false') >= 0
+  && rd(DYN_HOST).indexOf('sparseSenMatrix must be true or false') >= 0
+  && String(optAdjLibDefaults.sparseSenMatrix) === 'true'
+  && String(optAdjDynDefaults.sparseSenMatrix) === 'true');
 // The tool, its RPC and its card: a registered tool without the RPC (or without the card) is a
 // row that fails the moment it is called, or one that renders nothing.
 check('the tool, its RPC and its card are all registered',
@@ -2707,7 +2794,7 @@ check('the tool, its RPC and its card are all registered',
 // for `_DF_optadj_gen.csv`, and the card renders nothing.
 const OPTADJ_RUNNER_JAVA = join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java');
 check('the Java OptAdj runner names its two CSVs from the run mode',
-  rd(OPTADJ_RUNNER_JAVA).indexOf('String suffix = cfg.isCaN1() ? "_DF_optadj_N1" : "_DF_optadj"') >= 0
+  rd(OPTADJ_RUNNER_JAVA).indexOf('String suffix = caN1 ? "_DF_optadj_N1" : "_DF_optadj"') >= 0
   && rd(OPTADJ_RUNNER_JAVA).indexOf('String genCsv = stem + suffix + "_gen.csv"') >= 0
   && rd(OPTADJ_RUNNER_JAVA).indexOf('String branchCsv = stem + suffix + "_branch.csv"') >= 0,
   rd(OPTADJ_RUNNER_JAVA).indexOf('"_DF_optadj_N1"') >= 0 ? 'N1 infix on the mode' : 'no mode-dependent suffix');
@@ -2718,12 +2805,76 @@ const optAdjNamesBody = (path) => {
   const m = /function optAdjResultNames\(stem, optAdjType\) \{([\s\S]*?)\n[ \t]*\}/.exec(rd(path));
   return m === null ? null : m[1];
 };
-const optAdjNamesFn = (path) => {
-  const body = optAdjNamesBody(path);
-  if (body === null) return null;
-  try { return new Function('stem', 'optAdjType', body); } catch (e) { return null; }
+// The name rule now reads the mode through each half's own `canonicalOptAdjType`, so the harness
+// composes that half's real canonicalizer with its real tables: evaluating the pair together is what
+// proves a legacy spelling lands on the same N-1 pair as the canonical token.
+const optAdjLiteral = (path, re) => {
+  const m = re.exec(rd(path));
+  if (m === null) return null;
+  try { return new Function('return ' + m[1])(); } catch (e) { return null; }
 };
-const optAdjHostFns = [LIB_HOST, DYN_HOSTB, DYN_HOST].map(optAdjNamesFn);
+// Brace-matched function-body extraction: a non-greedy regex stops at the first nested `}`, which
+// truncates a body that contains a loop or an `if` block (optAdjConfigPayload has a `for`).
+const optAdjFnBody = (src, name) => {
+  const head = 'function ' + name + '(';
+  const start = src.indexOf(head);
+  if (start < 0) return null;
+  const argsEnd = src.indexOf(')', start + head.length);
+  if (argsEnd < 0) return null;
+  const open = src.indexOf('{', argsEnd);
+  if (open < 0) return null;
+  let depth = 0;
+  let quote = '';
+  for (let i = open; i < src.length; i += 1) {
+    const ch = src[i];
+    if (quote !== '') {
+      if (ch === '\\') { i += 1; continue; }
+      if (ch === quote) quote = '';
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { quote = ch; continue; }
+    if (ch === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i);
+      if (nl < 0) return null;
+      i = nl;
+      continue;
+    }
+    if (ch === '{') depth += 1;
+    else if (ch === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return { args: src.slice(start + head.length, argsEnd), body: src.slice(open + 1, i) };
+      }
+    }
+  }
+  return null;
+};
+const optAdjBody = (path, name) => optAdjFnBody(rd(path), name);
+const optAdjScopeFn = (path) => {
+  const canon = optAdjBody(path, 'canonicalOptAdjType');
+  const resolve = optAdjBody(path, 'resolveOptAdjType');
+  const names = optAdjBody(path, 'optAdjResultNames');
+  const payload = optAdjBody(path, 'optAdjConfigPayload');
+  const types = optAdjLiteral(path, /const OPTADJ_TYPES = (\[[^\]]*\])/);
+  const legacy = optAdjLiteral(path, /const OPTADJ_LEGACY_TYPES = (\{[^}]*\})/);
+  const defaults = optAdjLiteral(path, /const DEFAULT_OPTADJ_CONFIG = (\{[\s\S]*?\n[ \t]*\})/);
+  if (canon === null || resolve === null || names === null || payload === null || types === null
+      || legacy === null || defaults === null) return null;
+  // Each captured slice is a function BODY, so the composed source re-declares every name around it.
+  const src = 'function canonicalOptAdjType(' + canon.args + ') {' + canon.body + '\n}\n'
+    + 'function resolveOptAdjType(' + resolve.args + ') {' + resolve.body + '\n}\n'
+    + 'function optAdjResultNames(' + names.args + ') {' + names.body + '\n}\n'
+    + 'function optAdjConfigPayload(' + payload.args + ') {' + payload.body + '\n}\n'
+    + 'return { optAdjResultNames, optAdjConfigPayload, resolveOptAdjType }';
+  try {
+    return new Function('OPTADJ_TYPES', 'OPTADJ_LEGACY_TYPES', 'DEFAULT_OPTADJ_CONFIG',
+      'OPTADJ_SCAN_DEFAULTS', 'OPTADJ_CONFIG_KEYS', 'OPTADJ_DEFAULT_TYPE', src)(
+      types, legacy, defaults, { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 },
+      Object.keys(defaults), 'genAdjBaseCase');
+  } catch (e) { return null; }
+};
+const optAdjScopes = [LIB_HOST, DYN_HOSTB, DYN_HOST].map(optAdjScopeFn);
+const optAdjHostFns = optAdjScopes.map((scope) => (scope === null ? null : scope.optAdjResultNames));
 const optAdjNamesOf = (fn, type) => {
   try { return fn === null ? null : fn('ieee39', type); } catch (e) { return null; }
 };
@@ -2731,10 +2882,72 @@ const optAdjPair = (fn, type) => {
   const names = optAdjNamesOf(fn, type);
   return names === null ? null : names.genFile + '|' + names.branchFile;
 };
-check('the Host mirrors the runner\'s names for both modes',
+check('the Host mirrors the runner\'s names for both modes, retired spelling included',
   optAdjHostFns.every((fn) => optAdjPair(fn, 'genAdjBaseCase') === 'ieee39_DF_optadj_gen.csv|ieee39_DF_optadj_branch.csv'
-    && optAdjPair(fn, 'genAdjCaN_1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'),
-  optAdjHostFns.map((fn) => optAdjPair(fn, 'genAdjCaN_1')).join(' / '));
+    && optAdjPair(fn, 'genAdjCA_N-1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'
+    && optAdjPair(fn, 'genAdjCaN_1') === 'ieee39_DF_optadj_N1_gen.csv|ieee39_DF_optadj_N1_branch.csv'
+    && optAdjPair(fn, 'genAdjN2') === 'ieee39_DF_optadj_gen.csv|ieee39_DF_optadj_branch.csv'),
+  optAdjHostFns.map((fn) => optAdjPair(fn, 'genAdjCA_N-1')).join(' / '));
+// The alias lives in the Host, never in the bridge: the Java record rejects the retired token (its
+// own test pins that), so every half's resolveOptAdjType maps it before the mode reaches the
+// bridge — and the tool schema still advertises the canonical token only. The mode is a call
+// argument, not a config-file key.
+check('every host half normalises the retired mode token before the bridge sees it',
+  [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
+    const s = rd(p);
+    return s.indexOf('function resolveOptAdjType(') >= 0
+      && s.indexOf('const OPTADJ_LEGACY_TYPES = { genAdjCaN_1:') >= 0;
+  })
+  && rd(LIB_HOST).indexOf('enum: OPTADJ_TYPES') >= 0
+  && rd(LIB_HOST).indexOf('is still accepted on this argument') >= 0
+  && rd(LIB_HOST).indexOf('is not one of the six keys the Java record reads') >= 0,
+  rd(LIB_HOST).indexOf('OPTADJ_LEGACY_TYPES') >= 0 ? 'legacy map present' : 'no legacy map');
+// 0.7.11 — the mode left the Java record: the runner/bridge take it as a call argument, a leftover
+// `optAdjType` in a file is ignored by Java, and the Host is the one that keeps honoring it.
+const OPTADJ_BRIDGE_JAVA = join(JAVA_SRC, 'org', 'interpss', 'agent', 'bridge', 'IpssAgentBridge.java');
+check('the Java mode is a call argument, not a record field',
+  optAdjJava.indexOf('public record OptAdjRunConfig(Double scanLoadingThreshold') >= 0
+  && optAdjJava.indexOf('Boolean sparseSenMatrix, Integer threads)') >= 0
+  && optAdjJava.indexOf('public static String parseType(') >= 0
+  && optAdjJava.indexOf('public static boolean isCaN1(String optAdjType)') >= 0
+  && optAdjJava.indexOf('public double scanLoadingThresholdOrDefault(String optAdjType)') >= 0
+  && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
+    .indexOf('String optAdjType, OptAdjRunConfig config') >= 0
+  && rd(OPTADJ_BRIDGE_JAVA).indexOf('String optAdjType, String optAdjConfigJson') >= 0,
+  optAdjJava.indexOf('public record OptAdjRunConfig(') >= 0 ? 'record found' : 'no record');
+// The payload is exactly the six file keys the Java record reads, and the mode rides beside it as its
+// own bridge argument: a half that kept the mode in the JSON would have Java ignore it (the record no
+// longer reads the key), silently running the basecase.
+const optAdjPayloadOf = (scope, config, type) => {
+  try { return scope === null ? null : scope.optAdjConfigPayload(config, type); } catch (e) { return null; }
+};
+check('every host half sends the six Java file keys and no mode',
+  optAdjScopes.every((scope) => {
+    const payload = optAdjPayloadOf(scope, { scanLoadingThreshold: null, contingencyFile: null }, 'genAdjCA_N-1');
+    if (payload === null) return false;
+    const keys = Object.keys(payload).sort().join(',');
+    return keys === 'contingencyFile,contingencyMode,optAdjLoadingThreshold,scanLoadingThreshold,sparseSenMatrix,threads'
+      && payload.optAdjType === undefined
+      && payload.scanLoadingThreshold === 90
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjCaN_1').scanLoadingThreshold === 90
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjBaseCase').scanLoadingThreshold === 50
+      && optAdjPayloadOf(scope, { scanLoadingThreshold: 77 }, 'genAdjBaseCase').scanLoadingThreshold === 77;
+  }),
+  optAdjScopes.map((scope) => {
+    const p = optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjCA_N-1');
+    return p === null ? 'null' : Object.keys(p).join(',');
+  }).join(' / '));
+check('every host half passes the mode beside the payload and reads it back from a file or object',
+  [LIB_HOST, DYN_HOST, DYN_HOSTB].every((p) => {
+    const s = rd(p);
+    return s.indexOf('optAdjType, JSON.stringify(optAdjConfigPayload(') >= 0
+      || s.indexOf('reload === true, optAdjType, optAdjConfigJson') >= 0;
+  })
+  && rd(LIB_HOST).indexOf('reload === true, optAdjType, optAdjConfigJson') >= 0
+  && [LIB_HOST, DYN_HOST, DYN_HOSTB].every((p) => rd(p).indexOf('const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])') >= 0
+    && rd(p).indexOf('const rawType = value[OPTADJ_MODE_KEY]') >= 0)
+  && rd(LIB_HOST).indexOf('config[OPTADJ_MODE_KEY]') >= 0,
+  rd(LIB_HOST).indexOf('OPTADJ_INPUT_KEYS') >= 0 ? 'mode accepted as an input key' : 'no mode input key');
 // The client's kind lookup, run for the same reason: `optadj_gen` must find both the basecase and
 // the N-1 generator file, and must not pick up the other kind's N-1 file.
 const kindSuffixBody = (() => {
@@ -2774,6 +2987,303 @@ check('the OptAdj runner, bridge entry point and config path exist',
     .indexOf('public synchronized String runOptAdjWithConfig(') >= 0
   && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'util', 'ProjectPaths.java'))
     .indexOf('caseOptAdjRunConfig(') >= 0);
+
+// --- 23. click selection and its highlight (0.7.13) -------------------------
+// Selecting a bus or branch is a paint-time mark exactly like the flags and the search: it
+// names cells that are ALREADY drawn and outlines them, so the .drawio, the parsed scene and the
+// desktop app never learn about it. These checks pin the two halves that can regress silently —
+// which cells a selection resolves to, and that the renderer adds only an outline (never a
+// replacement fill) when asked.
+console.log('\n23. diagram selection highlight (0.7.13)');
+if (scene) {
+  const selPairs = api.drawioBranchPairs(scene);
+  const label5 = scene.nodes.find((n) => n.kind === 'text' && n.lines.join('') === 'Bus-5');
+  const bar5 = scene.nodes.find((n) => n.id === 'bus5');
+  const busMarks = api.drawioSelectionMarks(scene, selPairs, { kind: 'bus', id: 'bus5' });
+  check('a bus selection marks its bar and its Bus-N label',
+    bar5 !== undefined && label5 !== undefined
+      && busMarks.nodes.indexOf('bus5') >= 0 && busMarks.nodes.indexOf(label5.id) >= 0
+      && busMarks.edges.length === 0,
+    JSON.stringify(busMarks.nodes));
+  const labelTarget = label5 === undefined ? null : api.drawioHoverTarget(label5, selPairs);
+  check('clicking the label selects the same bus cell the mark uses',
+    labelTarget !== null && labelTarget.kind === 'bus' && labelTarget.id === 'bus5',
+    JSON.stringify(labelTarget));
+
+  const xfMarks = api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus4|bus7' });
+  check('a transformer branch marks both stubs and both rings',
+    ['e8a', 'e8b'].every((id) => xfMarks.edges.indexOf(id) >= 0)
+      && ['xf8', 'xf8b'].every((id) => xfMarks.nodes.indexOf(id) >= 0),
+    JSON.stringify(xfMarks));
+  check('an unknown bus, an unknown pair or no target marks nothing',
+    api.drawioSelectionMarks(scene, selPairs, { kind: 'bus', id: 'bus999' }).nodes.length === 0
+      && api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus1|bus999' }).edges.length === 0
+      && api.drawioSelectionMarks(scene, selPairs, null).nodes.length === 0
+      && api.drawioSelectionMarks(null, selPairs, { kind: 'bus', id: 'bus5' }).nodes.length === 0);
+
+  const snapshot = () => JSON.stringify({
+    nodes: scene.nodes.map((n) => [n.id, n.x, n.y, n.w, n.h, n.fill, n.stroke]),
+    edges: scene.edges.map((e) => [e.id, e.source, e.target]),
+    pairs: selPairs,
+  });
+  const beforeMark = snapshot();
+  api.drawioSelectionMarks(scene, selPairs, { kind: 'branch', key: 'bus4|bus7' });
+  check('the mark helper only reads the scene and the pairs', beforeMark === snapshot());
+
+  // The renderer: with no target it must emit exactly the tree it always did.
+  const plainSvg = api.DrawioDiagram({ scene: scene });
+  const plainGroups = groupsOf(plainSvg);
+  check('with no selection or hover there is no mark group',
+    plainGroups.every((g) => String(g.props.key) !== 'sel' && String(g.props.key) !== 'hov')
+      && plainGroups.length === scene.nodes.length + scene.edges.length,
+    plainGroups.length + ' groups');
+
+  const selSvg = api.DrawioDiagram({ scene: scene, selected: { kind: 'bus', id: 'bus5' } });
+  const selGroups = groupsOf(selSvg);
+  const selGroup = selGroups.filter((g) => String(g.props.key) === 'sel')[0];
+  check('a selected bus adds one mark group over the drawing',
+    selGroup !== undefined && selGroups[selGroups.length - 1] === selGroup
+      && selGroup.props.pointerEvents === 'none');
+  const selOutlines = selGroup === undefined ? [] : partsOf(selGroup)
+    .filter((p) => p.type === 'rect' && String(p.props.key).indexOf('mn') === 0);
+  check('the selection outlines the bar and its label in the selection blue',
+    selOutlines.length === 2 && selOutlines.every((p) => p.props.stroke === api.DRAWIO_SELECT_STROKE
+      && p.props.strokeDasharray === '5 3'),
+    selOutlines.length + ' outlines');
+  check('the selection blue is the birdseye frame colour, not the search green',
+    api.DRAWIO_SELECT_STROKE === api.DRAWIO_BIRDSEYE_FRAME && api.DRAWIO_SELECT_STROKE !== api.DRAWIO_MATCH_FILL,
+    api.DRAWIO_SELECT_STROKE);
+
+  // A flagged bus keeps its flag colour underneath the outline.
+  const bus5Index = scene.nodes.findIndex((n) => n.id === 'bus5');
+  const flagSvg = api.DrawioDiagram({ scene: scene, paint: { bus5: '#C0392B' }, selected: { kind: 'bus', id: 'bus5' } });
+  const flagBar = (groupsOf(flagSvg).filter((g) => String(g.props.key) === 'n' + bus5Index)[0] || { kids: [] });
+  const flagShape = partsOf(flagBar).filter((p) => p.props.key === 's')[0];
+  check('the outline leaves a flagged bus its own fill and stroke',
+    flagShape !== undefined && flagShape.props.fill === '#C0392B' && flagShape.props.stroke === '#C0392B',
+    flagShape && flagShape.props.fill);
+
+  const xfSvg = api.DrawioDiagram({ scene: scene, pairs: selPairs, selected: { kind: 'branch', key: 'bus4|bus7' } });
+  const xfGroup = groupsOf(xfSvg).filter((g) => String(g.props.key) === 'sel')[0];
+  const xfParts = xfGroup === undefined ? [] : partsOf(xfGroup);
+  const halos = xfParts.filter((p) => p.type === 'polyline' && String(p.props.key).indexOf('mh') === 0);
+  const cores = xfParts.filter((p) => p.type === 'polyline' && String(p.props.key).indexOf('md') === 0);
+  const ringOutlines = xfParts.filter((p) => p.type === 'ellipse');
+  check('a selected transformer branch draws a halo and a dashed core on both stubs',
+    halos.length === 2 && cores.length === 2
+      && cores.every((p) => p.props.strokeDasharray === '6 3'),
+    halos.length + ' halos / ' + cores.length + ' cores');
+  check('and outlines both transformer rings', ringOutlines.length === 2, ringOutlines.length + ' rings');
+
+  const hovSvg = api.DrawioDiagram({ scene: scene, hovered: { kind: 'bus', id: 'bus5' } });
+  const hovGroup = groupsOf(hovSvg).filter((g) => String(g.props.key) === 'hov')[0];
+  const hovParts = hovGroup === undefined ? [] : partsOf(hovGroup);
+  check('a hovered element gets the lighter mark and no dashed core',
+    hovGroup !== undefined && hovParts.length === 2
+      && hovParts.every((p) => String(p.props.key).indexOf('md') !== 0)
+      && hovParts.every((p) => p.props.strokeDasharray !== '5 3'));
+
+  const sameSvg = api.DrawioDiagram({
+    scene: scene,
+    selected: { kind: 'bus', id: 'bus5' },
+    hovered: { kind: 'bus', id: 'bus5' },
+  });
+  check('an identical hover is not painted twice',
+    groupsOf(sameSvg).filter((g) => String(g.props.key) === 'sel' || String(g.props.key) === 'hov').length === 1);
+
+  const hiddenSelSvg = api.DrawioDiagram({
+    scene: scene,
+    hidden: { bus5: true, [label5.id]: true },
+    selected: { kind: 'bus', id: 'bus5' },
+  });
+  check('a filtered-out selection leaves no outline behind',
+    groupsOf(hiddenSelSvg).every((g) => String(g.props.key) !== 'sel'));
+
+  // The click wiring: the hit areas report the same targets the marks resolve, and pass the
+  // event through so the canvas's clear-on-click can be stopped.
+  const picked = [];
+  const forwarded = [];
+  const clickHover = {
+    pairs: selPairs,
+    onBus: () => {}, onBranch: () => {}, onMove: () => {}, onLeave: () => {},
+    onPick: (target, event) => { picked.push(target); forwarded.push(event) },
+  };
+  const clickSvg = api.DrawioDiagram({ scene: scene, hover: clickHover });
+  const clickParts = {};
+  for (const g of groupsOf(clickSvg)) clickParts[String(g.props.key)] = partsOf(g);
+  const busHit = (clickParts['n' + bus5Index] || []).filter((p) => p.props.key === 'h')[0];
+  const busEvent = { clientX: 1, clientY: 2 };
+  busHit.props.onClick(busEvent);
+  const e8aIndex = scene.edges.findIndex((e) => e.id === 'e8a');
+  const edgeHit = (clickParts['e' + e8aIndex] || []).filter((p) => p.props.key === 'h')[0];
+  const edgeEvent = { clientX: 3, clientY: 4 };
+  edgeHit.props.onClick(edgeEvent);
+  check('a click reports the bus cell and the resolved branch pair',
+    picked.length === 2 && picked[0].kind === 'bus' && picked[0].id === 'bus5'
+      && picked[1].kind === 'branch' && picked[1].key === 'bus4|bus7',
+    JSON.stringify(picked));
+  check('the hit areas pass their event through to the picker',
+    forwarded[0] === busEvent && forwarded[1] === edgeEvent);
+  check('the picker stops the event so the canvas cannot clear what it just selected',
+    /function pickTarget\(target, event\)[\s\S]{0,200}?event\.stopPropagation\(\)/.test(body));
+
+  // The view wires the renderer, guards the drag and clears the selection in all three ways.
+  check('the renderer receives the selection, the hover mark and the click handler',
+    body.indexOf('selected: selection') >= 0 && body.indexOf('hovered: hoverMark') >= 0
+      && body.indexOf('onPick: pickTarget') >= 0);
+  check('the canvas clears on a click and on Escape',
+    body.indexOf('onClick: canvasClick') >= 0 && body.indexOf('onKeyDown: canvasKeyDown') >= 0
+      && /function canvasClick\(\)[\s\S]{0,120}?clearSelection\(\)/.test(body)
+      && /function canvasKeyDown\(e\)[\s\S]{0,80}?Escape[\s\S]{0,40}?clearSelection\(\)/.test(body));
+  check('a drag is never a selection',
+    /pickRef\.current = \{ moved: false/.test(body)
+      && /Math\.abs\(e\.clientX - pick\.x\) > 4/.test(body)
+      && /if \(pickRef\.current\.moved\) return/.test(body));
+  check('the pinned tip is addressed by its selection key so a late answer cannot retarget it',
+    /setPinnedTip\(\(t\) => \(t === null \|\| t\.key !== key \? t : \{ key: key, text: text/.test(body));
+  check('a click on the birdseye does not reach the canvas clear',
+    /onPointerLeave: \(e\) => \{ e\.stopPropagation\(\); if \(grab\) setGrab\(false\) \},[\s\S]{0,200}?onClick: \(e\) => e\.stopPropagation\(\)/.test(body));
+
+  // The pinned tooltip outlives the hover tip; the hover tip wins while the cursor is on an
+  // element. Both are plain render states, so this is a render check like the rest of §12.
+  const openState = [
+    ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
+    ['files', tabFiles(2)],
+    ['filesLoading', false],
+    ['path', 'wspace/data/c/diagram/d0.drawio'],
+    ['scene', scene],
+    ['loading', false],
+    ['error', null],
+  ];
+  const pinnedFlat = renderFlat(withState(openState.concat([
+    ['tip', null],
+    ['pinnedTip', { key: 'bus5', text: 'Bus Name: Bus5\nPinned selection', x: 10, y: 20 }],
+  ])));
+  check('a pinned selection tooltip renders after the hover tip is gone',
+    pinnedFlat.indexOf('THREW') < 0 && pinnedFlat.indexOf('Pinned selection') >= 0, pinnedFlat.slice(0, 120));
+  const bothFlat = renderFlat(withState(openState.concat([
+    ['tip', { text: 'HOVER TIP', x: 10, y: 20 }],
+    ['pinnedTip', { key: 'bus5', text: 'PINNED TIP', x: 10, y: 20 }],
+  ])));
+  check('the hover tip outranks the pinned one while the cursor is on an element',
+    bothFlat.indexOf('HOVER TIP') >= 0 && bothFlat.indexOf('PINNED TIP') < 0);
+}
+
+// --- 24. the diagram Python tools live under src/main/py/diagram ------------
+// The generator and the draw.io MCP helper moved out of `wspace/script/` (which keeps only the
+// `.gvy` fixtures). Every living command in the skill and the guides names them, so a relocation
+// that missed one of those references sends a user to a file that is no longer there — the failure
+// is just ENOENT, with no code path in the plugin to catch it. Pin the new home, the co-location,
+// the empty old one, and the references themselves.
+console.log('\n24. the diagram Python tooling moved to src/main/py/diagram');
+check('the generator and the MCP helper live under src/main/py/diagram',
+  existsSync(GENERATOR) && existsSync(DRAWIO_MCP),
+  (existsSync(GENERATOR) ? '' : 'missing ' + GENERATOR + '; ')
+    + (existsSync(DRAWIO_MCP) ? '' : 'missing ' + DRAWIO_MCP));
+check('the old wspace/script copies are gone (that folder keeps only the .gvy fixtures)',
+  !existsSync(join(ROOT, 'wspace', 'script', 'gen_oneline_diagram.py'))
+    && !existsSync(join(ROOT, 'wspace', 'script', 'drawio_mcp.py')));
+check('the generator finds its MCP helper beside itself, not at a hard-coded path',
+  generatorSrc.indexOf('os.path.dirname(os.path.abspath(__file__)), "drawio_mcp.py"') >= 0);
+
+const diagramRefs = {
+  'the diagram skill': '.agents/skills/ipss-case-diagram/SKILL.md',
+  'the tools reference': 'docs/interpss-tools.md',
+  'the process guide': 'docs/oneline-diagram-process.md',
+  'the diagram user guide': 'docs/user_guide/oneline_diagram_user_guide.md',
+};
+const readDiagramRef = (rel) => readFileSync(join(ROOT, rel), 'utf8');
+const staleRefs = Object.keys(diagramRefs).filter((name) => {
+  const text = readDiagramRef(diagramRefs[name]);
+  return text.indexOf('wspace/script/gen_oneline_diagram.py') >= 0
+    || text.indexOf('wspace/script/drawio_mcp.py') >= 0;
+});
+check('no living doc or skill still names the old wspace/script python path',
+  staleRefs.length === 0, staleRefs.join(', '));
+check('the living docs and the skill name the new generator path',
+  Object.keys(diagramRefs).every((name) => readDiagramRef(diagramRefs[name])
+    .indexOf('src/main/py/diagram/gen_oneline_diagram.py') >= 0),
+  Object.keys(diagramRefs).filter((name) => readDiagramRef(diagramRefs[name])
+    .indexOf('src/main/py/diagram/gen_oneline_diagram.py') < 0).join(', '));
+check('the skill and the process guide name the new MCP helper path',
+  ['.agents/skills/ipss-case-diagram/SKILL.md', 'docs/oneline-diagram-process.md']
+    .every((rel) => readDiagramRef(rel).indexOf('src/main/py/diagram/drawio_mcp.py') >= 0));
+
+// --- 25. generator bus symbols (--symbols, 0.7.14) -------------------------
+// The generator's optional equipment symbols are driven by the equipment tables. Both hang off
+// the RIGHT edge of the bar on short leads (a generator lead + `~` circle, a load lead + drop +
+// down arrow) and must stay inside the bus footprint, which is what keeps the page and the
+// layout unchanged. These are source pins: the feature needs numpy and Pillow, so the guard
+// cannot run it, but the contract it must keep is visible in the code.
+console.log('\n25. generator bus symbols (--symbols, 0.7.14)');
+check('the generator offers --symbols none|gen|load|both, default none',
+  generatorSrc.indexOf('ap.add_argument("--symbols", choices=("none", "gen", "load", "both"), default="none"') >= 0);
+check('bus status comes from the gen/load tables, by BusID, with no InService or MW filter',
+  generatorSrc.indexOf('equipment = {"gen": gen_csv, "load": load_csv}') >= 0
+    && generatorSrc.indexOf('mark_equipment(buses, by_id, gen_csv, "has_gen")') >= 0
+    && generatorSrc.indexOf('mark_equipment(buses, by_id, load_csv, "has_load")') >= 0
+    && generatorSrc.indexOf('row["InService"]') < 0 && generatorSrc.indexOf('row.get("InService")') < 0);
+check('a generator is a `~` ellipse and a load a south-pointing triangle, each in a group',
+  generatorSrc.indexOf('GEN_STYLE = ("ellipse;') >= 0
+    && generatorSrc.indexOf('LOAD_STYLE = ("shape=triangle;direction=south;') >= 0
+    && generatorSrc.indexOf('"value": "~"') >= 0
+    && generatorSrc.indexOf('"id": "gg%d" % b.num') >= 0
+    && generatorSrc.indexOf('"id": "lg%d" % b.num') >= 0
+    && generatorSrc.indexOf('"style": "group"') >= 0
+    && generatorSrc.indexOf('"id": "gen%d" % b.num') >= 0
+    && generatorSrc.indexOf('"id": "ld%d" % b.num') >= 0);
+check('each symbol is ANCHORED to its bus by a lead edge (source bus, target symbol)',
+  generatorSrc.indexOf('"id": "sg%d" % b.num') >= 0
+    && generatorSrc.indexOf('"id": "sl%d" % b.num') >= 0
+    && generatorSrc.indexOf('"source": "bus%d" % b.num, "target": "gen%d" % b.num') >= 0
+    && generatorSrc.indexOf('"source": "bus%d" % b.num, "target": "ld%d" % b.num') >= 0
+    && generatorSrc.indexOf('endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=%g;') >= 0
+    && generatorSrc.indexOf('if sy.get("entry") is not None:') >= 0
+    && generatorSrc.indexOf('"exit": (0.0, GEN_FRAC)') >= 0
+    && generatorSrc.indexOf('"exit": (1.0, LOAD_FRAC)') >= 0
+    && generatorSrc.indexOf('"points": [(x + BUS_W + SYM_STEM, ey)]') >= 0);
+check('each symbol group owns its circle/triangle, so the symbol moves as one object',
+  generatorSrc.indexOf('"parent": "gg%d" % b.num') >= 0
+    && generatorSrc.indexOf('"parent": "lg%d" % b.num') >= 0
+    && generatorSrc.indexOf('groups[parent]["x"], groups[parent]["y"]') >= 0);
+check('the generator hangs off the left edge, the load off the right, both inside the footprint',
+  generatorSrc.indexOf('gx, gy = x - SYM_STEM - 2 * GEN_R, cy - GEN_R') >= 0
+    && generatorSrc.indexOf('tx = x + BUS_W + SYM_STEM - LOAD_W / 2.0') >= 0
+    && generatorSrc.indexOf('SYM_STEM = 6.0') >= 0
+    && generatorSrc.indexOf('GEN_R = 6.5') >= 0
+    && generatorSrc.indexOf('LOAD_W, LOAD_H = 6.5, 13.0') >= 0
+    && generatorSrc.indexOf('LOAD_DROP = 9.0') >= 0);
+check('the equipment symbols cannot inflate the transformer ring count',
+  generatorSrc.indexOf('re.fullmatch(r"xf\\d+b?", c.get("id")') >= 0);
+check('the 20000-cell cap is shared by the self-check and the pre-layout --symbols check',
+  generatorSrc.indexOf('PREVIEW_MAX_CELLS = 20000') >= 0
+    && generatorSrc.indexOf('len(cells) > PREVIEW_MAX_CELLS') >= 0
+    && generatorSrc.indexOf('estimate > PREVIEW_MAX_CELLS') >= 0
+    && generatorSrc.indexOf('3 * n_gen + 3 * n_load') >= 0);
+check('a requested family with no equipment table is refused with the missing path',
+  generatorSrc.indexOf('--symbols %s needs %s') >= 0
+    && generatorSrc.indexOf('drop %s from --symbols') >= 0);
+check('a symbol file is validated against the tables, and a symbol-less file still passes',
+  generatorSrc.indexOf('want_gen = {"gen%d" % b.num for b in buses if b.has_gen}') >= 0
+    && generatorSrc.indexOf('have_gen = {i for i in sym_cells if re.fullmatch(r"gen\\d+", i)}') >= 0
+    && generatorSrc.indexOf('is not a `~` generator ellipse') >= 0
+    && generatorSrc.indexOf('load triangle pointing south') >= 0
+    && generatorSrc.indexOf('is not a symbol group cell') >= 0
+    && generatorSrc.indexOf('is not a child of %s') >= 0
+    && generatorSrc.indexOf('is not anchored bus%s -> %s') >= 0
+    && generatorSrc.indexOf('leaves its bus%d footprint') >= 0);
+check('a hand-added draw.io edge is rejected by --check (editor/tab drift)',
+  generatorSrc.indexOf('is not a generated edge') >= 0
+    && generatorSrc.indexOf('connects no bus') >= 0);
+check('the default output is <stem>-oneline-generate.drawio',
+  generatorSrc.indexOf('"%s-oneline-generate.drawio" % stem') >= 0);
+check('--check can skip the Bus-1 corner rule for a hand-adjusted layout',
+  generatorSrc.indexOf('"--no-anchor"') >= 0
+    && generatorSrc.indexOf('anchor=None if args.no_anchor else anchor') >= 0);
+check('the header carries only the title and subtitle (no legend box)',
+  generatorSrc.indexOf('id="legend"') < 0
+    && generatorSrc.indexOf('legendText') < 0
+    && generatorSrc.indexOf('BAND_H = 90.0') >= 0);
 
 console.log('\n' + (failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'));
 process.exit(failures === 0 ? 0 : 1);

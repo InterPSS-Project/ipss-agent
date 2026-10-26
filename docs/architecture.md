@@ -115,7 +115,7 @@ java -jar …/ipss-agent-cmd-1.0.0-uber.jar report <nerc|aclf> "<display_name>" 
 | `GvyScriptRunner` | `runner` | Evaluate a Groovy `.gvy` script against a live `AclfNetwork` (`aclfnet` binding) → mutation digest |
 | `ContingencyRunner` | `runner` | DC N-1 contingency → contingency CSV |
 | `OptAdjRunner` | `runner` | Generator redispatch for thermal limits (SSA scan → LP → re-scan) → gen + branch CSVs |
-| `CaRunConfig`, `OptAdjRunConfig` | `runner/config` | Per-case run configuration records: CA (`config/ca_run.json`, 20 keys) and OptAdj (`config/opt_adj_run.json`, 6 keys: mode, both thresholds, contingency input, worker count) |
+| `CaRunConfig`, `OptAdjRunConfig` | `runner/config` | Per-case run configuration records: CA (`config/ca_run.json`, 20 keys) and OptAdj (`config/opt_adj_run.json`, 6 keys: both thresholds, contingency input, sparse flag, worker count; mode is a runner/bridge argument) |
 | `ReportRunner` | `report` | Orchestrate Markdown report generation |
 | `IpssAgentBridge` | `bridge` | In-process JSON facade for DSH `java-bridge` |
 | `SimuModelRepository` | `model` | Cache one base-case `AclfNetwork` in memory |
@@ -241,11 +241,16 @@ still writes both CSVs. Method, prerequisites and anchors:
 [gen_opt_adjustment.md](gen_opt_adjustment.md).
 
 **OptAdj config resolution** (`OptAdjRunner.resolveInputs`, printed as `Using opt_adj_run.json: …`):
-an explicit CLI contingency file pins the `custom` mode to it; else the case-specific
-`wspace/<input_parent>/config/opt_adj_run.json`; else the built-in defaults (basecase mode, 50 %
-scan, 100 % enforcement, all N-1 outages, one SSA worker per processor). Only `genAdjCaN_1` reads a
-contingency file — a basecase run rejects one. The chat tool layers its scalar arguments and its
-`optAdjConfig` object over the same file, so GUI-less and scripted runs agree.
+an explicit CLI contingency file pins the `custom` contingency mode to it; else the case-specific
+`wspace/<input_parent>/config/opt_adj_run.json`; else the built-in defaults (50 % scan / 100 %
+enforcement for basecase, all N-1 outages, sparse sensitivities, one SSA worker per processor). The
+OptAdj **mode** is not a file key: the CLI infers `genAdjCA_N-1` when a contingency path is present
+and otherwise runs `genAdjBaseCase`; the bridge / chat tool pass `optAdjType` as a separate argument.
+Only `genAdjCA_N-1` reads a contingency file — a basecase run rejects one. The chat tool layers its
+scalar file-key arguments and its `optAdjConfig` object over the same file, and resolves the mode as
+the tool argument → an `optAdjType` named in that object or the file → the CLI's inference (a
+contingency path means N-1) → basecase; the retired `genAdjCaN_1` spelling is folded onto
+`genAdjCA_N-1` wherever the mode is read, before the bridge sees it.
 
 ### Step 5 — Report generation
 
@@ -290,7 +295,7 @@ Analyzers (`VoltageAnalyzer`, `BranchLoadingAnalyzer`, `GeneratorQAnalyzer`, `Co
 | `<stem>_DF_load.csv` | ACLF |
 | `<stem>_DF_contingency.csv` | CA |
 | `<stem>_DF_optadj_gen.csv` / `<stem>_DF_optadj_branch.csv` | OptAdj basecase (`genAdjBaseCase`) |
-| `<stem>_DF_optadj_N1_gen.csv` / `<stem>_DF_optadj_N1_branch.csv` | OptAdj N-1 (`genAdjCaN_1`, 0.7.5+) |
+| `<stem>_DF_optadj_N1_gen.csv` / `<stem>_DF_optadj_N1_branch.csv` | OptAdj N-1 (`genAdjCA_N-1`, 0.7.5+) |
 | `AC_Loadflow_Report.md` | `report aclf` |
 | `NERC_TPL_001_5_Report.md` | `report nerc` |
 
@@ -312,7 +317,7 @@ Legacy layout `wspace/result/<subdir>/` is still supported by `ReportCaseResolve
 | `runAclf(format, absCasePath, absConfigPath, absResultsDir, stem)` | Reuse cached net when path matches; call `AclfRunner.runOnNet()` |
 | `runGvy(format, absCasePath, absScriptPath, reload)` | `.gvy` under `<case dir>/scripts/` only; reuse the cached net unless `reload`; evaluate via `GvyScriptRunner` (mutates in place) |
 | `runContingencyWithConfig(format, absCasePath, absContPath, absMonitorPath, absResultsDir, stem, caConfigJson)` | Whole `ca_run.json` payload → `ContingencyRunner.runOnNet` |
-| `runOptAdjWithConfig(format, absCasePath, absContPath, absResultsDir, stem, reload, optAdjConfigJson)` | Whole `opt_adj_run.json` payload → `OptAdjRunner.runOnNet`; **mutates the cached net's generator P**, so `reload` re-parses first |
+| `runOptAdjWithConfig(format, absCasePath, absContPath, absResultsDir, stem, reload, optAdjType, optAdjConfigJson)` | Mode + `opt_adj_run.json` payload → `OptAdjRunner.runOnNet`; **mutates the cached net's generator P**, so `reload` re-parses first |
 | `summarize(scope, sortRule, numRec)` | In-memory result summary via `AclfResultAdapter` |
 | `getNetworkInfo()` | Text network summary |
 | `runReport(reportType, displayName, projectRoot, resultDirRelative, csvPrefix)` | Delegate to `ReportRunner` |

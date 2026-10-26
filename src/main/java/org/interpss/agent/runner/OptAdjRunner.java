@@ -51,6 +51,10 @@ import com.interpss.optadj.result.SsaResultContainer;
  * {@code getPGenLimit()} without a null check, so the alternative is an opaque
  * {@code NullPointerException} halfway through the LP.
  * <p>
+ * The mode ({@link OptAdjRunConfig#GEN_ADJ_BASE_CASE} / {@link OptAdjRunConfig#GEN_ADJ_CA_N1}) is a
+ * call argument, not a {@code config/opt_adj_run.json} key. The CLI infers N-1 when a contingency
+ * path is present and otherwise runs the basecase; the bridge / chat tool pass the mode explicitly.
+ * <p>
  * The adjustment is applied to the {@code AclfNetwork} the caller passes in (the DCLF model's gen
  * P is overwritten), so a second run continues from the redispatched state.
  */
@@ -63,7 +67,7 @@ public final class OptAdjRunner {
             Path resultsDir, String stem) throws Exception {
         AclfNetwork net = NetworkLoader.loadNetwork(cli.format(), caseFilePath);
         ValidatedOptAdjInputs inputs = resolveInputs(paths, cli);
-        return runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.config());
+        return runOnNet(net, resultsDir, stem, inputs.contPath(), inputs.optAdjType(), inputs.config());
     }
 
     /**
@@ -83,9 +87,11 @@ public final class OptAdjRunner {
      * one rather than ignoring it.
      */
     public static OptAdjSummary runOnNet(AclfNetwork net, Path resultsDir, String stem,
-            Path contPath, OptAdjRunConfig config) throws Exception {
+            Path contPath, String optAdjType, OptAdjRunConfig config) throws Exception {
         OptAdjRunConfig cfg = config == null ? OptAdjRunConfig.DEFAULT : config;
-        if (contPath != null && !cfg.isCaN1()) {
+        String type = OptAdjRunConfig.parseType(optAdjType, "optAdjType");
+        boolean caN1 = OptAdjRunConfig.isCaN1(type);
+        if (contPath != null && !caN1) {
             throw new IllegalStateException("a basecase OptAdj run has no contingencies: use optAdjType '"
                     + OptAdjRunConfig.GEN_ADJ_CA_N1 + "' or drop the contingency file");
         }
@@ -118,19 +124,19 @@ public final class OptAdjRunner {
         algo.calculateDclf(DclfMethod.INC_LOSS);
 
         List<DclfBranchOutage> contList = null;
-        if (cfg.isCaN1()) {
+        if (caN1) {
             contList = contPath != null
                     ? dclfContList(algo, contPath)
                     : ContingencyRunner.n1BranchOutageList(algo);
         }
 
         AclfNetSsaHelper ssaHelper = new AclfNetSsaHelper(algo, cfg.threadsOrDefault());
-        double scanThreshold = cfg.scanLoadingThresholdOrDefault();
+        double scanThreshold = cfg.scanLoadingThresholdOrDefault(type);
         double optAdjThreshold = cfg.optAdjLoadingThresholdOrDefault();
-        SsaResultContainer scanned = cfg.isCaN1()
+        SsaResultContainer scanned = caN1
                 ? ssaHelper.contingencyScan(contList, scanThreshold)
                 : ssaHelper.baseCaseScan(scanThreshold);
-        List<SsaBranchOverLimitInfo> before = overLimitInfo(scanned, cfg.isCaN1());
+        List<SsaBranchOverLimitInfo> before = overLimitInfo(scanned, caN1);
         requireFiniteLoadings(before);
 
         // Nothing above the scan threshold means there is no constraint to relieve: skip the LP
@@ -139,19 +145,20 @@ public final class OptAdjRunner {
         Map<String, SsaBranchOverLimitInfo> after = new LinkedHashMap<>();
         if (!before.isEmpty()) {
             OptAdjResultContainer optAdjResult = new OptAdjResultContainer(scanned);
-            Map<String, GenAdjustResult> optimized = cfg.isCaN1()
-                    ? new AclfNetContigencyOptimizer(true).optimize(algo, optAdjResult, optAdjThreshold)
-                    : new AclfNetLoadFlowOptimizer(true).optimize(algo, optAdjResult, optAdjThreshold);
+            boolean sparseSenMatrix = cfg.sparseSenMatrixOrDefault();
+            Map<String, GenAdjustResult> optimized = caN1
+                    ? new AclfNetContigencyOptimizer(sparseSenMatrix).optimize(algo, optAdjResult, optAdjThreshold)
+                    : new AclfNetLoadFlowOptimizer(sparseSenMatrix).optimize(algo, optAdjResult, optAdjThreshold);
             adjustments = optimized != null
                     ? optimized
                     : (optAdjResult.getOptAdjResults() == null ? Map.of() : optAdjResult.getOptAdjResults());
 
             // Re-evaluate the SAME monitored set after the redispatch (the doc's post-opt anchors).
             algo.calculateDclf(DclfMethod.INC_LOSS);
-            SsaResultContainer rescanned = cfg.isCaN1()
+            SsaResultContainer rescanned = caN1
                     ? ssaHelper.contingencyScan(contList, before)
                     : ssaHelper.calBaseCaseLoading(before);
-            for (SsaBranchOverLimitInfo entry : overLimitInfo(rescanned, cfg.isCaN1())) {
+            for (SsaBranchOverLimitInfo entry : overLimitInfo(rescanned, caN1)) {
                 after.put(entryKey(entry), entry);
             }
         }
@@ -159,11 +166,11 @@ public final class OptAdjRunner {
         Files.createDirectories(resultsDir);
         // Each mode owns its own pair: `_DF_optadj_*` for the basecase, `_DF_optadj_N1_*` for the
         // N-1 scan, so the two can share one result folder (and the client can open either).
-        String suffix = cfg.isCaN1() ? "_DF_optadj_N1" : "_DF_optadj";
+        String suffix = caN1 ? "_DF_optadj_N1" : "_DF_optadj";
         String genCsv = stem + suffix + "_gen.csv";
         String branchCsv = stem + suffix + "_branch.csv";
         Csv.saver().save(genFrame(adjustments), resultsDir.resolve(genCsv).toString());
-        Csv.saver().save(branchFrame(before, after, cfg.isCaN1()), resultsDir.resolve(branchCsv).toString());
+        Csv.saver().save(branchFrame(before, after, caN1), resultsDir.resolve(branchCsv).toString());
 
         int gensAdjusted = 0;
         for (GenAdjustResult result : adjustments.values()) {
@@ -171,7 +178,7 @@ public final class OptAdjRunner {
                 gensAdjusted++;
             }
         }
-        OptAdjSummary summary = new OptAdjSummary(cfg.optAdjTypeOrDefault(), scanThreshold, optAdjThreshold,
+        OptAdjSummary summary = new OptAdjSummary(type, scanThreshold, optAdjThreshold,
                 contList == null ? 0 : contList.size(),
                 before.size(),
                 countAtOrAbove(before, optAdjThreshold),
@@ -186,8 +193,10 @@ public final class OptAdjRunner {
     }
 
     /**
-     * Effective run config for a CLI run: the case's {@code config/opt_adj_run.json} unless the
-     * CLI names a contingency file, which pins the {@code custom} mode to that file.
+     * Effective run inputs for a CLI run: the case's {@code config/opt_adj_run.json} (thresholds /
+     * contingency / sparse / threads) unless the CLI names a contingency file, which pins the
+     * {@code custom} mode to that file. The OptAdj mode is inferred: a contingency path means
+     * {@link OptAdjRunConfig#GEN_ADJ_CA_N1}, otherwise {@link OptAdjRunConfig#GEN_ADJ_BASE_CASE}.
      */
     public static ValidatedOptAdjInputs resolveInputs(ProjectPaths paths, CliArgs cli) {
         Path explicitCont = null;
@@ -209,14 +218,20 @@ public final class OptAdjRunner {
             System.out.println("Using opt_adj_run.json: " + configFile);
         }
 
+        Path contPath;
         if (explicitCont != null) {
-            config = new OptAdjRunConfig(config.optAdjType(), config.scanLoadingThreshold(),
-                    config.optAdjLoadingThreshold(), OptAdjRunConfig.CUSTOM, cli.contFile(), config.threads());
-            return new ValidatedOptAdjInputs(explicitCont, config);
+            config = new OptAdjRunConfig(config.scanLoadingThreshold(),
+                    config.optAdjLoadingThreshold(), OptAdjRunConfig.CUSTOM, cli.contFile(),
+                    config.sparseSenMatrix(), config.threads());
+            contPath = explicitCont;
+        } else {
+            contPath = ContingencyRunner.resolveConfigEntry(paths, configFile, config.contingencyInput(),
+                    config.contingencyIsCustom(), "contingencyFile", "custom contingencies");
         }
-        Path contPath = ContingencyRunner.resolveConfigEntry(paths, configFile, config.contingencyInput(),
-                config.contingencyIsCustom(), "contingencyFile", "custom contingencies");
-        return new ValidatedOptAdjInputs(contPath, config);
+        String optAdjType = contPath != null
+                ? OptAdjRunConfig.GEN_ADJ_CA_N1
+                : OptAdjRunConfig.GEN_ADJ_BASE_CASE;
+        return new ValidatedOptAdjInputs(contPath, optAdjType, config);
     }
 
     /** The contingency list a {@code custom} N-1 run scans, from the same JSON CA reads. */
@@ -343,8 +358,8 @@ public final class OptAdjRunner {
             {"branchId", "outageBranchId", "limitMW", "baseFlowMW", "loadingBeforePct",
                 "shiftedFlowMWAfter", "loadingAfterPct"};
 
-    /** The resolved contingency input plus the run config it came from. */
-    public record ValidatedOptAdjInputs(Path contPath, OptAdjRunConfig config) {
+    /** The resolved contingency input, the inferred/requested mode, and the run config. */
+    public record ValidatedOptAdjInputs(Path contPath, String optAdjType, OptAdjRunConfig config) {
     }
 
     /** What the run did, printed by the CLI and mirrored into the bridge's JSON reply. */

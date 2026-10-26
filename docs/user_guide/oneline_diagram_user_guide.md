@@ -19,7 +19,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 | Case has ACLF results but no diagram yet | Ask Chat to draw it (`$ipss-case-diagram`), or run the generator script |
 | Layout looks wrong after generation | Re-run with another `--seed`, or open the file in draw.io and edit |
 | You need the authoritative PNG | Use the Diagram tab’s draw.io button (desktop app), not only the Pillow preview |
-| You are comparing the preview with the draw.io app | Geometry and styles match since **0.6.33** (square bars, label alignment, label masks). These differences are deliberate: near-grey colours become theme tokens (dark mode), flagged buses/branches take the flag colours, a search hit turns **green** (`#2EA043`, **0.6.36+** / **0.7.0**), a filter hides what does not match, and the hover areas are padded |
+| You are comparing the preview with the draw.io app | Geometry and styles match since **0.6.33** (square bars, label alignment, label masks). These differences are deliberate: near-grey colours become theme tokens (dark mode), flagged buses/branches take the flag colours, a search hit turns **green** (`#2EA043`, **0.6.36+** / **0.7.0**), a filter hides what does not match, a clicked bus/branch takes the blue selection outline (**0.7.13+**, in the tab only — the file stays plain), and the hover areas are padded |
 | You want to find a bus or branch on a large drawing | Use **🔍 Search** (`Bus-N`, number, name, or `Bus-A -> Bus-B`); **OK** centres the view on the hit (**0.6.37+** / **0.7.0**) |
 
 
@@ -29,7 +29,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 
 ## Prerequisites
 
-- DeepSeek Harness with the InterPSS plugin installed — recommend **0.7.7+** (Diagram tab since **0.6.8**; draw.io button **0.6.12+**, configurable launcher **0.6.16+**; search / filter / gear / birdseye / ACLF–CA loadings through **0.6.37** / **0.7.0**; OptAdj branch-tooltip loadings **0.7.7+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
+- DeepSeek Harness with the InterPSS plugin installed — recommend **0.7.13+** (Diagram tab since **0.6.8**; draw.io button **0.6.12+**, configurable launcher **0.6.16+**; search / filter / gear / birdseye / ACLF–CA loadings through **0.6.37** / **0.7.0**; OptAdj branch-tooltip loadings **0.7.7+**; click-to-select highlighting **0.7.13+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 - An **iPSS Agent** workspace (same activation gate as the InterPSS tab)
 - A selected / loaded simulation case under `wspace/data/**`
 - For **generation**: converged ACLF outputs `<case>/result/<stem>_DF_bus.csv` and `_DF_branch.csv` (run ACLF first if missing)
@@ -60,7 +60,8 @@ Toolbar (plugin **0.6.11+**, zoom picker **0.6.21+**, Fit in the picker **0.6.22
 
 | Action | Effect |
 | ------ | ------ |
-| **hover** a bus bar (or its `Bus-N` label) or a branch | Same tooltip style as the InterPSS connection diagram; without a converged result: `no result data — run ACLF`. A branch adds its flow loadings (**0.6.30+**): `Basecase Loading(%): 13.4%` from the branch table, and `Contingency Loading(%): …` when the CA result table lists that branch — that table holds only branches at or above the CA's `overloadThreshold` (the case's `config/ca_run.json`, 90 % by default), so lower-loaded branches have no contingency line. Lower the threshold and re-run CA to see more (**0.6.31+** lists the table even when it holds few rows). An OptAdj run adds an **OptAdj** loading under the plain one of its own mode (**0.7.7+**): `Basecase OptAdj Loading(%): …` from `result/<stem>_DF_optadj_branch.csv` and `Contingency OptAdj Loading(%): …` from `result/<stem>_DF_optadj_N1_branch.csv`, each the **post-redispatch** `loadingAfterPct` (the worst outage for the N-1 pair) and each shown only when its file exists and lists that branch — the file holds just the run's scan candidates (50 % basecase / 90 % N-1 by default), so a lightly loaded branch has no OptAdj line even after a run |
+| **hover** a bus bar (or its `Bus-N` label) or a branch | The element takes a light **blue outline** (**0.7.13+**) and the tooltip follows the cursor: same style as the InterPSS connection diagram; without a converged result: `no result data — run ACLF`. A branch adds its flow loadings (**0.6.30+**): `Basecase Loading(%): 13.4%` from the branch table, and `Contingency Loading(%): …` when the CA result table lists that branch — that table holds only branches at or above the CA's `overloadThreshold` (the case's `config/ca_run.json`, 90 % by default), so lower-loaded branches have no contingency line. Lower the threshold and re-run CA to see more (**0.6.31+** lists the table even when it holds few rows). An OptAdj run adds an **OptAdj** loading under the plain one of its own mode (**0.7.7+**): `Basecase OptAdj Loading(%): …` from `result/<stem>_DF_optadj_branch.csv` and `Contingency OptAdj Loading(%): …` from `result/<stem>_DF_optadj_N1_branch.csv`, each the **post-redispatch** `loadingAfterPct` (the worst outage for the N-1 pair) and each shown only when its file exists and lists that branch — the file holds just the run's scan candidates (50 % basecase / 90 % N-1 by default), so a lightly loaded branch has no OptAdj line even after a run |
+| **click** a bus or branch (**0.7.13+**) | **Selects** it: the blue outline becomes solid selection feedback (2 px dashed `#1F6FEB` plus a 12 % blue fill) and the tooltip is **pinned** at the click point, so it stays after the cursor moves away; hovering another element still shows that element's tooltip and outline, and the pinned one returns when the cursor leaves. A bus selection marks its bar **and** its `Bus-N` label; a branch selection marks every cell of the pair — both transformer stubs, both symbol rings and all parallel circuits — and its tooltip lists every circuit's row. Click another element to move the selection, or click empty paper / press **Esc** to clear it. Dragging (more than a few pixels) is a **pan**, never a select, and the selection survives pan/zoom, a search and a filter; a filtered-out cell is simply no longer outlined. Nothing is written: the `.drawio`, the desktop app and the PNG stay plain |
 | **scroll** / **drag** | Zoom about the cursor / pan |
 | **🔍 Search the diagram** (**0.6.23+**, `->` since **0.6.25**, `Bus-1 -> Bus-2` since **0.6.35**, green highlight since **0.6.36**, centred on OK since **0.6.37**) | Opens a dialog (OK / Cancel): a bus number (`1001`), a bus id (`Bus-1001`), part of a bus name (`ODESSA`), or a branch written as `1001->1002` or between two ids (`Bus-1 -> Bus-2` — the id spelling, spaces around the arrow and the ids' hyphens all optional). The placeholder and help describe *this* case — its bus count and range, a branch example from its own bus ids, and a name from its own table. Matches are highlighted in **green** in the drawing (bus bar, its `Bus-N` text and the branch line) and counted next to the buttons; **OK** also brings the match to the middle of the view at the zoom you are already at (at **Fit** the whole drawing is visible, so nothing moves — zoom in first if you want the jump); **Cancel** changes nothing |
 | **▼ Filter the diagram** (**0.6.23+**, live message **0.6.24+**, band wording from the config **0.6.27+**, branch loading filters **0.6.32+**) | Opens a dialog (OK / Cancel) that keeps one **area** and/or **zone** (from the case's own bus table) and/or only the buses outside the band `config/net_diagram.json` sets (0.9–1.1 pu by default), and/or only the branches at or above a flow flag (**0.6.32+**) — base-case and/or contingency, each labelled with the threshold from that same config. Its message previews your selection live — `Showing 91 of 2000 buses (area 7 COAST, zone 1 BAY CITY).` — while the drawing itself changes only on **OK**. Everything that does not match is hidden, with its branches and transformer symbols; a branch-loading criterion also hides the buses that are not an end of a branch that stays, and the message then counts **branches** (`Showing 144 of 2000 buses and 86 of 2678 branches (base-case loading ≥ 70%).`). A loading box is disabled while its result table is missing (`no branch table yet` / `no CA table yet`). The funnel stays lit while a filter is on, and the status text (`filter: area 5 ✕`) clears it |
@@ -70,7 +71,7 @@ Toolbar (plugin **0.6.11+**, zoom picker **0.6.21+**, Fit in the picker **0.6.22
 | **a red bar + red `Bus-N`** (**0.6.18+**) | That bus's solved voltage magnitude is outside the band in `config/net_diagram.json` (default **0.9–1.1 pu**, checked strictly: the endpoints themselves are in band). Hover it for the out-of-band warning. Needs the case's ACLF result tables; a case with no results, or every bus in band, simply shows no red. **The `.drawio` file is not modified** — the colour is chosen when the tab renders the SVG, so the file, the desktop draw.io app and the generator's PNG preview stay exactly as generated |
 | **draw.io** button (upper-right, **0.6.15+**) | Opens the current file in the local draw.io desktop app, using the launcher configured in `config/ipss_plugin_env.json` (**0.6.16+**; `open -a draw.io` on macOS by default). Status text appears to the left of the button (`Launched draw.io…` or the Host error). Restart `dsh web` after a Host change so the button works. |
 
-(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS-tab Diagram modal; **0.6.12** / **0.6.15** / **0.6.16** draw.io button and launcher config; **0.6.18+** voltage / flow flags; **0.6.21–0.6.32** zoom picker, search/filter, gear, birdseye, branch loadings; **0.6.34** removed the `R` / `S` Source view; **0.6.35–0.6.37** bus-id branch search, green highlight, centre-on-OK; **0.7.0** packages that Diagram line; **0.7.6** / **0.7.7** add OptAdj post-redispatch loadings on branch tooltips — see [Release-V0.7.7.md](../release_note/Release-V0.7.7.md).)
+(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS-tab Diagram modal; **0.6.12** / **0.6.15** / **0.6.16** draw.io button and launcher config; **0.6.18+** voltage / flow flags; **0.6.21–0.6.32** zoom picker, search/filter, gear, birdseye, branch loadings; **0.6.34** removed the `R` / `S` Source view; **0.6.35–0.6.37** bus-id branch search, green highlight, centre-on-OK; **0.7.0** packages that Diagram line; **0.7.6** / **0.7.7** add OptAdj post-redispatch loadings on branch tooltips; **0.7.13** adds click-to-select highlighting — see [Release-V0.7.7.md](../release_note/Release-V0.7.7.md).)
 
 ### Configure the draw.io launcher (0.6.16+)
 
@@ -108,9 +109,9 @@ executable for each OS:
 
 ## Generate a one-line diagram
 
-Diagrams are **generated, not hand-placed**, for cases larger than a small teaching example. The generator (`wspace/script/gen_oneline_diagram.py`) lays out buses and branches from ACLF CSVs in the style of `wspace/template/oneline-diagram.drawio`, then writes:
+Diagrams are **generated, not hand-placed**, for cases larger than a small teaching example. The generator (`src/main/py/diagram/gen_oneline_diagram.py`) lays out buses and branches from ACLF CSVs in the style of `wspace/template/oneline-diagram.drawio`, then writes:
 
-- `<case>/diagram/<stem>-oneline.drawio` — what the Diagram tab opens
+- `<case>/diagram/<stem>-oneline-generate.drawio` — the default generated file the Diagram tab lists
 - `<stem>-oneline-preview.png` — optional Pillow preview (approximate)
 
 ### From Chat (recommended)
@@ -142,8 +143,12 @@ Use the harness Python that has **numpy** and **Pillow** (a bare system `python3
 ```bash
 PY="${DSH_PYTHON:-$HOME/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3}"
 
-"$PY" wspace/script/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
+"$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
     --title "IEEE 118-Bus One-Line Diagram"
+
+# with the equipment symbols (generator circle / load down-arrow on the right of each bar)
+"$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
+    --title "IEEE 118-Bus One-Line Diagram" --symbols both
 ```
 
 Useful flags:
@@ -153,8 +158,9 @@ Useful flags:
 | `--title TEXT` | Page title and diagram name |
 | `--layout auto\|force\|lattice` | Placement strategy. `auto` (default) uses the force pipeline up to **250 buses** and the lattice above it; `lattice` puts every bus on its own grid cell (the only path that can place a large case — Texas 2K, 2000 buses, produces an 8000 × 6000 page in ~18 s); `force` always uses the original pipeline |
 | `--seed N` | Another valid layout for the same topology (default `11`) |
+| `--symbols none\|gen\|load\|both` | Optional equipment symbols, default `none`. `gen` draws a `○~` circle on the **left** of every bus that has a row in `result/<stem>_DF_gen.csv`, `load` a `↓` arrow at the end of a lead-and-drop on the **right** of every bus in `_DF_load.csv`, `both` draws both. Status is **row presence only** (`InService` and MW are ignored), one symbol per family per bus; each lead is an **edge anchored to the bus** (source = bus, target = symbol), and the body is a group cell, so moving either end keeps the connection. Every part fits inside the bar's footprint, so the page size does not change; each symbol is 3 cells |
 | `--no-png` | Skip the Pillow preview |
-| `--check FILE` | Validate an existing diagram; write nothing |
+| `--check FILE` | Validate an existing diagram; write nothing. A file with symbols is checked against the equipment tables |
 | `--open` | After a passing self-check, open in the draw.io editor (MCP) |
 
 A non-zero exit means the self-check failed (ids, transformers, Bus-1 corner rule, etc.).
@@ -167,8 +173,9 @@ A non-zero exit means the self-check failed (ids, transformers, Bus-1 corner rul
 | Buses | Vertical bar per bus with `Bus-N` label above |
 | Branches | One undirected line per branch row; parallel circuits slightly apart |
 | Transformers | Two interlocking rings on `IsXfmr` branches |
-| Loads / generators / voltage colours | Not drawn — topology only |
-| Header | Title, subtitle (counts / voltage levels when available), legend |
+| Loads / generators | **Optional**, with `--symbols gen\|load\|both` (**0.7.14+**): a `○~` circle on the **left** of each bar that has a row in `result/<stem>_DF_gen.csv`, a `↓` arrow at the end of a lead-and-drop on the **right** of each bar in `_DF_load.csv`. Presence, not MW or `InService`; one symbol per family per bus; every lead is an edge **anchored to its bus** (so it never detaches when the bus or the symbol is moved), and the symbols stay inside the bar's footprint, so the page does not grow. They are marks only — the Diagram tab draws them (the arrow needs plugin 0.7.14+) but they have no tooltip |
+| Voltage colours | Not drawn **in the file** — the Diagram tab paints out-of-band buses red at render time only |
+| Header | Title, subtitle (counts / voltage levels when available), legend (the equipment line appears only when that family was drawn) |
 
 
 Regenerating **replaces** the `.drawio`. Hand edits in draw.io are lost on the next generator run unless you save under a different name.
@@ -219,6 +226,7 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 | Branch tooltip has base/CA loading but no OptAdj line | Needs `result/<stem>_DF_optadj_branch.csv` and/or `_DF_optadj_N1_branch.csv` from an OptAdj run (**0.7.7+**); the file lists only scan candidates, so a lightly loaded branch has no line. On **0.7.6** alone the lines never appeared — upgrade past the `readCsv` allow-list fix |
 | Search finds nothing, or the filter hides everything | Search understands a bus number, `Bus-N`, part of a name, or a branch between two buses — `A->B`, or `Bus-A -> Bus-B` (**0.6.35+** / **0.7.0**; a dash or slash works too); a filter that matches no bus hides the whole drawing — pick **All areas** and **All zones** in the filter dialog (or click the status text) to bring it back. Both read the selected case's `result/<stem>_DF_bus.csv`, so run ACLF first |
 | Search highlights green but the view does not jump | At **Fit** the whole page is already on screen, so **OK** leaves the view alone (**0.6.37+**). Zoom in first, then search again — or pan with the birdseye if it is enabled |
+| Clicking a bus/branch does not select it | Selection is **0.7.13+**; the click must be on the element (its bar/label or the line/symbol), and a click that moved more than a few pixels is a **pan**. A selected cell that a filter hides is no longer outlined — clear the filter to see it again. Click empty paper or press **Esc** to clear the selection |
 | No red buses, or the wrong ones | The colouring needs `<case>/result/<stem>_DF_bus.csv` for the **selected** case and a `VoltMag` column in it — run ACLF, and re-select the case. It reads the table by column **name**, so a hand-edited table with renamed columns colours nothing rather than guessing. Nothing red is normal when every bus is inside 0.9–1.1 pu |
 | Generator: `no *_DF_bus.csv / *_DF_branch.csv` | Solve ACLF first (`$ipss-case-aclf`), then re-run |
 | `ModuleNotFoundError: No module named 'PIL'` | Use the harness Python path above, or pass `--no-png` |
@@ -227,7 +235,7 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 | Layout still ugly after generate | Try another `--seed`; for tiny teaching cases, prefer hand layout in draw.io |
 | “too large to preview” / “diagram too large” | The ceilings are **20000 cells** and **4 MiB** since **0.6.20** (they were 2000 cells / 2 MiB before 0.6.19, and 5 MiB in 0.6.19). **The byte ceiling is a Host limit, so it only changes after an app restart** — until then the running app keeps refusing with its old number. A 2000-bus case like Texas 2K now fits (~10.7k cells, ~3 MB); something far bigger — `OpenEInterconnect` is 78k buses — still will not, and is unreadable as one page anyway. The Host cap needs an app restart to take effect |
 | Generating a large case is slow or the self-check fails on overlaps | Use `--layout lattice` (or leave it `auto`, which switches at 250 buses). The force pipeline cannot separate a few thousand footprints: on Texas 2K it wrote a 4000 x 4 907 300 px page with 2193 overlapping footprints, while the lattice path writes an 8000 x 6000 page with none, in about 18 seconds. A large drawing is legible block by block but its long-range tie lines cross the page — that is the case's own structure, not a defect you can fix with another seed |
-| Hand edits disappeared | Regenerating overwrites the default `<stem>-oneline.drawio` — use a separate filename |
+| Hand edits disappeared | Regenerating overwrites the default `<stem>-oneline-generate.drawio` — use a separate filename |
 
 
 ---
@@ -244,4 +252,4 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
 - Skills: `$ipss-case-diagram` (generate), `$ipss-case-aclf` (result CSVs), `$ipss-case-optadj`, `$ipss-case-load`
 - Template: `wspace/template/oneline-diagram.drawio`
-- Generator: `wspace/script/gen_oneline_diagram.py`
+- Generator: `src/main/py/diagram/gen_oneline_diagram.py`

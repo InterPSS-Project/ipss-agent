@@ -46,7 +46,7 @@ public record CliArgs(String simutype, String format, String input, String contF
         System.err.println("  simutype: aclf | ca | optadj");
         System.err.println("  format:   ieee | psse | bpa");
         System.err.println("  ca:       cont_file + monitor_file select the inputs");
-        System.err.println("  optadj:   cont_file is the N-1 contingency file (genAdjCaN_1 mode only)");
+        System.err.println("  optadj:   cont_file is the N-1 contingency file (genAdjCA_N-1 mode only)");
         System.err.println("  paths are relative to wspace/");
     }
 }

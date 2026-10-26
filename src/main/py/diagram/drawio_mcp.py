@@ -7,11 +7,11 @@ is loaded (see docs/oneline-diagram-process.md); this script speaks the same std
 directly, so the round-trip also works from a plain shell, from Codex / Claude Code, or in
 this session before the profile row is live.
 
-    python3 wspace/script/drawio_mcp.py list  <file.drawio>
-    python3 wspace/script/drawio_mcp.py get   <file.drawio> [--page 0] [--out page.xml]
-    python3 wspace/script/drawio_mcp.py set   <file.drawio> --page 0 --content page.xml
-    python3 wspace/script/drawio_mcp.py open  <file.drawio> [--page 0]     # opens the editor
-    python3 wspace/script/drawio_mcp.py shapes "transformer"
+    python3 src/main/py/diagram/drawio_mcp.py list  <file.drawio>
+    python3 src/main/py/diagram/drawio_mcp.py get   <file.drawio> [--page 0] [--out page.xml]
+    python3 src/main/py/diagram/drawio_mcp.py set   <file.drawio> --page 0 --content page.xml
+    python3 src/main/py/diagram/drawio_mcp.py open  <file.drawio> [--page 0]     # opens the editor
+    python3 src/main/py/diagram/drawio_mcp.py shapes "transformer"
 
 `set` replaces one page and leaves the rest of the file alone, so a hand edit made in the
 editor (or a page produced here) can be pushed back into the case's diagram and re-checked

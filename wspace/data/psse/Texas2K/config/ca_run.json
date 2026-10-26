@@ -3,20 +3,5 @@
   "contingencyFile": "data/psse/Texas2K/2k_contingencies_115kVAbove.json",
   "monitorMode": "custom",
   "monitoredBranchFile": "data/psse/Texas2K/2k_monitored_branches.json",
-  "overloadThreshold": 50,
-  "dclfInclLoss": true,
-  "dclfScreening": false,
-  "dcLoadingCutoff": 100,
-  "dcFlowChangeCutoff": 200,
-  "solutionMethod": "SparseEqnSolve",
-  "kluEndpointRhsBatchSize": 0,
-  "cacheViolationCombinedShiftFactors": false,
-  "islandingTreatment": "ANCHORED_COMPENSATE_ONE_BUS",
-  "n1IslandingReplayEnabled": false,
-  "multiOutageReplayMode": "EXACT_TOPOLOGY",
-  "highImpedanceReactancePu": 10000,
-  "turnOffIslandBus": true,
-  "autoTurnLine2Xfr": true,
-  "ratingProvider": "default",
-  "threads": 0
+  "overloadThreshold": 50
 }

@@ -1,10 +1,10 @@
 # InterPSS — persistent Cordis plugin for DeepSeek Harness
 
 A persistent, installable dual-face Cordis plugin for the DeepSeek Harness web
-GUI (**0.7.7**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
+GUI (**0.7.15**). It adds an **InterPSS** tab (next to Chat) for running power-system AC load
 flow on IEEE CDF / PSS/E RAW / BPA Dat cases, exploring the bus/branch/gen/load results,
 and generating a **NERC TPL-001-5** contingency report — plus a **Diagram** tab
-(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.7**) that draws the selected case's draw.io one-line diagram full-size.
+(0.6.8; search / filter / gear / green centre-on-OK through 0.6.37, packaged as **0.7.15**) that draws the selected case's draw.io one-line diagram full-size.
 
 Unlike a dynamic per-session injection, this is a real persistent composition
 row: a Host half plus a browser Client half, mounted through the profile's
@@ -71,14 +71,20 @@ parameters and results, no build-time Typert compiler required.
   thresholds and colours in `config/net_diagram.json` (0.6.26) and
   bus/branch tooltips (a branch quotes its base-case and contingency loadings, and — since 0.7.7 —
   the post-redispatch `Basecase OptAdj Loading(%)` / `Contingency OptAdj Loading(%)` from the case's
-  two OptAdj branch tables, each line only when its table exists and lists that branch), and
+  two OptAdj branch tables, each line only when its table exists and lists that branch), a
+  **click selection** with a blue outline and a pinned tooltip (0.7.13; a hovered element gets a
+  lighter outline, a bus marks its bar and `Bus-N` label, a branch marks its stubs, transformer
+  rings and parallel circuits, and empty-paper/Esc clears it — the `.drawio` stays untouched), and
   (0.6.12; at the right end of the top row since 0.6.15) a
   draw.io button that opens the file in the **local draw.io
   desktop app** to edit it. A bus whose solved `|V|` is outside **0.9–1.1 pu** is painted **red**
   (bar and `Bus-N` text, with the violation spelled out in its tooltip; the band and colour come from the gear dialog's
   `config/net_diagram.json` since 0.6.26, which also paints branch flow flags) — at render time only,
   since 0.6.18: the `.drawio` file, the desktop app and the generator's PNG preview stay exactly as
-  authored. It reuses `listDrawioFiles`, `readDrawio`, `readCsv` (bus / branch / contingency / OptAdj
+  authored. The generator can also add optional **generator / load symbols** per bus (`--symbols`,
+  from the case's `_DF_gen.csv` / `_DF_load.csv`); the tab paints their load arrows as draw.io
+  `triangle` cells since **0.7.14** (before that the arrow degraded to a black box). It reuses
+  `listDrawioFiles`, `readDrawio`, `readCsv` (bus / branch / contingency / OptAdj
   branch tables — OptAdj families since 0.7.7), `checkResult` and
   `busConnections`, and the launcher is the one new endpoint (`openDrawio`, over the sandbox-aware
   `subprocess` service — no `node:child_process`, since the dynamic half has no imports). Which
@@ -116,7 +122,7 @@ iPSS Agent workspace activation check.
 | `interpss_run_aclf` | Run an AC load flow (ACLF) on a simulation case and report convergence plus the resulting network information. |
 | `interpss_case_summary` | Summarize the bridge-held case: net totals (convergence, counts, generation, load, max mismatch), or a top-N ranking by `bus` / `gen` / `load` / `branch`. |
 | `interpss_run_ca` | Run a DC contingency analysis (N-1 screening) on the held case without the CA dialog: inputs come from `contingencyFile`/`monitorFile`, else the case-folder `config/ca_run.json`, else case-folder discovery, else the Java N-1 defaults; `overloadThreshold` (0.4.6+) sets the over loading threshold the run reports against (argument → `ca_run.json` → 90) and `caConfig` (0.7.2+) the solver knobs (partial object, merged per key over `ca_run.json`; the defaults are the values every earlier run used). Writes `<stem>_DF_contingency.csv`, browsable from the card's **Explore result → Contingency** row (0.4.2+), which opens sorted by `LoadingPercent` with clickable headers (0.4.3+). |
-| `interpss_case_optadj` | Redispatch generation to relieve thermal overloads (OptAdj) on the held case: `optAdjType` selects `genAdjBaseCase` (pre-contingency, scan default 50 %) or `genAdjCaN_1` (post-contingency for single branch outages, scan default 90 %); `scanLoadingThreshold`/`optAdjLoadingThreshold` override the thresholds, `contingencyFile` names the N-1 input (N-1 only), `optAdjConfig` carries the same keys as an object and `reload` re-parses the case first. **Mutates the held model's generator P**; refuses a case whose generators carry no P limit or whose branches carry no rating MVA 1. Writes `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv`, both browsable from the card's **Explore results** row. |
+| `interpss_case_optadj` | Redispatch generation to relieve thermal overloads (OptAdj) on the held case: `optAdjType` selects `genAdjBaseCase` (pre-contingency, scan default 50 %) or `genAdjCA_N-1` (post-contingency for single branch outages, scan default 90 %; the retired 0.7.4–0.7.7 spelling `genAdjCaN_1` is still accepted and normalised). The mode is not a file key (the record reads six since 0.7.11) and travels as its own bridge argument: the Host takes it from this argument, else from an `optAdjType` in `optAdjConfig` or the case's `config/opt_adj_run.json`, else infers it (a contingency file means N-1). `scanLoadingThreshold`/`optAdjLoadingThreshold` override the thresholds, `contingencyFile` names the N-1 input (N-1 only), `optAdjConfig` carries the six file keys as an object — including `sparseSenMatrix` (`true` = sparse sensitivities, the default) and `threads` — and `reload` re-parses the case first. **Mutates the held model's generator P**; refuses a case whose generators carry no P limit or whose branches carry no rating MVA 1. Writes `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv`, both browsable from the card's **Explore results** row. |
 | `interpss_run_gvy` | Apply Groovy to the bridge-held case (binding `aclfnet`), reporting the script's return value and a before/after model digest. `script` takes a `.gvy` file from the case folder's `scripts/` directory, the source itself (0.4.9+), or an array of those applied in order (0.4.11+ — stops at the first failure, `steps` reports each one). Whitespace or statement punctuation marks source, a single bare word is a file name. |
 
 The first three tools resolve the target case through one shared helper, in this order:

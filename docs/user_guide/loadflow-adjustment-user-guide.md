@@ -23,7 +23,7 @@ Engineering detail: [load-q-adjustment.md](../load-q-adjustment.md) (voltage) an
 | One bus is outside a voltage band; other targets are weakly coupled        | Adjust **one** load Q (scalar `dV/dQ`)                               |
 | Two or more buses must land in the same band and move each other’s voltage | Adjust the loads **together using an** N×N `dV/dQ` sensitivity matrix |
 | Pre-contingency branch loading is above rating                             | LP-based Gen optimization adjustment **basecase** (`genAdjBaseCase`) |
-| Post-contingency (N-1 branch outage) loading is above rating               | LP-based Gen optimization adjustment **CA N-1** (`genAdjCaN_1`)      |
+| Post-contingency (N-1 branch outage) loading is above rating               | LP-based Gen optimization adjustment **CA N-1** (`genAdjCA_N-1`)      |
 
 
 Typical voltage goal: bring a depressed bus into a band such as **[0.90, 0.91]** pu by reducing bus load Q (active power left unchanged). The shipped IEEE14 fixtures use that band.
@@ -283,10 +283,19 @@ regression anchors: [gen_opt_adjustment.md](../gen_opt_adjustment.md).
 |                               | **Basecase OptAdj**                          | **N-1 contingency OptAdj**                            |
 | ----------------------------- | -------------------------------------------- | ----------------------------------------------------- |
 | When                          | Pre-contingency loading above rating         | Post-contingency (branch outage) loading above rating |
-| `optAdjType`                  | `genAdjBaseCase` (default)                   | `genAdjCaN_1`                                         |
+| `optAdjType`                  | `genAdjBaseCase` (default)                   | `genAdjCA_N-1`                                         |
 | Typical scan / opt thresholds | 50% scan → 100% opt                          | 90% scan → 100% opt                                   |
 | Contingency input             | None (rejects a contingency file)            | All N-1, or a listed `contingencyFile`                |
+| Sensitivity path              | `sparseSenMatrix: true` (default)            | same key; `false` selects dense sensitivities          |
 | IEEE39 sample                 | `IEEE39_OptBasecase_SsaResult_Sparse_Sample` | `IEEE39_OptN1Scan_SsaResult_Sparse_Sample`            |
+
+The N-1 token was renamed from `genAdjCaN_1` to `genAdjCA_N-1` in 0.7.8. The bridge accepts the
+canonical token only and the Host maps the retired spelling wherever it reads the mode — the
+`optAdjType` argument above, an `optAdjType` inside `optAdjConfig`, or the one in a
+`config/opt_adj_run.json` written from an older copy of this guide — so such a file still runs. The
+mode is not one of the six file keys the record reads (0.7.11): when neither the argument nor the file
+names one, a contingency file means N-1 and otherwise the basecase, which is how a CLI run of the same
+file decides it.
 
 
 ---
@@ -341,7 +350,7 @@ CLI alternative (no Chat): `IpssCmd optadj` — see [IpssCmd.md](../../IpssCmd.m
 ```text
 1. Load case
 2. Apply gen P limits + branch ratingMva1  (if the case file does not already have them)
-3. interpss_case_optadj  (basecase or genAdjCaN_1)
+3. interpss_case_optadj  (basecase or genAdjCA_N-1)
 4. Read gen / branch OptAdj CSVs  (or the card’s Explore results tables)
 5. Optional: ACLF or CA to confirm the redispatched operating point
 ```
@@ -354,7 +363,7 @@ Natural-language prompts the agent can map to tools:
 | Load the IEEE39 case                             | `$ipss-case-load` / `interpss_case_load`           |
 | Apply IEEE39 gen limits and branch ratings       | `$ipss-case-script` / `interpss_run_gvy`           |
 | Relieve basecase overloads by redispatching gens | `$ipss-case-optadj` / `interpss_case_optadj`       |
-| Relieve N-1 overloads by redispatching gens      | `$ipss-case-optadj` with `optAdjType: genAdjCaN_1` |
+| Relieve N-1 overloads by redispatching gens      | `$ipss-case-optadj` with `optAdjType: genAdjCA_N-1` |
 | Confirm with AC load flow                        | `$ipss-case-aclf` / `interpss_run_aclf`            |
 
 
@@ -439,7 +448,7 @@ library build; see [gen_opt_adjustment.md](../gen_opt_adjustment.md) for regress
 |               |                                                               |
 | ------------- | ------------------------------------------------------------- |
 | Case          | `wspace/data/ieee/ieee39/ieee39.ieee`                         |
-| Config        | `optAdjType: genAdjCaN_1`, scan **90%**, enforce **100%**     |
+| Config        | `optAdjType: genAdjCA_N-1`, scan **90%**, enforce **100%**     |
 | Contingencies | All N-1 (branches not on the reference bus), or a listed JSON |
 
 
@@ -457,9 +466,9 @@ Equivalent tool sequence:
 ```text
 interpss_case_load({ case: 'wspace/data/ieee/ieee39/ieee39.ieee' })
 interpss_run_gvy({ script: 'ieee39_limit_setup.gvy', reload: true })
-interpss_case_optadj({ optAdjType: 'genAdjCaN_1' })
+interpss_case_optadj({ optAdjType: 'genAdjCA_N-1' })
 # or a listed contingency set:
-# interpss_case_optadj({ optAdjType: 'genAdjCaN_1', contingencyFile: 'sub_115kV.json' })
+# interpss_case_optadj({ optAdjType: 'genAdjCA_N-1', contingencyFile: 'sub_115kV.json' })
 ```
 
 Defaults when thresholds are omitted: scan **90%**, OptAdj **100%**.
@@ -497,7 +506,7 @@ Suggested follow-on: `$ipss-case-aclf` or `$ipss-case-ca` on the redispatched he
 ## Checklist for OptAdj on your own case
 
 1. Confirm every active generator has a **P gen limit** and every branch has **ratingMva1**.
-2. Decide **basecase** vs **N-1** (`genAdjBaseCase` / `genAdjCaN_1`).
+2. Decide **basecase** vs **N-1** (`genAdjBaseCase` / `genAdjCA_N-1`).
 3. Optionally persist defaults in `config/opt_adj_run.json`; override per call with tool args.
 4. Run OptAdj → read gen / branch CSVs (or the card) → optional ACLF/CA confirm.
 5. Remember the held model is mutated; reload before comparing to the stored case file.
@@ -520,7 +529,7 @@ Suggested follow-on: `$ipss-case-aclf` or `$ipss-case-ca` on the redispatched he
 | Result CSVs look “old” after another ACLF        | Each ACLF overwrites `result/`                                        | Re-read CSVs / regenerate reports after the final solve                          |
 | OptAdj refuses: generators have no P gen limit   | Missing `pGenLimit`                                                   | Run the case’s limit-setup script (IEEE39: `ieee39_limit_setup.gvy`)             |
 | OptAdj refuses: branches have no rating MVA 1    | Missing `ratingMva1` / `LimMvaA`                                      | Same — rate branches before the scan                                             |
-| `a basecase OptAdj run has no contingencies`     | `contingencyFile` passed with `genAdjBaseCase`                        | Drop the file, or switch to `genAdjCaN_1`                                        |
+| `a basecase OptAdj run has no contingencies`     | `contingencyFile` passed with `genAdjBaseCase`                        | Drop the file, or switch to `genAdjCA_N-1`                                        |
 | ACLF/CA still show pre-OptAdj dispatch           | Expected the file, but held model was not mutated / or was reloaded   | OptAdj mutates the held net; do not reload if you want the redispatched state    |
 | Some N-1 pairs still above 100% after OptAdj     | Gen P limits / LP feasibility                                         | Normal when limits bind; check `adjP` and tighten ratings or widen gen limits    |
 

@@ -30,7 +30,7 @@ public class IEEE39_OptN1Scan_SsaResult_Sparse_Sample {
 				CacheType.SenNotCached, true);
 		dclfAlgo.calculateDclf(DclfMethod.INC_LOSS);
 
-		OptAdjRunConfig optAdjRunConfig = new OptAdjRunConfig(OptAdjRunConfig.GEN_ADJ_CA_N1, 90.0, 100.0);
+		OptAdjRunConfig optAdjRunConfig = new OptAdjRunConfig(90.0, 100.0);
 
 		// define a contingency list
 		List<DclfBranchOutage> contList = new ArrayList<>();

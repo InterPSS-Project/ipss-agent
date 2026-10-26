@@ -48,7 +48,8 @@ class OptAdjRunnerTest {
         AclfNetwork net = load();
         applyRatings(net);
 
-        assertThatThrownBy(() -> OptAdjRunner.runOnNet(net, resultsDir, stem, null, basecase()))
+        assertThatThrownBy(() -> OptAdjRunner.runOnNet(net, resultsDir, stem, null,
+                OptAdjRunConfig.GEN_ADJ_BASE_CASE, basecase()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("have no P gen limit");
     }
@@ -59,7 +60,8 @@ class OptAdjRunnerTest {
         AclfNetwork net = load();
         applyGenLimits(net);
 
-        assertThatThrownBy(() -> OptAdjRunner.runOnNet(net, resultsDir, stem, null, basecase()))
+        assertThatThrownBy(() -> OptAdjRunner.runOnNet(net, resultsDir, stem, null,
+                OptAdjRunConfig.GEN_ADJ_BASE_CASE, basecase()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("no rating MVA 1");
     }
@@ -70,7 +72,8 @@ class OptAdjRunnerTest {
         applyFixture(net);
 
         OptAdjRunner.OptAdjSummary summary =
-                OptAdjRunner.runOnNet(net, resultsDir, stem, null, basecase());
+                OptAdjRunner.runOnNet(net, resultsDir, stem, null,
+                        OptAdjRunConfig.GEN_ADJ_BASE_CASE, basecase());
 
         assertThat(summary.optAdjType()).isEqualTo(OptAdjRunConfig.GEN_ADJ_BASE_CASE);
         assertThat(summary.scanThreshold()).isEqualTo(50.0);
@@ -107,7 +110,7 @@ class OptAdjRunnerTest {
         applyFixture(net);
 
         OptAdjRunner.OptAdjSummary summary = OptAdjRunner.runOnNet(net, resultsDir, stem, null,
-                new OptAdjRunConfig(OptAdjRunConfig.GEN_ADJ_CA_N1, 90.0, 100.0));
+                OptAdjRunConfig.GEN_ADJ_CA_N1, new OptAdjRunConfig(90.0, 100.0));
 
         assertThat(summary.optAdjType()).isEqualTo(OptAdjRunConfig.GEN_ADJ_CA_N1);
         assertThat(summary.scanThreshold()).isEqualTo(90.0);
@@ -133,7 +136,7 @@ class OptAdjRunnerTest {
         applyFixture(net);
 
         assertThatThrownBy(() -> OptAdjRunner.runOnNet(net, resultsDir, stem,
-                tempDir.resolve("contingencies.json"), basecase()))
+                tempDir.resolve("contingencies.json"), OptAdjRunConfig.GEN_ADJ_BASE_CASE, basecase()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("has no contingencies");
     }
@@ -145,7 +148,7 @@ class OptAdjRunnerTest {
         applyFixture(net);
 
         OptAdjRunner.OptAdjSummary summary = OptAdjRunner.runOnNet(net, resultsDir, stem, null,
-                new OptAdjRunConfig(OptAdjRunConfig.GEN_ADJ_BASE_CASE, 250.0, 100.0));
+                OptAdjRunConfig.GEN_ADJ_BASE_CASE, new OptAdjRunConfig(250.0, 100.0));
 
         assertThat(summary.scanned()).isZero();
         assertThat(summary.overLimitBefore()).isZero();
@@ -155,7 +158,7 @@ class OptAdjRunnerTest {
     }
 
     private OptAdjRunConfig basecase() {
-        return new OptAdjRunConfig(OptAdjRunConfig.GEN_ADJ_BASE_CASE, 50.0, 100.0);
+        return new OptAdjRunConfig(50.0, 100.0);
     }
 
     private AclfNetwork load() throws Exception {

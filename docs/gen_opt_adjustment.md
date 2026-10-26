@@ -13,7 +13,7 @@ This note follows the sparse SSA-result path used by the IEEE-39 samples in
 |                               | **Basecase OptAdj**                            | **N-1 contingency OptAdj**                                 |
 | ----------------------------- | ---------------------------------------------- | ---------------------------------------------------------- |
 | When                          | Pre-contingency branch loading is above rating | Post-contingency (branch outage) loading is above rating   |
-| `OptAdjRunConfig` type        | `GEN_ADJ_BASE_CASE` (`"genAdjBaseCase"`)       | `GEN_ADJ_CA_N1` (`"genAdjCaN_1"`)                          |
+| `OptAdjRunConfig` type        | `GEN_ADJ_BASE_CASE` (`"genAdjBaseCase"`)       | `GEN_ADJ_CA_N1` (`"genAdjCA_N-1"`)                          |
 | SSA scan                      | `AclfNetSsaHelper.baseCaseScan(thresholdPct)`  | `AclfNetSsaHelper.contingencyScan(contList, thresholdPct)` |
 | Optimizer                     | `AclfNetLoadFlowOptimizer(sparse)`             | `AclfNetContigencyOptimizer(sparse)`                       |
 | IEEE39 sample                 | `IEEE39_OptBasecase_SsaResult_Sparse_Sample`   | `IEEE39_OptN1Scan_SsaResult_Sparse_Sample`                 |
@@ -43,25 +43,40 @@ Optional Groovy mirror of the Java fixture limits:
 
 ## `OptAdjRunConfig`
 
+The mode (`genAdjBaseCase` / `genAdjCA_N-1`) is a **runner / bridge argument**, not a
+`config/opt_adj_run.json` key. The persisted record holds the thresholds and run-control knobs:
+
 ```java
 public record OptAdjRunConfig(
-    String optAdjType,
     Double scanLoadingThreshold,
-    Double optAdjLoadingThreshold) {
+    Double optAdjLoadingThreshold,
+    String contingencyMode,
+    String contingencyFile,
+    Boolean sparseSenMatrix,
+    Integer threads) {
 
     public static final String GEN_ADJ_BASE_CASE = "genAdjBaseCase";
-    public static final String GEN_ADJ_CA_N1 = "genAdjCaN_1";
+    public static final String GEN_ADJ_CA_N1 = "genAdjCA_N-1";
 }
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `optAdjType` | Mode token: basecase vs N-1 CA |
-| `scanLoadingThreshold` | Percent used by the SSA scan (candidate collection) |
+| `scanLoadingThreshold` | Percent used by the SSA scan (candidate collection); unset follows the caller’s mode (50 % basecase, 90 % N-1) |
 | `optAdjLoadingThreshold` | Percent enforced by the LP optimizer |
+| `contingencyMode` / `contingencyFile` | N-1 input: `all` or a `custom` contingency JSON |
+| `sparseSenMatrix` | Sensitivity path handed to both optimizer constructors: `true` = sparse (default), `false` = dense |
+| `threads` | SSA worker count (`0` = one per available processor) |
 
-Both IEEE-39 samples build the config up front and pass the two doubles into scan / optimize —
-they no longer hard-code bare `50.0` / `90.0` / `100.0` at the call sites.
+The DSH Host mirrors the six file keys in `DEFAULT_OPTADJ_CONFIG` and passes `optAdjType` separately.
+It still *reads* a mode from the `optAdjConfig` object or the file — that is where 0.7.4–0.7.10 files
+name it — and falls back to the CLI's own inference (a contingency path means N-1) when nothing names
+one. The N-1 token was renamed from `genAdjCaN_1` to `genAdjCA_N-1` when `sparseSenMatrix` landed; the
+Host still accepts the older spelling wherever it reads the mode and normalises it, while `parseType`
+rejects it.
+
+Both IEEE-39 samples build the config with the two-arg form (`new OptAdjRunConfig(50.0, 100.0)`) and
+pass the two doubles into scan / optimize.
 
 ---
 
@@ -73,7 +88,8 @@ they no longer hard-code bare `50.0` / `90.0` / `100.0` at the call sites.
    90%) so the sparse sensitivity matrix includes branches that are near limit. The optimizer
    enforces a *higher* limit (typically **100%** of rating). In samples:
    `optAdjRunConfig.scanLoadingThreshold()` vs `optAdjRunConfig.optAdjLoadingThreshold()`.
-2. **Sparse SSA path.** Pass `true` to the optimizer constructor and wrap the scan result in
+2. **Sparse SSA path.** Pass `true` to the optimizer constructor — the config's
+   `sparseSenMatrix`, sparse by default — and wrap the scan result in
    `OptAdjResultContainer`. Control gens and monitored branches are taken from the SSA
    over-limit set, not the full network — smaller LP / sparse PTDF matrix.
 3. **Null result container (full-network path).** In
@@ -150,7 +166,7 @@ Without these ratings the IEEE-39 basecase / N-1 OptAdj demos do not show meanin
 
    ```java
    OptAdjRunConfig optAdjRunConfig =
-       new OptAdjRunConfig(OptAdjRunConfig.GEN_ADJ_BASE_CASE, 50.0, 100.0);
+       new OptAdjRunConfig(50.0, 100.0);
    ```
 
 4. Scan basecase:
@@ -209,7 +225,7 @@ Each `GenAdjustResult` prints `genP`, `adjP` (MW delta applied), and the gen P l
 
    ```java
    OptAdjRunConfig optAdjRunConfig =
-       new OptAdjRunConfig(OptAdjRunConfig.GEN_ADJ_CA_N1, 90.0, 100.0);
+       new OptAdjRunConfig(90.0, 100.0);
    ```
 
 3. Build an N-1 list: one `OPEN` outage per branch **not** connected to the reference bus.
@@ -331,11 +347,12 @@ named without `SsaResult` in the class name (e.g. `IEEE39_OptBasecase_Sparse_Sam
 - OptAdj is wired end to end since plugin 0.7.4: `OptAdjRunner` (`org.interpss.agent.runner`)
   runs both examples for the CLI (`IpssCmd optadj`), the bridge
   (`IpssAgentBridge.runOptAdjWithConfig`) and the chat tool `interpss_case_optadj`, with
-  `config/opt_adj_run.json` persisted per case beside `ca_run.json`. `OptAdjRunConfig` now also
-  carries `contingencyMode`/`contingencyFile` (the `custom` N-1 input) and `threads` (`0` = one SSA
-  worker per processor); the three-argument constructor calls above still compile. Since 0.7.5 each
-  mode writes its own result pair — `_DF_optadj_gen.csv` / `_DF_optadj_branch.csv` for the basecase,
-  `_DF_optadj_N1_gen.csv` / `_DF_optadj_N1_branch.csv` for `genAdjCaN_1` — so the two runs can share
+  `config/opt_adj_run.json` persisted per case beside `ca_run.json`. The mode is a call argument
+  (CLI infers N-1 from a contingency path; the Host reads one from its argument, its
+  `optAdjConfig` or the file and then infers the same way); the file carries thresholds, contingency input,
+  `sparseSenMatrix` and `threads`. Since 0.7.5 each mode writes its own result pair —
+  `_DF_optadj_gen.csv` / `_DF_optadj_branch.csv` for the basecase,
+  `_DF_optadj_N1_gen.csv` / `_DF_optadj_N1_branch.csv` for `genAdjCA_N-1` — so the two runs can share
   one `result/` folder.
 - Since **0.7.7** the Diagram tab’s branch tooltip quotes those branch tables: **Basecase OptAdj
   Loading(%)** from `_DF_optadj_branch.csv` and **Contingency OptAdj Loading(%)** from

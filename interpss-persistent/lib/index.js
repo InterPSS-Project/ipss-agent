@@ -725,13 +725,10 @@ function caConfigPayload(config) {
 }
 
 // Generator-redispatch (OptAdj) run config (config/opt_adj_run.json beside config/ca_run.json).
-// Like CA there is no project-level default: the mode, the two loading thresholds and the
-// contingency input are case-specific, so an absent file is the built-in default below. The
-// method and its prerequisites are documented in docs/gen_opt_adjustment.md.
+// The mode is a call argument (tool / bridge / CLI inference), not a file key. The thresholds and
+// contingency input are case-specific, so an absent file is the built-in default below. The method
+// and its prerequisites are documented in docs/gen_opt_adjustment.md.
 const DEFAULT_OPTADJ_CONFIG = {
-  // 'genAdjBaseCase' relieves pre-contingency (basecase) loading, 'genAdjCaN_1' post-contingency
-  // loading for single branch outages. The Java `OptAdjRunConfig` names the same two tokens.
-  optAdjType: 'genAdjBaseCase',
   // The SSA scan collects candidates above this percentage. null = follow the mode, which is what
   // the two documented samples do (basecase 50 %, N-1 90 %); an explicit number always wins.
   scanLoadingThreshold: null,
@@ -739,24 +736,57 @@ const DEFAULT_OPTADJ_CONFIG = {
   optAdjLoadingThreshold: 100,
   contingencyMode: 'all',
   contingencyFile: null,
+  // The optimizer's sensitivity path: true = sparse, false = dense. Java defaults to the same true,
+  // which is what its runner hard-coded before the knob, so an absent key changes no result.
+  sparseSenMatrix: true,
   // 0 = one SSA worker per available processor.
   threads: 0,
 }
 
 // The mode tokens and the mode-dependent scan default, duplicated from
-// `OptAdjRunConfig.DEFAULT_SCAN_*` so a run that names no scan threshold still gets the sample's
-// value; guard §22 pins the two sides against each other.
-const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCaN_1']
-const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, genAdjCaN_1: 90 }
+// `OptAdjRunConfig.GEN_ADJ_*`/`DEFAULT_SCAN_*` so a run that names no scan threshold still gets the
+// sample's value; guard §22 pins the two sides against each other. `OPTADJ_LEGACY_TYPES` maps the
+// retired spelling onto the canonical token, so a legacy name on the tool/UI arg behaves exactly
+// like the token Java accepts. Default mode when the caller names none.
+const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']
+const OPTADJ_DEFAULT_TYPE = 'genAdjBaseCase'
+const OPTADJ_SCAN_DEFAULTS = { genAdjBaseCase: 50, 'genAdjCA_N-1': 90 }
+const OPTADJ_LEGACY_TYPES = { genAdjCaN_1: 'genAdjCA_N-1' }
+// The six keys the Java record reads from `config/opt_adj_run.json` — exactly what the payload
+// carries (0.7.11).
 const OPTADJ_CONFIG_KEYS = Object.keys(DEFAULT_OPTADJ_CONFIG)
+// The mode is not a Java file key: it travels as its own bridge argument. The Host still honors an
+// `optAdjType` in the config file or in `optAdjConfig` (0.7.4-0.7.10 files name it), so it is an
+// accepted *input* key while staying out of the payload.
+const OPTADJ_MODE_KEY = 'optAdjType'
+const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])
 
-// The bridge payload: every key, with the mode-dependent scan default filled in when the caller
-// (or the file) left the scan threshold unset, so the Java side always receives an explicit number.
-function optAdjConfigPayload(config) {
+// The canonical mode token for an untrusted value, '' when it names no known mode. Every reader —
+// tool arg, result-file names, CLI fallback — goes through this one mapping.
+function canonicalOptAdjType(value) {
+  if (typeof value !== 'string') return ''
+  const token = value.trim()
+  if (OPTADJ_TYPES.indexOf(token) >= 0) return token
+  const mapped = OPTADJ_LEGACY_TYPES[token]
+  return mapped === undefined ? '' : mapped
+}
+
+// Resolve the mode for a run: an explicit arg (with legacy spelling mapped), else N-1 when a
+// contingency path is present (CLI inference), else the basecase default.
+function resolveOptAdjType(explicitType, contRel) {
+  const type = canonicalOptAdjType(explicitType)
+  if (type !== '') return type
+  return contRel !== null && contRel !== undefined && contRel !== ''
+    ? 'genAdjCA_N-1'
+    : OPTADJ_DEFAULT_TYPE
+}
+
+// The bridge config JSON (no mode): every file key, with the mode-dependent scan default filled in
+// when the caller (or the file) left the scan threshold unset, so the Java side always receives an
+// explicit number. The mode travels as a separate bridge argument.
+function optAdjConfigPayload(config, optAdjType) {
   const source = config && typeof config === 'object' ? config : DEFAULT_OPTADJ_CONFIG
-  const type = OPTADJ_TYPES.indexOf(source.optAdjType) >= 0
-    ? source.optAdjType
-    : DEFAULT_OPTADJ_CONFIG.optAdjType
+  const type = resolveOptAdjType(optAdjType, source.contingencyFile)
   const out = {}
   for (const key of OPTADJ_CONFIG_KEYS) {
     out[key] = source[key] === undefined ? DEFAULT_OPTADJ_CONFIG[key] : source[key]
@@ -771,7 +801,7 @@ function optAdjConfigPayload(config) {
 // the `N1` infix so its pair cannot overwrite a basecase pair in the same result folder.
 // Guard §22 pins this rule against the Java runner and the client's file lookup.
 function optAdjResultNames(stem, optAdjType) {
-  const suffix = optAdjType === 'genAdjCaN_1' ? '_DF_optadj_N1' : '_DF_optadj'
+  const suffix = canonicalOptAdjType(optAdjType) === 'genAdjCA_N-1' ? '_DF_optadj_N1' : '_DF_optadj'
   return { genFile: stem + suffix + '_gen.csv', branchFile: stem + suffix + '_branch.csv' }
 }
 
@@ -1046,25 +1076,28 @@ async function resolveCaRunConfig(ctx, root, parent, explicit) {
   return { ok: true, config: await suggestCaConfig(ctx, root, parent), source: 'suggested' }
 }
 
-// Normalise an untrusted OptAdj payload to the six known keys. An absent key keeps its default;
-// a present one must be usable, because a redispatch that silently ignores the requested mode or
-// limit is worse than one that refuses. The Java `OptAdjRunConfig` rejects the same values.
+// Normalise an untrusted OptAdj payload to the six known file keys plus the optional mode. An
+// absent key keeps its default; a present one must be usable, because a redispatch that silently
+// ignores the requested mode or limit is worse than one that refuses. The mode is not a Java file
+// key, so it is carried on the validated object (readers take it from there) and never enters the
+// payload; a retired spelling is mapped onto the canonical token, because Java rejects it.
 async function validateOptAdjConfig(ctx, root, value, requireFiles) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return { ok: false, error: 'the run configuration must be a JSON object' }
   }
   const out = Object.assign({}, DEFAULT_OPTADJ_CONFIG)
 
-  const rawType = value.optAdjType
+  const rawType = value[OPTADJ_MODE_KEY]
   if (rawType !== undefined && rawType !== null && rawType !== '') {
-    if (OPTADJ_TYPES.indexOf(rawType) < 0) {
+    const type = canonicalOptAdjType(rawType)
+    if (type === '') {
       return {
         ok: false,
         error: 'unsupported optAdjType ' + JSON.stringify(rawType) +
           ' (expected ' + OPTADJ_TYPES.join('|') + ')',
       }
     }
-    out.optAdjType = rawType
+    out[OPTADJ_MODE_KEY] = type
   }
 
   // A loading percentage: 0 < t <= 1000, the rule the Java record enforces.
@@ -1081,6 +1114,22 @@ async function validateOptAdjConfig(ctx, root, value, requireFiles) {
   for (const key of ['scanLoadingThreshold', 'optAdjLoadingThreshold']) {
     const bad = loading(key)
     if (bad !== null) return { ok: false, error: bad }
+  }
+
+  // Sparse (true) or dense (false) sensitivities. A JSON boolean is the natural spelling; the two
+  // strings are accepted because a hand-written file often carries them, and both collapse to a
+  // real boolean before the payload reaches the bridge.
+  const rawSparse = value.sparseSenMatrix
+  if (rawSparse !== undefined && rawSparse !== null && rawSparse !== '') {
+    if (typeof rawSparse === 'boolean') out.sparseSenMatrix = rawSparse
+    else if (rawSparse === 'true') out.sparseSenMatrix = true
+    else if (rawSparse === 'false') out.sparseSenMatrix = false
+    else {
+      return {
+        ok: false,
+        error: 'sparseSenMatrix must be true or false (got ' + JSON.stringify(rawSparse) + ')',
+      }
+    }
   }
 
   const rawThreads = value.threads
@@ -1602,13 +1651,17 @@ class InterpssService extends TypertRemoteService {
           // file simply means "no contingency data". Without this line the Diagram tab never saw
           // the table at all, so its contingency flags and tooltip line could never appear (0.6.31).
           stem + '_DF_contingency.csv',
-          // The two OptAdj branch tables, listed the same way and for the same reason (0.6.31): the
-          // Diagram tab's tooltip adds a line per mode when the table lists the branch, and an absent
-          // file just means "no OptAdj data" (0.7.7 — the readCsv allow-list below had to learn these
-          // two families as well). The `.gvy`/bridge path writes them -- basecase
-          // `_DF_optadj_branch.csv`, N-1 `_DF_optadj_N1_branch.csv` since 0.7.5.
+          // The four OptAdj tables, listed the same way and for the same reason (0.6.31): the
+          // Diagram tab's tooltip adds a line per mode when the branch table lists the branch, and an
+          // absent file just means "no OptAdj data" (0.7.7 — the readCsv allow-list below had to learn
+          // these families as well). The `.gvy`/bridge path writes them -- basecase
+          // `_DF_optadj_branch.csv`, N-1 `_DF_optadj_N1_branch.csv` since 0.7.5; the `_gen` pair is
+          // what the OptAdj card's **Gen adjustments** table reads (0.7.10 — it was missing from both
+          // this list and the allow-list, so that button always answered `Invalid result path`).
           stem + '_DF_optadj_branch.csv',
           stem + '_DF_optadj_N1_branch.csv',
+          stem + '_DF_optadj_gen.csv',
+          stem + '_DF_optadj_N1_gen.csv',
           stem + '_network_info.txt',
         ],
       }
@@ -1780,7 +1833,7 @@ class InterpssService extends TypertRemoteService {
     // the OptAdj pair was missing here in 0.7.6, so the Diagram tab's reads came back
     // `Invalid result path`, the loading map stayed null and both OptAdj tooltip lines were silently
     // empty (0.7.7). Guard §11 runs this very pattern against the names the client looks up.
-    if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency|optadj_branch|optadj_N1_branch)\.csv$/.test(path)) {
+    if (!/^data\/[A-Za-z0-9_.\/-]+\/result\/[A-Za-z0-9_.-]+_DF_(bus|branch|gen|load|contingency|optadj_branch|optadj_N1_branch|optadj_gen|optadj_N1_gen)\.csv$/.test(path)) {
       return { ok: false, error: 'Invalid result path: ' + path }
     }
     const start = (input && typeof input.start === 'number' && input.start > 0) ? Math.floor(input.start) : 0
@@ -2137,8 +2190,10 @@ class InterpssService extends TypertRemoteService {
 
   // Generator redispatch (OptAdj) for a case: the chat tool's dialog-free entry point, and the
   // RPC a future dialog would use. The run config comes from an explicit payload, else the case
-  // folder's config/opt_adj_run.json, else the built-in default (basecase, 50 % scan, 100 %
-  // enforcement). The run MUTATES the held model's generator P, so `reload` starts from the file.
+  // folder's config/opt_adj_run.json, else the built-in default (50 % scan / 100 % enforcement for
+  // basecase). The mode is `input.optAdjType` (or a legacy `input.config.optAdjType`), else
+  // inferred from a contingency path. The run MUTATES the held model's generator P, so `reload`
+  // starts from the file.
   async runOptAdj(input) {
     const caseInput = input && typeof input.input === 'string' ? input.input : ''
     const format = normalizeCaseFormat(input && input.format, caseInput)
@@ -2152,11 +2207,23 @@ class InterpssService extends TypertRemoteService {
     const { parent, stem } = this.caseParts(caseInput)
     const resultDir = parent + '/result'
 
+    // The mode is not a file key, but the validator accepts one from the config payload (0.7.4–0.7.10
+    // files name it) and canonicalises it; the RPC's own `optAdjType` wins over it.
     const resolved = await resolveOptAdjRunConfig(this.ctx, root, parent, input && input.config)
     if (!resolved.ok) return { ok: false, error: resolved.error }
     const config = resolved.config
     const reload = input && input.reload === true
     const contRel = config.contingencyFile
+    let requestedType = config[OPTADJ_MODE_KEY]
+    if (input && input.optAdjType !== undefined && input.optAdjType !== null && input.optAdjType !== '') {
+      const mapped = canonicalOptAdjType(input.optAdjType)
+      if (mapped === '') {
+        return { ok: false, error: 'unsupported optAdjType ' + JSON.stringify(input.optAdjType) +
+          ' (expected ' + OPTADJ_TYPES.join('|') + ')' }
+      }
+      requestedType = mapped
+    }
+    const optAdjType = resolveOptAdjType(requestedType, contRel)
 
     // In-process bridge path (preferred): no JVM spawn, cached network.
     const bridge = this.bridge()
@@ -2166,10 +2233,10 @@ class InterpssService extends TypertRemoteService {
         const absCont = contRel !== null ? root + '/wspace/' + contRel : null
         const absResults = root + '/wspace/' + resultDir
         const raw = await bridge.runOptAdjWithConfig(format, absCase, absCont, absResults, stem, reload,
-          JSON.stringify(optAdjConfigPayload(config)))
+          optAdjType, JSON.stringify(optAdjConfigPayload(config, optAdjType)))
         const parsed = JSON.parse(raw)
         if (parsed && parsed.ok) {
-          const type = parsed.optAdjType || config.optAdjType
+          const type = parsed.optAdjType || optAdjType
           const names = optAdjResultNames(stem, type)
           return {
             ok: true,
@@ -2198,7 +2265,8 @@ class InterpssService extends TypertRemoteService {
       }
     }
 
-    // Fallback: shell out to the Java OptAdj subcommand (IpssCmd optadj).
+    // Fallback: shell out to the Java OptAdj subcommand (IpssCmd optadj). The CLI infers N-1 from
+    // a contingency path the same way resolveOptAdjType does.
     const shell = this.ctx.get('shell')
     if (shell === undefined) return { ok: false, error: 'shell service unavailable' }
 
@@ -2221,13 +2289,13 @@ class InterpssService extends TypertRemoteService {
     }
 
     const summary = /OptAdjSummary:[\s\S]*?Branch Loadings=\S+/.exec(res.stdout.text || '')
-    const names = optAdjResultNames(stem, config.optAdjType)
+    const names = optAdjResultNames(stem, optAdjType)
     return {
       ok: true,
       resultDir: resultDir,
       genFile: names.genFile,
       branchFile: names.branchFile,
-      optAdjType: config.optAdjType,
+      optAdjType: optAdjType,
       optAdjSummary: summary ? summary[0].trim() : null,
       stdout: res.stdout.text,
       stderr: res.stderr.text,
@@ -3928,12 +3996,17 @@ function caseOptAdjTool(ctx) {
       'Relieve basecase or N-1 branch thermal overloads on a power-system case in the embedded ' +
       'InterPSS bridge by redispatching generator active power (OptAdj). `optAdjType` picks the ' +
       'mode: "genAdjBaseCase" (pre-contingency loading, the default, scan default 50 %) or ' +
-      '"genAdjCaN_1" (post-contingency loading for single branch outages, scan default 90 %) — an ' +
-      'explicit `scanLoadingThreshold` always wins. `optAdjLoadingThreshold` is the percentage the ' +
-      'optimizer enforces (default 100). `contingencyFile` names the contingency JSON (a file in ' +
-      'the case folder, or a workspace-relative data/... path) and is only meaningful for ' +
-      '"genAdjCaN_1"; omit it for all N-1 outages. `optAdjConfig` carries the same keys as an object ' +
-      '(partial, unknown keys rejected) and `reload` re-parses the case first. The run MUTATES the ' +
+      '"genAdjCA_N-1" (post-contingency loading for single branch outages, scan default 90 %) — an ' +
+      'explicit `scanLoadingThreshold` always wins, and the retired 0.7.4-0.7.7 spelling ' +
+      '"genAdjCaN_1" is still accepted on this argument and normalised to "genAdjCA_N-1". The mode ' +
+      'is not one of the six keys the Java record reads: it travels as its own argument, and when ' +
+      'neither this argument nor the config names one, a contingency file means N-1 (the same ' +
+      'inference the CLI makes), otherwise the basecase. `optAdjLoadingThreshold` is the ' +
+      'percentage the optimizer enforces (default 100). `contingencyFile` names the contingency ' +
+      'JSON (a file in the case folder, or a workspace-relative data/... path) and is only ' +
+      'meaningful for "genAdjCA_N-1"; omit it for all N-1 outages. `optAdjConfig` carries the six ' +
+      'file keys as an object (partial, unknown keys rejected) plus an optional `optAdjType` that ' +
+      'the Host still honors there instead, and `reload` re-parses the case first. The run MUTATES the ' +
       'held model\'s generator P, so a later ACLF/CA sees the adjusted dispatch until the case is ' +
       'reloaded. The scan measures loading against each branch\'s rating MVA 1 and the optimizer ' +
       'needs a P gen limit per generator: a case whose branches carry no ratings, or whose ' +
@@ -3941,7 +4014,7 @@ function caseOptAdjTool(ctx) {
       'scripts/ieee39_limit_setup.gvy first). Writes <stem>_DF_optadj_gen.csv (genName, genP, adjP, ' +
       'limitMax, limitMin) and <stem>_DF_optadj_branch.csv (branchId, outageBranchId, limitMW, ' +
       'baseFlowMW, loadingBeforePct, shiftedFlowMWAfter, loadingAfterPct) under ' +
-      'wspace/<case dir>/result/ — or, for `optAdjType` "genAdjCaN_1", the same pair under the N1 ' +
+      'wspace/<case dir>/result/ — or, for `optAdjType` "genAdjCA_N-1", the same pair under the N1 ' +
       'infix (<stem>_DF_optadj_N1_gen.csv / <stem>_DF_optadj_N1_branch.csv), so the two modes keep ' +
       'separate result files. The reply\'s `genFile` / `branchFile` name what was written.',
     parameters: {
@@ -3960,14 +4033,14 @@ function caseOptAdjTool(ctx) {
           type: 'string',
           enum: OPTADJ_TYPES,
           description:
-            'Mode: "genAdjBaseCase" (pre-contingency, default) or "genAdjCaN_1" (post-contingency ' +
+            'Mode: "genAdjBaseCase" (pre-contingency, default) or "genAdjCA_N-1" (post-contingency ' +
             'for single branch outages).',
         },
         scanLoadingThreshold: {
           type: 'number',
           description:
             'Optional candidate-collection percentage (0 < t <= 1000; default 50 for genAdjBaseCase, ' +
-            '90 for genAdjCaN_1).',
+            '90 for genAdjCA_N-1).',
         },
         optAdjLoadingThreshold: {
           type: 'number',
@@ -3977,18 +4050,20 @@ function caseOptAdjTool(ctx) {
         contingencyFile: {
           type: 'string',
           description:
-            'genAdjCaN_1 mode only: the contingency JSON, addressable like the CA tool\'s ' +
+            'genAdjCA_N-1 mode only: the contingency JSON, addressable like the CA tool\'s ' +
             '`contingencyFile`. Omit it for all N-1 outages. A basecase run rejects it.',
         },
         optAdjConfig: {
           type: 'object',
           description:
             'Optional overrides as one object, merged over the arguments above per key (the ' +
-            'arguments win when both are given). Keys: optAdjType ("genAdjBaseCase" | ' +
-            '"genAdjCaN_1"), scanLoadingThreshold (number, null = follow the mode), ' +
-            'optAdjLoadingThreshold (number, 100), contingencyMode ("all" | "custom"), ' +
-            'contingencyFile (workspace-relative path), threads (int >= 0, 0 = one SSA worker per ' +
-            'available processor).',
+            'arguments win when both are given). The six file keys: scanLoadingThreshold (number, ' +
+            'null = follow the mode), optAdjLoadingThreshold (number, 100), contingencyMode ' +
+            '("all" | "custom"), contingencyFile (workspace-relative path), sparseSenMatrix ' +
+            '(boolean, true = sparse sensitivities, the default), threads (int >= 0, 0 = one SSA ' +
+            'worker per available processor). An `optAdjType` here is also accepted (the retired ' +
+            '"genAdjCaN_1" included) and honored when the top-level argument names no mode; it is ' +
+            'never sent in the payload Java parses.',
         },
         reload: {
           type: 'boolean',
@@ -4030,9 +4105,12 @@ function caseOptAdjTool(ctx) {
         if (value && value.ok === true) {
           const num = (n) => (typeof n === 'number' && Number.isFinite(n) ? String(n) : '?')
           const mode = String(value.optAdjType || '')
+          // The N-1 mode carries contingencies; compared canonically so a legacy echoed token still
+          // reads as N-1.
+          const n1 = canonicalOptAdjType(mode) === 'genAdjCA_N-1'
           const inputs = typeof value.contingencyFile === 'string' && value.contingencyFile !== ''
             ? value.contingencyFile
-            : (mode === 'genAdjCaN_1' ? 'all N-1 outages' : 'basecase (no contingencies)')
+            : (n1 ? 'all N-1 outages' : 'basecase (no contingencies)')
           return [{
             type: 'text',
             text: [
@@ -4040,7 +4118,7 @@ function caseOptAdjTool(ctx) {
                 ' (source: ' + String(value.source || '') + ')',
               'Mode ' + mode + ' \u00b7 scan ' + num(value.scanLoadingThreshold) + '% \u00b7 enforce ' +
                 num(value.optAdjLoadingThreshold) + '%' +
-                (mode === 'genAdjCaN_1' ? ' \u00b7 ' + num(value.contingencies) + ' contingencies' : ''),
+                (n1 ? ' \u00b7 ' + num(value.contingencies) + ' contingencies' : ''),
               'Over limit ' + num(value.overLimitBefore) + ' \u2192 ' + num(value.overLimitAfter) +
                 ' \u00b7 ' + num(value.gensAdjusted) + ' of ' + num(value.controlGens) +
                 ' control generators adjusted \u00b7 ' + num(value.scanned) + ' scanned entries',
@@ -4090,12 +4168,18 @@ function caseOptAdjTool(ctx) {
 
       const { parent, stem } = casePartsOf(target.input)
 
-      // Arguments, then the `optAdjConfig` object, then the case's opt_adj_run.json: a later layer
-      // overrides an earlier one per key, so passing only `optAdjType` keeps the case's own
-      // thresholds and contingency selection.
+      // File-key arguments, then the `optAdjConfig` object, then the case's opt_adj_run.json: a
+      // later layer overrides an earlier one per key. The mode is the separate `optAdjType` arg
+      // (not a file key), so passing only the mode keeps the case's own thresholds.
       const explicit = {}
-      if (args && typeof args.optAdjType === 'string' && args.optAdjType.trim() !== '') {
-        explicit.optAdjType = args.optAdjType
+      let requestedType = args && typeof args.optAdjType === 'string' ? args.optAdjType : ''
+      if (requestedType.trim() !== '') {
+        const mapped = canonicalOptAdjType(requestedType)
+        if (mapped === '') {
+          return fail('unsupported optAdjType ' + JSON.stringify(requestedType) +
+            ' (expected ' + OPTADJ_TYPES.join('|') + ')', 'argument')
+        }
+        requestedType = mapped
       }
       if (args && typeof args.scanLoadingThreshold === 'number' && Number.isFinite(args.scanLoadingThreshold)) {
         explicit.scanLoadingThreshold = args.scanLoadingThreshold
@@ -4120,9 +4204,9 @@ function caseOptAdjTool(ctx) {
           return fail('optAdjConfig must be a JSON object of run-configuration keys', 'argument')
         }
         for (const key of Object.keys(override)) {
-          if (OPTADJ_CONFIG_KEYS.indexOf(key) < 0) {
+          if (OPTADJ_INPUT_KEYS.indexOf(key) < 0) {
             return fail('optAdjConfig: unknown key ' + JSON.stringify(key) + ' (known: ' +
-              OPTADJ_CONFIG_KEYS.join(', ') + ')', 'argument')
+              OPTADJ_INPUT_KEYS.join(', ') + ')', 'argument')
           }
           explicit[key] = override[key]
         }
@@ -4142,6 +4226,9 @@ function caseOptAdjTool(ctx) {
         if (!validated.ok) return fail('invalid run configuration: ' + validated.error, 'argument')
         config = validated.config
       }
+      // The mode: the `optAdjType` argument wins, then the one the object/file named (the validator
+      // canonicalised it), then the CLI's own inference — a contingency path means N-1.
+      const optAdjType = resolveOptAdjType(requestedType || config[OPTADJ_MODE_KEY], config.contingencyFile)
 
       const bridge = ctx.get('javaBridge')
       if (bridge === undefined || typeof bridge.runOptAdjWithConfig !== 'function') {
@@ -4152,13 +4239,13 @@ function caseOptAdjTool(ctx) {
         const absResults = root + '/wspace/' + parent + '/result'
         const absCont = config.contingencyFile === null ? null : root + '/wspace/' + config.contingencyFile
         const raw = await bridge.runOptAdjWithConfig(target.format, absCase, absCont, absResults, stem,
-          args && args.reload === true, JSON.stringify(optAdjConfigPayload(config)))
+          args && args.reload === true, optAdjType, JSON.stringify(optAdjConfigPayload(config, optAdjType)))
         const parsed = JSON.parse(raw)
         if (!parsed || parsed.ok !== true) {
           return fail(String((parsed && parsed.error) || 'bridge runOptAdj failed'), source)
         }
         adoptLoadedCase(sessionId, target)
-        const type = typeof parsed.optAdjType === 'string' ? parsed.optAdjType : config.optAdjType
+        const type = typeof parsed.optAdjType === 'string' ? parsed.optAdjType : optAdjType
         const names = optAdjResultNames(stem, type)
         const value = {
           ok: true,
@@ -4361,10 +4448,12 @@ export default {
         }
         return withCaStdio(raw, cap, absCase)
       },
-      // The whole `opt_adj_run.json` payload (mode, both thresholds, contingency input, worker
-      // count) as JSON. A jar without `runOptAdjWithConfig` cannot do the redispatch at all, so
-      // this reports the missing entry point instead of silently doing something else.
-      async runOptAdjWithConfig(format, absCase, absCont, absResults, stem, reload, optAdjConfigJson) {
+      // Mode as a separate argument; the rest is the `opt_adj_run.json` payload (thresholds,
+      // contingency input, sparse flag, worker count) as JSON. A jar without
+      // `runOptAdjWithConfig` cannot do the redispatch at all, so this reports the missing entry
+      // point instead of silently doing something else.
+      async runOptAdjWithConfig(format, absCase, absCont, absResults, stem, reload, optAdjType,
+          optAdjConfigJson) {
         const bridge = await ensureBridge(rootFor(absCase))
         if (typeof bridge.runOptAdjWithConfig !== 'function') {
           return JSON.stringify({
@@ -4376,7 +4465,7 @@ export default {
         let raw
         try {
           raw = await bridge.runOptAdjWithConfig(format, absCase, absCont, absResults, stem,
-            reload === true, optAdjConfigJson)
+            reload === true, optAdjType, optAdjConfigJson)
         } finally {
           cap.stop()
         }

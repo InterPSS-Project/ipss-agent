@@ -122,18 +122,26 @@ java -jar ../target/ipss-agent-cmd-1.0.0-uber.jar optadj ieee data/ieee/ieee39/i
 ```
 
 `optadj` takes **at most one** positional file (the N-1 contingency JSON; a monitor file is
-rejected — the SSA scan is the monitored set). A basecase run refuses a contingency file. The case
+rejected — the SSA scan is the monitored set). A basecase run refuses a contingency file. The **mode**
+is not a file key (since 0.7.11 the record reads six): the CLI infers `genAdjCA_N-1` when a contingency
+path is present and otherwise runs `genAdjBaseCase` — the same inference the chat tool falls back on,
+so one file means the same thing to both. The case
 folder's `config/opt_adj_run.json` (the same file the chat tool reads and writes) overrides the
 built-in defaults:
 
 | Key | Values | Meaning |
 | --- | --- | --- |
-| `optAdjType` | `genAdjBaseCase` (default) \| `genAdjCaN_1` | Relieve pre-contingency (basecase) or post-contingency (single branch outage) loading |
 | `scanLoadingThreshold` | `0 < t <= 1000`; unset = 50 basecase / 90 N-1 | Candidate-collection percentage |
 | `optAdjLoadingThreshold` | `0 < t <= 1000` (default `100`) | Percentage the optimizer enforces |
-| `contingencyMode` | `all` (default) \| `custom` | All N-1 outages, or the listed contingencies (`genAdjCaN_1` only) |
+| `contingencyMode` | `all` (default) \| `custom` | All N-1 outages, or the listed contingencies (`genAdjCA_N-1` only) |
 | `contingencyFile` | path under `wspace/` | The contingency JSON; required when the mode is `custom` |
+| `sparseSenMatrix` | `true` (default) \| `false` | Sensitivity path passed to the LP's optimizer: sparse, or dense |
 | `threads` | `>= 0` (default `0`) | SSA workers; `0` = one per available processor |
+
+The N-1 mode token was renamed from `genAdjCaN_1` to `genAdjCA_N-1` in 0.7.8. The record accepts the
+canonical token only, and the CLI takes its mode from the inference above — an `optAdjType` left in a
+file (0.7.4–0.7.10 wrote one) is ignored here. The DSH Host still honors it, folding the retired
+spelling onto the canonical token, so an older file keeps its mode through the plugin.
 
 Two preconditions are refused with the reason rather than producing a meaningless run: every active
 generator needs a **P gen limit** and every branch a **rating MVA 1** (the scan divides the flow by
@@ -152,7 +160,7 @@ Results are written under `wspace/<input_parent>/result/`:
 - `<stem>_DF_load.csv`
 - `<stem>_DF_contingency.csv` (CA only)
 - `<stem>_DF_optadj_gen.csv` + `<stem>_DF_optadj_branch.csv` (OptAdj basecase)
-- `<stem>_DF_optadj_N1_gen.csv` + `<stem>_DF_optadj_N1_branch.csv` (OptAdj N-1, `genAdjCaN_1`)
+- `<stem>_DF_optadj_N1_gen.csv` + `<stem>_DF_optadj_N1_branch.csv` (OptAdj N-1, `genAdjCA_N-1`)
 
 See [Setup.md](Setup.md) for the full layout and the report generators in
 [GenReport.md](GenReport.md).

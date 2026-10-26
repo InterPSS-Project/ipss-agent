@@ -42,17 +42,29 @@ half of the job to the machinery that is good at it:
      (which cannot scale to 3000 long branches) is not needed.
 
 `--open` hands the finished diagram to the draw.io editor through the draw.io MCP server
-(`wspace/script/drawio_mcp.py`), which also round-trips hand edits back into the file.
+(`src/main/py/diagram/drawio_mcp.py`), which also round-trips hand edits back into the file.
+
+`--symbols none|gen|load|both` (default `none`) optionally adds bus equipment symbols, both
+hanging off the right edge of the bar: a generator circle (`ellipse` whose label is `~`) for every
+bus that has a row in `result/<stem>_DF_gen.csv`, and a load arrow (`shape=triangle` pointing DOWN
+at the end of a lead-and-drop) for every bus with a row in `result/<stem>_DF_load.csv`. Status is
+ROW PRESENCE ONLY -- `InService` and the MW columns are deliberately ignored, so an out-of-service
+unit still marks its bus. Each body is a `style=group` cell and each lead is a real EDGE anchored
+to the bus (source) and the symbol (target), like a branch stub, so moving either end keeps the
+connection. Both symbols stay inside the existing 52 x 72 bus footprint, so the layout and page
+size do not change.
 
 Deliverable, plus a raster preview built from the same geometry:
 
-  <stem>-oneline.drawio         the diagram (draw.io / the InterPSS preview)
+  <stem>-oneline-generate.drawio  the diagram (draw.io / the InterPSS preview)
   <stem>-oneline-preview.png    approximate Pillow render for a quick look
 
 Bus cells are `busN` and bus labels read `Bus-N` -- the two spellings the
 InterPSS plugin's diagram preview resolves to a bus tooltip. A branch is either
 one edge between two bus cells or two stub edges chained through a transformer
-group cell, which is how the plugin pairs a transformer with its branch.
+group cell, which is how the plugin pairs a transformer with its branch. The
+optional `genN` / `ldN` symbol cells are neither: they are inert vertices the
+preview paints but never resolves to a bus tooltip.
 """
 
 from __future__ import annotations
@@ -71,13 +83,14 @@ from collections import defaultdict, deque
 import numpy as np
 
 # --- template geometry ------------------------------------------------------
-BUS_W, BUS_H = 6.0, 52.0
+BUS_W, BUS_H = 4.0, 52.0     # the generated bar is 4 wide; the hand-laid template keeps 6
 LABEL_W, LABEL_H = 46.0, 18.0
+LABEL_FONT = 10        # px; the template uses 11, the generated diagrams read better at 10
 LABEL_GAP = 2.0
 BOX_W = 52.0
 BOX_H = LABEL_H + LABEL_GAP + BUS_H          # 72, exactly label + gap + bar
 GRID = 10.0
-BAND_H = 170.0                                # title/legend band above the network
+BAND_H = 90.0                                 # title/subtitle band above the network
 XF_R = 16.0                                   # one transformer ring
 XF_OVERLAP = 8.0                              # ring centre offset (rings interlock)
 LINE_W = 1.5
@@ -86,8 +99,32 @@ BAR_STYLE = "rounded=0;fillColor={fill};strokeColor={stroke};"
 EDGE_STYLE = "endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=%g;" % LINE_W
 XF_STYLE = "ellipse;fillColor=none;strokeColor=#000000;strokeWidth=%g;aspect=fixed;" % LINE_W
 LABEL_STYLE = ("rounded=0;fillColor=#FFFFFF;strokeColor=none;html=1;align=center;verticalAlign=middle;"
-               "fontSize=11;fontStyle=1;fontColor=#000000;")
+               "fontSize=%d;fontStyle=1;fontColor=#000000;" % LABEL_FONT)
 TEXT_STYLE = "text;html=1;fontSize=%d;%sfontColor=%s;align=%s;verticalAlign=%s;"
+
+# --- optional bus equipment symbols (--symbols) -----------------------------
+# Status comes from the equipment tables, not the bus CSV: a bus has a generator iff its
+# `_DF_gen.csv` has a row whose BusID is that bus, and a load iff `_DF_load.csv` does. Presence
+# only -- `InService` and the MW columns are ignored on purpose (an out-of-service unit still
+# marks the bus). Both symbols HANG OFF THE SAME (right) SIDE of the bar, each on its own short
+# lead, and both stay inside the 52 x 72 bus footprint: the bar is only 6 wide, so ~23 px of
+# free space to its right is what keeps the layout and the page size unchanged.
+#
+#   generator:  bar ├──○~           a horizontal lead, then the circle (its label is `~`)
+#   load:       bar ├──┐            a horizontal lead, then a drop, ending in a DOWN arrow
+#                   ↓
+SYM_STEM = 6.0                                # lead length from the bar to the symbol
+GEN_R = 6.5                                   # generator circle radius (13 px symbol)
+GEN_FRAC = 0.34                               # its centre down the bar
+LOAD_W, LOAD_H = 6.5, 13.0                    # load arrow box (narrow)
+LOAD_DROP = 9.0                               # vertical part of the load lead
+LOAD_FRAC = 0.55                              # where the load lead leaves the bar
+GEN_STYLE = ("ellipse;aspect=fixed;fillColor=#FFFFFF;strokeColor=#000000;strokeWidth=%g;"
+             "align=center;verticalAlign=middle;fontSize=10;fontStyle=1;fontColor=#000000;" % LINE_W)
+LOAD_STYLE = ("shape=triangle;direction=south;aspect=fixed;fillColor=#000000;"
+              "strokeColor=#000000;strokeWidth=%g;" % LINE_W)
+STEM_STYLE = "rounded=0;fillColor=#000000;strokeColor=#000000;strokeWidth=0;"
+PREVIEW_MAX_CELLS = 20000                     # the InterPSS preview's cap (client + Host)
 
 # Every bus bar uses the template's single grey. The `Vn` suffix the IEEE names
 # carry (`Olive V1`, `Rivrsde V2`, `Pinevlle V3`) is read only as text, for the
@@ -98,12 +135,15 @@ VOLT_BY_SUFFIX = {"V1": "345 kV", "V2": "138 kV", "V3": "161 kV"}
 # --- case model -------------------------------------------------------------
 class Bus:
     __slots__ = ("bus_id", "num", "name", "volt", "fill", "stroke", "btype",
-                 "load_p", "gen_p", "xy", "bar_xy", "label_xy")
+                 "has_gen", "has_load", "xy", "bar_xy", "label_xy")
 
-    def __init__(self, bus_id, num, name, volt, fill, stroke, btype, load_p, gen_p):
+    def __init__(self, bus_id, num, name, volt, fill, stroke, btype):
         self.bus_id, self.num, self.name = bus_id, num, name
         self.volt, self.fill, self.stroke = volt, fill, stroke
-        self.btype, self.load_p, self.gen_p = btype, load_p, gen_p
+        self.btype = btype
+        # Equipment presence, set by read_case from the _DF_gen / _DF_load tables. Status is
+        # having a ROW for the bus, not its InService flag or its MW.
+        self.has_gen, self.has_load = False, False
         self.xy = (0.0, 0.0)
         self.bar_xy = (0.0, 0.0)
         self.label_xy = (0.0, 0.0)
@@ -152,12 +192,16 @@ def bus_number(bus_id, column, taken):
 
 def read_case(case_dir):
     res = os.path.join(case_dir, "result")
-    buses_csv = branch_csv = None
+    buses_csv = branch_csv = gen_csv = load_csv = None
     for fn in sorted(os.listdir(res)):
         if fn.endswith("_DF_bus.csv"):
             buses_csv = os.path.join(res, fn)
         elif fn.endswith("_DF_branch.csv"):
             branch_csv = os.path.join(res, fn)
+        elif fn.endswith("_DF_gen.csv"):
+            gen_csv = os.path.join(res, fn)
+        elif fn.endswith("_DF_load.csv"):
+            load_csv = os.path.join(res, fn)
     if buses_csv is None or branch_csv is None:
         sys.exit("no *_DF_bus.csv / *_DF_branch.csv under %s -- run ACLF first" % res)
     stem = os.path.basename(buses_csv)[: -len("_DF_bus.csv")]
@@ -171,9 +215,7 @@ def read_case(case_dir):
             volt = VOLT_BY_SUFFIX.get(tail.group(1), "") if tail else ""
             num = bus_number(row["ID"], row.get("Number"), taken)
             taken.add(num)
-            b = Bus(row["ID"], num, name, volt, BAR_FILL, BAR_STROKE,
-                    row.get("BusType", ""), float(row.get("LoadP") or 0.0),
-                    float(row.get("GenP") or 0.0))
+            b = Bus(row["ID"], num, name, volt, BAR_FILL, BAR_STROKE, row.get("BusType", ""))
             buses.append(b)
             by_id[b.key] = b
             nominal.append(row.get("NomVolt") or "")
@@ -193,6 +235,13 @@ def read_case(case_dir):
                 b.volt = "%g kV" % (v / 1000.0)
     buses.sort(key=lambda b: b.num)
 
+    # Equipment presence: a row in the table means the bus carries that equipment. `InService`
+    # and the MW columns are deliberately NOT read -- the request is "has a generator/load", so
+    # an out-of-service unit still marks its bus. Rows for a bus this diagram does not draw are
+    # ignored (the bus table is the drawing's universe).
+    mark_equipment(buses, by_id, gen_csv, "has_gen")
+    mark_equipment(buses, by_id, load_csv, "has_load")
+
     branches = []
     with open(branch_csv, newline="", encoding="utf-8-sig") as fh:
         for i, row in enumerate(csv.DictReader(fh)):
@@ -201,8 +250,94 @@ def read_case(case_dir):
                 continue
             branches.append(Branch(i, f, t, row["IsXfmr"].strip().lower() == "true",
                                    row.get("Circuit", "").strip(), row["ID"]))
-    return stem, buses, branches, anchor
+    equipment = {"gen": gen_csv, "load": load_csv}
+    return stem, buses, branches, anchor, equipment
 
+
+def mark_equipment(buses, by_id, path, attr):
+    """Mark every bus with a row in the gen/load table. Presence only (see read_case).
+
+    The bus is resolved by its `BusID` first -- that is the id the bus table's `ID` column and
+    the diagram's `busN` cell are built from, and it survives the BPA cases whose `Number`
+    column is 0. A row whose BusID is unknown falls back to `BusNumber` against the diagram's
+    own number; anything else is ignored rather than inventing a symbol for a bus that is not
+    drawn.
+    """
+    if path is None:
+        return
+    by_num = {b.num: b for b in buses}
+    with open(path, newline="", encoding="utf-8-sig") as fh:
+        for row in csv.DictReader(fh):
+            b = by_id.get((row.get("BusID") or "").strip().lower())
+            if b is None:
+                try:
+                    n = int((row.get("BusNumber") or "").strip())
+                except (TypeError, ValueError):
+                    n = 0
+                b = by_num.get(n)
+            if b is not None:
+                setattr(b, attr, True)
+
+
+def bus_symbols(buses, want):
+    """The optional generator/load symbols, each ANCHORED to its bus with a real edge.
+
+    `want` is `{"gen": bool, "load": bool}`. The generator hangs off the LEFT edge of the bar,
+    the load off the RIGHT (a fixed layout rule), so a bus with both reads `○~ | Bar | ↓`:
+
+      * generator (`ggN`) -- a `style=group` cell holding the `genN` ellipse whose own label is
+        `~`; a lead edge `sgN` runs from the bus's left edge into the circle, with
+        `endArrow=none` (draw.io centres a vertex label, and the app preview draws an ellipse
+        node's label too);
+      * load (`lgN`) -- a group cell holding the `ldN` triangle pointing south; the lead edge
+        `slN` runs from the bus to an elbow above the arrow and then down into it.
+
+    The lead is an EDGE with the bus as its source and the symbol as its target, exactly like a
+    branch's stub: moving the bus keeps the lead attached to the bus, and moving the symbol
+    keeps it attached to the symbol -- there is never a gap. The group still makes the symbol
+    one object in draw.io (the transformer rings are grouped the same way).
+
+    Every part stays inside the 52 x 72 bus footprint (the circle's far edge is 22 px from the
+    bar centre, the arrow's below 51 px down the 52 px bar), so the layout and the page size are
+    exactly the same with and without them. Coordinates are absolute here; `write_drawio` makes
+    each vertex relative to its group before writing.
+    """
+    out = []
+    for b in buses:
+        x, y = b.bar_xy
+        if want.get("gen") and b.has_gen:
+            cy = y + BUS_H * GEN_FRAC
+            gx, gy = x - SYM_STEM - 2 * GEN_R, cy - GEN_R
+            out.append({"id": "gg%d" % b.num, "kind": "group", "num": b.num,
+                        "x": gx, "y": gy, "w": 2 * GEN_R, "h": 2 * GEN_R,
+                        "style": "group", "value": "", "parent": "1"})
+            out.append({"id": "gen%d" % b.num, "kind": "gen", "num": b.num,
+                        "x": gx, "y": gy, "w": 2 * GEN_R, "h": 2 * GEN_R,
+                        "style": GEN_STYLE, "value": "~", "parent": "gg%d" % b.num})
+            out.append({"id": "sg%d" % b.num, "kind": "lead", "num": b.num,
+                        "source": "bus%d" % b.num, "target": "gen%d" % b.num,
+                        "exit": (0.0, GEN_FRAC),
+                        "points": [],
+                        "draw": [(x, cy), (gx + 2 * GEN_R, cy)]})
+        if want.get("load") and b.has_load:
+            # The generator sits on the LEFT of the bar, the load on the RIGHT (a user rule):
+            # both still fit in the bar's own footprint, whose label is centred over the bar.
+            ey = y + BUS_H * LOAD_FRAC
+            tx = x + BUS_W + SYM_STEM - LOAD_W / 2.0
+            ty = ey + LOAD_DROP
+            out.append({"id": "lg%d" % b.num, "kind": "group", "num": b.num,
+                        "x": tx, "y": ty, "w": LOAD_W, "h": LOAD_H,
+                        "style": "group", "value": "", "parent": "1"})
+            out.append({"id": "ld%d" % b.num, "kind": "load", "num": b.num,
+                        "x": tx, "y": ty, "w": LOAD_W, "h": LOAD_H,
+                        "style": LOAD_STYLE, "value": "", "parent": "lg%d" % b.num})
+            out.append({"id": "sl%d" % b.num, "kind": "lead", "num": b.num,
+                        "source": "bus%d" % b.num, "target": "ld%d" % b.num,
+                        "exit": (1.0, LOAD_FRAC),
+                        "points": [(x + BUS_W + SYM_STEM, ey)],
+                        "draw": [(x + BUS_W, ey), (x + BUS_W + SYM_STEM, ey),
+                                 (x + BUS_W + SYM_STEM, ty)]})
+    return out
 
 # --- layout (box units: one bus footprint = 1 x 1) --------------------------
 TARGET = 1.22          # what the relaxation aims for: footprint + 22% gap
@@ -742,7 +877,7 @@ def route(p0, p1, hard, soft=(), clearance=7.0):
 
 
 # --- geometry plan ----------------------------------------------------------
-def plan(buses, branches, hops=True, slots=None):
+def plan(buses, branches, hops=True, slots=None, symbol_boxes=()):
     """Bus geometry, transformer symbols and every routed edge, once.
 
     `hops=False` draws every branch straight: on the lattice path the edges are emitted before
@@ -752,9 +887,13 @@ def plan(buses, branches, hops=True, slots=None):
     `slots` is the lattice placement (see layout_buses_lattice): each transformer symbol is then
     placed in a *reserved* gap between four bus cells, which is empty of bars and labels by
     construction, instead of being searched for along the trunk.
+
+    `symbol_boxes` are the optional bus equipment symbols (bus_symbols): branches are routed
+    around them, and the transformer search does not put a ring on one.
     """
     bar_obs = {b.key: bar_rect(b, 3.0) for b in buses}
     lab_obs = {b.key: label_rect(b, 1.0) for b in buses}
+    sym_obs = list(symbol_boxes)
 
     ends = {}
     for br in branches:
@@ -834,7 +973,7 @@ def plan(buses, branches, hops=True, slots=None):
         if spot is None:
             near = (min(p0[0], p1[0]) - 150, min(p0[1], p1[1]) - 150,
                     max(p0[0], p1[0]) + 150, max(p0[1], p1[1]) + 150)
-            obstacles = [r for r in list(bar_obs.values()) + list(lab_obs.values())
+            obstacles = [r for r in list(bar_obs.values()) + list(lab_obs.values()) + sym_obs
                          if boxes_hit(near, r)]
             perp = (-tdy, tdx)
             cands = sorted(((o, ti / 40.0)
@@ -882,7 +1021,8 @@ def plan(buses, branches, hops=True, slots=None):
         # emitted before the bars (the bars mask the wires) -- so there is no obstacle list to
         # scan and `route` short-circuits on its first line.
         hard = [] if not hops else \
-            [r for k, r in bar_obs.items() if k not in (ba.key, bb.key)] + list(xf_box.values())
+            [r for k, r in bar_obs.items() if k not in (ba.key, bb.key)] + list(xf_box.values()) \
+            + sym_obs
         soft = [] if not hops else [r for k, r in lab_obs.items() if k not in (ba.key, bb.key)]
         if br.is_xfmr:
             sym = next(s for s in symbols if s["br"] is br)
@@ -950,7 +1090,8 @@ def esc(text):
 
 
 def write_drawio(path, stem, title, subtitle, buses, symbols, edges, page_w, page_h,
-                 edges_first=False):
+                 edges_first=False, bus_symbols=None):
+    bus_symbols = bus_symbols or []
     P = []
     add = P.append
     add('<mxfile host="65bd71144e">\n')
@@ -961,31 +1102,16 @@ def write_drawio(path, stem, title, subtitle, buses, symbols, edges, page_w, pag
     add('            <root>\n                <mxCell id="0"/>\n                <mxCell id="1" parent="0"/>\n')
     add('                <mxCell id="bg" value="" style="rounded=0;fillColor=#FFFFFF;strokeColor=none;locked=1;" parent="1" vertex="1">\n'
         '                    <mxGeometry width="%g" height="%g" as="geometry"/>\n                </mxCell>\n' % (page_w, page_h))
-    # Header: title and subtitle on the left, legend on the right -- but a narrow page has no
-    # room for the two side by side, and draw.io paints the legend box over the title text
-    # (the exporter then widens the page to fit the overflowing cells). So the legend stacks
-    # under the subtitle whenever the title column would come out too thin.
-    lw = min(360.0, page_w - 80.0)
-    lx, ly, lh = page_w - 40.0 - lw, 20.0, 66.0
-    title_w = lx - 60.0
-    if title_w < 340.0:
-        lx, ly, title_w = 40.0, 88.0, page_w - 80.0
-    sub_w = title_w
+    # Header: just the title and the subtitle. The old legend box (symbol key + hover hint) is
+    # gone -- the Diagram tab documents the interaction -- so the title column gets the full
+    # page width and the band above the network is only as tall as the two text cells.
+    title_w = page_w - 80.0
     add('                <mxCell id="title" value="%s" style="%s" parent="1" vertex="1">\n'
         '                    <mxGeometry x="40" y="20" width="%g" height="30" as="geometry"/>\n                </mxCell>\n'
         % (esc(title), TEXT_STYLE % (20, "fontStyle=1;", "#000000", "left", "middle"), title_w))
     add('                <mxCell id="subtitle" value="%s" style="%s" parent="1" vertex="1">\n'
         '                    <mxGeometry x="40" y="52" width="%g" height="18" as="geometry"/>\n                </mxCell>\n'
-        % (esc(subtitle), TEXT_STYLE % (11, "", "#666666", "left", "middle"), sub_w))
-    add('                <mxCell id="legend" value="" style="rounded=0;fillColor=#F7F7F7;strokeColor=#CCCCCC;" parent="1" vertex="1">\n'
-        '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n' % (lx, ly, lw, lh))
-    add('                <mxCell id="legendText" value="%s" style="%s" parent="1" vertex="1">\n'
-        '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n'
-        # draw.io collapses a literal newline in an html label, so the line break is a <br>
-        # (escaped here); the plugin preview turns the same <br> back into a newline.
-        % (esc("\u2503 vertical bus      \u2500 branch      \u25cb\u25cb transformer<br>"
-               "Bus-N  id only \u2014 hover a bar, a label or a branch"),
-           TEXT_STYLE % (10, "", "#000000", "left", "top") + "spacing=6;", lx, ly, lw, lh))
+        % (esc(subtitle), TEXT_STYLE % (11, "", "#666666", "left", "middle"), title_w))
     def add_buses():
         for b in buses:
             add('                <mxCell id="bus%d" value="" style="%s" parent="1" vertex="1">\n'
@@ -1024,6 +1150,31 @@ def write_drawio(path, stem, title, subtitle, buses, symbols, edges, page_w, pag
             add('                <mxCell id="%s" value="" style="%s" parent="%s" vertex="1">\n'
                 '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n'
                 % (cid, XF_STYLE, s["group"], ox, oy, XF_R, XF_R))
+    # Optional equipment symbols, after the bars and wires so a wire passing behind a symbol is
+    # masked by it, and before the labels (which are painted last for the same reason). Each
+    # symbol's lead is an EDGE anchored to its bus (source) and to the symbol (target), exactly
+    # like a branch stub; the symbol itself is a `style=group` cell around one vertex, so
+    # draw.io moves it as one object. Child coordinates are relative to that group.
+    leads = [s for s in bus_symbols if s["kind"] == "lead"]
+    groups = {s["id"]: s for s in bus_symbols if s["kind"] == "group"}
+    for sy in leads:
+        style = ("endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=%g;"
+                 "exitX=%g;exitY=%g;"
+                 % (LINE_W, sy["exit"][0], sy["exit"][1]))
+        if sy.get("entry") is not None:
+            style += "entryX=%g;entryY=%g;" % sy["entry"]
+        way = "".join('<mxPoint x="%g" y="%g"/>' % (p[0], p[1]) for p in sy["points"])
+        add('                <mxCell id="%s" value="" style="%s" parent="1" source="%s" target="%s" edge="1">\n'
+            '                    <mxGeometry relative="1" as="geometry">%s</mxGeometry>\n                </mxCell>\n'
+            % (sy["id"], style, sy["source"], sy["target"],
+               ('<Array as="points">%s</Array>' % way) if way else ""))
+    for sy in (s for s in bus_symbols if s["kind"] != "lead"):
+        parent = sy.get("parent", "1")
+        ox, oy = (groups[parent]["x"], groups[parent]["y"]) if parent in groups else (0.0, 0.0)
+        add('                <mxCell id="%s" value="%s" style="%s" parent="%s" vertex="1">\n'
+            '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n'
+            % (sy["id"], esc(sy["value"]), sy["style"], parent,
+               sy["x"] - ox, sy["y"] - oy, sy["w"], sy["h"]))
     for b in buses:                      # labels last: their paper box covers wires
         add('                <mxCell id="nm%d" value="Bus-%d" style="%s" parent="1" vertex="1">\n'
             '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n'
@@ -1046,7 +1197,8 @@ def _font(size, bold=False):
     return ImageFont.load_default()
 
 
-def write_png(path, title, subtitle, buses, symbols, edges, page_w, page_h, scale=1.0):
+def write_png(path, title, subtitle, buses, symbols, edges, page_w, page_h, scale=1.0,
+              bus_symbols=None):
     from PIL import Image, ImageDraw
     S = scale
     img = Image.new("RGB", (max(1, int(page_w * S)), max(1, int(page_h * S))), "white")
@@ -1059,7 +1211,7 @@ def write_png(path, title, subtitle, buses, symbols, edges, page_w, page_h, scal
         for ox, oy in offs:
             x, y = s["gx"] + ox, s["gy"] + oy
             d.ellipse([x * S, y * S, (x + XF_R) * S, (y + XF_R) * S], outline="#000000", width=w)
-    f = _font(max(7, int(11 * S)), bold=True)
+    f = _font(max(7, int(LABEL_FONT * S)), bold=True)
     for b in buses:
         x, y = b.bar_xy
         d.rectangle([x * S, y * S, (x + BUS_W) * S, (y + BUS_H) * S], fill=b.fill, outline=b.stroke)
@@ -1067,13 +1219,26 @@ def write_png(path, title, subtitle, buses, symbols, edges, page_w, page_h, scal
         d.rectangle([lx * S, ly * S, (lx + LABEL_W) * S, (ly + LABEL_H) * S], fill="white")
         d.text(((lx + LABEL_W / 2) * S, (ly + LABEL_H / 2) * S), "Bus-%d" % b.num,
                font=f, fill="#000000", anchor="mm")
+    # The optional symbols, after the bars/wires like the .drawio's paint order. Their leads are
+    # edges in the file; here they are drawn as the same polyline before the symbol body.
+    fsym = _font(max(6, int(10 * S)), bold=True)
+    for sy in (bus_symbols or []):
+        if sy["kind"] == "lead":
+            d.line([(p[0] * S, p[1] * S) for p in sy["draw"]], fill="#000000", width=w)
+            continue
+        sx, syy, sw, sh = sy["x"] * S, sy["y"] * S, sy["w"] * S, sy["h"] * S
+        if sy["kind"] == "gen":
+            d.ellipse([sx, syy, sx + sw, syy + sh], fill="#FFFFFF", outline="#000000", width=w)
+            d.text((sx + sw / 2, syy + sh / 2), "~", font=fsym, fill="#000000", anchor="mm")
+        elif sy["kind"] == "load":              # a DOWN arrow
+            d.polygon([(sx, syy), (sx + sw, syy), (sx + sw / 2, syy + sh)], fill="#000000")
     d.text((40 * S, 34 * S), title, font=_font(max(11, int(20 * S)), True), fill="#000000", anchor="lm")
     d.text((40 * S, 60 * S), subtitle, font=_font(max(8, int(11 * S))), fill="#666666", anchor="lm")
     img.save(path)
 
 
 # --- validation -------------------------------------------------------------
-def validate(path, buses, branches, quiet=False, anchor=None):
+def validate(path, buses, branches, quiet=False, anchor=None, equipment=None):
     """Read the deliverable back the way the InterPSS diagram preview does."""
     problems = []
     root = ET.parse(path).getroot()
@@ -1081,8 +1246,8 @@ def validate(path, buses, branches, quiet=False, anchor=None):
     by_id = {c.get("id"): c for c in cells}
     if len(by_id) != len(cells):
         problems.append("duplicate cell ids")
-    if len(cells) > 20000:
-        problems.append("more than 20000 cells: %d" % len(cells))
+    if len(cells) > PREVIEW_MAX_CELLS:
+        problems.append("more than %d cells: %d" % (PREVIEW_MAX_CELLS, len(cells)))
     for c in cells:
         for end in (c.get("source"), c.get("target")):
             if end is not None and end not in by_id:
@@ -1110,13 +1275,25 @@ def validate(path, buses, branches, quiet=False, anchor=None):
 
     pairs = set()
     for e in edges:
+        # A generated edge is a branch/stub (`eN`) or an equipment lead (`sgN`/`slN`). Anything
+        # else is a draw.io-created edge that somebody saved into this file -- the preview
+        # silently drops such an edge (usually because one end is a group cell), so the editor
+        # and the tab then show different diagrams. Fail instead of shipping the drift.
+        if not re.fullmatch(r"(e|sg|sl)\d+", e.get("id") or ""):
+            problems.append("edge %s is not a generated edge" % e.get("id"))
         ends = ends_of(e)
         if len(ends) == 2:
             pairs.add("|".join(ends))
             continue
+        if len(ends) == 0:
+            problems.append("edge %s connects no bus" % e.get("id"))
+            continue
         if len(ends) != 1:
             continue
         other = e.get("target") if re.fullmatch(r"bus\d+", e.get("source") or "", re.I) else e.get("source")
+        # A generator/load lead is an edge from the bus to the symbol: an anchor, not a branch.
+        if re.fullmatch(r"(gen|ld)\d+", other or ""):
+            continue
         grp = parent.get(other)
         union = set()
         for c in edges:
@@ -1131,7 +1308,10 @@ def validate(path, buses, branches, quiet=False, anchor=None):
         problems.append("%d branch pairs missing (e.g. %s)" % (len(want - pairs), sorted(want - pairs)[:3]))
     if pairs - want:
         problems.append("%d pairs with no branch (e.g. %s)" % (len(pairs - want), sorted(pairs - want)[:3]))
-    rings = [c for c in cells if "ellipse" in (c.get("style") or "")]
+    # Only the transformer rings: the optional generator symbol is an ellipse too, and counting
+    # every ellipse would make `--symbols gen` fail its own self-check.
+    rings = [c for c in cells if "ellipse" in (c.get("style") or "")
+             and re.fullmatch(r"xf\d+b?", c.get("id") or "")]
     n_xf = sum(1 for br in branches if br.is_xfmr)
     if len(rings) != 2 * n_xf:
         problems.append("expected %d transformer rings, found %d" % (2 * n_xf, len(rings)))
@@ -1157,6 +1337,28 @@ def validate(path, buses, branches, quiet=False, anchor=None):
             cur = p
         return (x, y, x + w, y + h)
 
+    # Every transformer is ONE group cell owning its two rings: that is what makes it a single
+    # object in draw.io and what the preview's branch pairing walks through. A ring outside a
+    # group, a group with the wrong children, or a group box that does not enclose them all
+    # break "move the symbol as one" even though the picture still looks right.
+    xf_groups = {c.get("id"): c for c in cells if re.fullmatch(r"xfg\d+", c.get("id") or "")}
+    for gid, gc in xf_groups.items():
+        num = gid[3:]
+        kids = [cid for cid in by_id if parent.get(cid) == gid]
+        if set(kids) != {"xf" + num, "xf" + num + "b"}:
+            problems.append("transformer group %s does not own its two rings (found %s)"
+                            % (gid, sorted(kids)))
+        gb = box_of(gc)
+        for cid in kids:
+            kb = box_of(by_id[cid])
+            if gb is not None and kb is not None and not (
+                    gb[0] - 0.51 <= kb[0] and kb[2] <= gb[2] + 0.51
+                    and gb[1] - 0.51 <= kb[1] and kb[3] <= gb[3] + 0.51):
+                problems.append("transformer group %s does not enclose %s" % (gid, cid))
+    for cid in (c.get("id") for c in cells):
+        if re.fullmatch(r"xf\d+b?", cid or "") and parent.get(cid) not in xf_groups:
+            problems.append("transformer ring %s is not inside a transformer group" % cid)
+
     solid = {c.get("id"): box_of(c) for c in cells
              if re.fullmatch(r"bus\d+", c.get("id") or "", re.I)
              or re.fullmatch(r"Bus-\d+", (c.get("value") or "").strip())}
@@ -1172,12 +1374,103 @@ def validate(path, buses, branches, quiet=False, anchor=None):
         if offenders:
             problems.append("the first bus (%d) is not the top-left-most bus: %d sit above/left "
                             "(e.g. %s)" % (anchor.num, len(offenders), offenders[:3]))
-    for g in (c for c in cells if (c.get("style") or "") == "group"):
+    # Only the transformer groups here: the optional equipment groups are checked against their
+    # own bus footprint below, and a symbol group touching its own children is not an overlap.
+    for g in (c for c in cells if (c.get("style") or "") == "group"
+              and re.fullmatch(r"xfg\d+", c.get("id") or "")):
         gb = box_of(g)
         if gb is None:
             continue
         for cid, r in solid.items():
             if r is not None and boxes_hit(gb, r):
+                problems.append("transformer %s overlaps %s" % (g.get("id"), cid))
+
+    # The optional equipment symbols. Their EXPECTATION comes from the file, not from the flags:
+    # a diagram generated without symbols has none, and --check must keep passing on it. Once a
+    # family is present, the set must match the equipment tables exactly (a missing or orphan
+    # symbol means the file and the case have drifted apart), each cell must carry its shape and
+    # parent, and each box -- leads and group included -- must sit inside its bus's own footprint,
+    # the rule that keeps the page and the no-overlap guarantee valid.
+    sym_cells = {c.get("id"): c for c in cells
+                 if re.fullmatch(r"(gg|lg|gen|ld)\d+", c.get("id") or "")}
+    lead_edges = {c.get("id"): c for c in cells
+                  if re.fullmatch(r"(sg|sl)\d+", c.get("id") or "")}
+    have_gen = {i for i in sym_cells if re.fullmatch(r"gen\d+", i)}
+    have_ld = {i for i in sym_cells if re.fullmatch(r"ld\d+", i)}
+    have_gg = {i for i in sym_cells if re.fullmatch(r"gg\d+", i)}
+    have_lg = {i for i in sym_cells if re.fullmatch(r"lg\d+", i)}
+    have_sg = {i for i in lead_edges if re.fullmatch(r"sg\d+", i)}
+    have_sl = {i for i in lead_edges if re.fullmatch(r"sl\d+", i)}
+    want_gen = {"gen%d" % b.num for b in buses if b.has_gen}
+    want_ld = {"ld%d" % b.num for b in buses if b.has_load}
+    want_gg = {"gg%d" % b.num for b in buses if b.has_gen}
+    want_lg = {"lg%d" % b.num for b in buses if b.has_load}
+    want_sg = {"sg%d" % b.num for b in buses if b.has_gen}
+    want_sl = {"sl%d" % b.num for b in buses if b.has_load}
+    if have_gen:
+        if equipment is None or equipment.get("gen") is None:
+            problems.append("cannot verify %d generator symbols: no *_DF_gen.csv" % len(have_gen))
+        else:
+            for what, have, want in (("group", have_gg, want_gg),
+                                      ("lead", have_sg, want_sg),
+                                      ("symbol", have_gen, want_gen)):
+                for cid in sorted(want - have):
+                    problems.append("%s %s is missing from the diagram" % (what, cid))
+                for cid in sorted(have - want):
+                    problems.append("%s %s has no generator row in *_DF_gen.csv" % (what, cid))
+    if have_ld:
+        if equipment is None or equipment.get("load") is None:
+            problems.append("cannot verify %d load symbols: no *_DF_load.csv" % len(have_ld))
+        else:
+            for what, have, want in (("group", have_lg, want_lg),
+                                      ("lead", have_sl, want_sl),
+                                      ("symbol", have_ld, want_ld)):
+                for cid in sorted(want - have):
+                    problems.append("load %s %s is missing from the diagram" % (what, cid))
+                for cid in sorted(have - want):
+                    problems.append("load %s %s has no load row in *_DF_load.csv" % (what, cid))
+    # The lead must be a real edge ANCHORED to the bus and to the symbol -- that is what keeps
+    # the connection when either end moves in draw.io.
+    for cid, edge in lead_edges.items():
+        m = re.fullmatch(r"(sg|sl)(\d+)", cid)
+        num = m.group(2)
+        want_src, want_tgt = "bus" + num, ("gen" if m.group(1) == "sg" else "ld") + num
+        if edge.get("source") != want_src or edge.get("target") != want_tgt:
+            problems.append("%s is not anchored bus%s -> %s" % (cid, num, want_tgt))
+        if "endArrow=none" not in (edge.get("style") or ""):
+            problems.append("%s has an arrowhead" % cid)
+    sym_box = {cid: box_of(c) for cid, c in sym_cells.items()}
+    for cid, cell in sym_cells.items():
+        style = cell.get("style") or ""
+        m = re.fullmatch(r"(gg|lg|gen|ld)(\d+)", cid)
+        num = int(m.group(2))
+        if re.fullmatch(r"(gg|lg)\d+", cid):
+            if style != "group":
+                problems.append("%s is not a symbol group cell" % cid)
+            want_parent = cid
+        elif re.fullmatch(r"gen\d+", cid):
+            if "ellipse" not in style or (cell.get("value") or "").strip() != "~":
+                problems.append("%s is not a `~` generator ellipse" % cid)
+            want_parent = "gg%d" % num
+        else:
+            if "shape=triangle" not in style or "direction=south" not in style:
+                problems.append("%s is not a load triangle pointing south" % cid)
+            want_parent = "lg%d" % num
+        if want_parent != cid and parent.get(cid) != want_parent:
+            problems.append("%s is not a child of %s" % (cid, want_parent))
+        bar, lab = solid.get("bus%d" % num), solid.get("nm%d" % num)
+        box = sym_box.get(cid)
+        if bar is None or lab is None or box is None:
+            problems.append("%s has no bus%d footprint to sit in" % (cid, num))
+            continue
+        fp = (min(bar[0], lab[0]), min(bar[1], lab[1]), max(bar[2], lab[2]), max(bar[3], lab[3]))
+        if not (fp[0] - 0.51 <= box[0] and box[2] <= fp[2] + 0.51
+                and fp[1] - 0.51 <= box[1] and box[3] <= fp[3] + 0.51):
+            problems.append("%s leaves its bus%d footprint" % (cid, num))
+        for g in (c for c in cells if (c.get("style") or "") == "group"
+                  and re.fullmatch(r"xfg\d+", c.get("id") or "")):
+            gb = box_of(g)
+            if gb is not None and boxes_hit(gb, box):
                 problems.append("transformer %s overlaps %s" % (g.get("id"), cid))
 
     # No two bus footprints may overlap. This is the defect the force pipeline can ship: its
@@ -1209,12 +1502,16 @@ def validate(path, buses, branches, quiet=False, anchor=None):
             if ratio < 0.35 or ratio > 3.0 or max(pw, ph) > 20000.0:
                 problems.append("page is not page-friendly: %gx%g" % (pw, ph))
     if not quiet:
-        print("check %s: %d cells, %d edges, %d bus pairs, %d transformer rings, %d labels"
-              % (os.path.basename(path), len(cells), len(edges), len(pairs), len(rings), len(labels)))
+        sym_note = ""
+        if sym_cells:
+            sym_note = ", %d gen + %d load symbols" % (len(have_gen), len(have_ld))
+        print("check %s: %d cells, %d edges, %d bus pairs, %d transformer rings, %d labels%s"
+              % (os.path.basename(path), len(cells), len(edges), len(pairs), len(rings),
+                 len(labels), sym_note))
         for p in problems:
             print("  FAIL %s" % p)
         if not problems:
-            print("  PASS -- bus/branch hover ids, arrows, transformers and page all hold")
+            print("  PASS -- bus/branch hover ids, arrows, transformers, symbols and page all hold")
     return not problems
 
 
@@ -1223,7 +1520,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("case_dir", help="case folder holding result/<stem>_DF_bus.csv")
-    ap.add_argument("--out", help="output .drawio (default <case_dir>/diagram/<stem>-oneline.drawio)")
+    ap.add_argument("--out", help="output .drawio (default <case_dir>/diagram/<stem>-oneline-generate.drawio)")
     ap.add_argument("--title", help="diagram title")
     ap.add_argument("--png", help="preview PNG (default alongside the .drawio)")
     ap.add_argument("--no-png", action="store_true", help="skip the preview PNG")
@@ -1235,6 +1532,17 @@ def main():
                          "`force` = always the original pipeline; `lattice` = always one cell per "
                          "bus, branches drawn under the bars" % FORCE_MAX_BUSES)
     ap.add_argument("--check", metavar="DRAWIO", help="only validate an existing diagram")
+    ap.add_argument("--no-anchor", action="store_true",
+                    help="skip the Bus-1 top-left rule (for a hand-adjusted classic layout)")
+    ap.add_argument("--symbols", choices=("none", "gen", "load", "both"), default="none",
+                    help="optional bus equipment symbols, driven by the result tables: `gen` "
+                         "draws a generator circle on a lead edge from the right of every bar "
+                         "that has a row in <stem>_DF_gen.csv, `load` a down arrow at the end of "
+                         "a lead-and-drop edge from the right of every bar in <stem>_DF_load.csv, "
+                         "`both` draws both. The leads are anchored to the bus and the symbol, so "
+                         "moving either end keeps the connection. Status is row presence only "
+                         "(InService and MW are ignored). Default none; they fit inside the bus "
+                         "footprint, so the page size does not change")
     ap.add_argument("--app-export", metavar="PNG", nargs="?", const="", default=None,
                     help="also render the diagram with the local draw.io desktop app's CLI "
                          "(authoritative draw.io output, not the Pillow approximation); optional "
@@ -1243,12 +1551,34 @@ def main():
                     help="draw.io desktop executable used by --app-export")
     ap.add_argument("--open", action="store_true",
                     help="after a passing self-check, open the diagram in the draw.io editor "
-                         "through the draw.io MCP server (wspace/script/drawio_mcp.py)")
+                         "through the draw.io MCP server (src/main/py/diagram/drawio_mcp.py)")
     args = ap.parse_args()
 
-    stem, buses, branches, anchor = read_case(args.case_dir)
+    stem, buses, branches, anchor, equipment = read_case(args.case_dir)
     if args.check:
-        sys.exit(0 if validate(args.check, buses, branches, anchor=anchor) else 1)
+        sys.exit(0 if validate(args.check, buses, branches,
+                               anchor=None if args.no_anchor else anchor,
+                               equipment=equipment) else 1)
+    want = {"gen": args.symbols in ("gen", "both"),
+            "load": args.symbols in ("load", "both")}
+    for fam in ("gen", "load"):
+        if want[fam] and equipment.get(fam) is None:
+            sys.exit("--symbols %s needs %s -- run ACLF first, or drop %s from --symbols"
+                     % (fam, os.path.join(args.case_dir, "result", "%s_DF_%s.csv" % (stem, fam)),
+                        fam))
+    # The preview caps a diagram at PREVIEW_MAX_CELLS; each symbol adds 3 cells (a group, its
+    # single body vertex, and the lead edge anchored to the bus), so check the ceiling BEFORE
+    # the (possibly minutes-long) layout rather than writing a file the app cannot open. The
+    # count is exact: 2 root cells + 3 header cells + 2 per bus + 1 per edge + 3 per transformer.
+    n_gen = sum(1 for b in buses if b.has_gen) if want["gen"] else 0
+    n_load = sum(1 for b in buses if b.has_load) if want["load"] else 0
+    n_sym = 3 * n_gen + 3 * n_load
+    if n_sym:
+        n_xf = sum(1 for br in branches if br.is_xfmr)
+        estimate = 5 + 2 * len(buses) + len(branches) + 4 * n_xf + n_sym
+        if estimate > PREVIEW_MAX_CELLS:
+            sys.exit("--symbols would make this diagram %d cells; the preview limit is %d -- "
+                     "re-run without --symbols or on a smaller case" % (estimate, PREVIEW_MAX_CELLS))
     kind = args.layout
     if kind == "auto":
         kind = "force" if len(buses) <= FORCE_MAX_BUSES else "lattice"
@@ -1258,9 +1588,13 @@ def main():
     else:
         buses = layout_buses(buses, branches, seed=args.seed, anchor=anchor)
         placement = {"kind": "force"}
+    bus_syms = bus_symbols(buses, want)
+    # Only the symbol bodies (their groups) are obstacles; the leads are wires and may be crossed.
+    symbol_boxes = [(s["x"], s["y"], s["x"] + s["w"], s["y"] + s["h"])
+                    for s in bus_syms if s["kind"] == "group"]
     symbols, edges, detours, warnings, slot_stats = plan(
         buses, branches, hops=kind == "force",
-        slots=placement if kind == "lattice" else None)
+        slots=placement if kind == "lattice" else None, symbol_boxes=symbol_boxes)
     placed_s = time.time() - started
     page_w = math.ceil((max(b.xy[0] for b in buses) + BOX_W / 2 + 60.0) / 100.0) * 100.0
     page_h = math.ceil((max(b.xy[1] for b in buses) + BOX_H / 2 + 60.0) / 100.0) * 100.0
@@ -1269,13 +1603,17 @@ def main():
     subtitle = ("%d buses, %d branches (%d transformers)%s - axes are layout, not geography"
                 % (len(buses), len(branches), sum(1 for br in branches if br.is_xfmr),
                    (", voltage levels " + volts) if volts else ""))
-    out = args.out or os.path.join(args.case_dir, "diagram", "%s-oneline.drawio" % stem)
+    out = args.out or os.path.join(args.case_dir, "diagram", "%s-oneline-generate.drawio" % stem)
     os.makedirs(os.path.dirname(out), exist_ok=True)
     write_drawio(out, stem, title, subtitle, buses, symbols, edges, page_w, page_h,
-                 edges_first=kind == "lattice")
+                 edges_first=kind == "lattice", bus_symbols=bus_syms)
     for w in warnings:
         print("note: %s" % w)
     print("placed %d buses with the %s strategy in %.1fs" % (len(buses), kind, placed_s))
+    if bus_syms:
+        print("%d generator symbols, %d load symbols (from the equipment tables)"
+              % (sum(1 for s in bus_syms if s["kind"] == "gen"),
+                 sum(1 for s in bus_syms if s["kind"] == "load")))
     if kind == "lattice":
         cell = placement["cell"]
         spans = sorted(abs(cell[br.fbus.key][0] - cell[br.tbus.key][0])
@@ -1290,10 +1628,12 @@ def main():
     print("wrote %s (%gx%g, %d buses, %d branches, %d edges, %d hopped, %d overlapping footprints)"
           % (out, page_w, page_h, len(buses), len(branches), len(edges), detours,
              crowded(np.array([b.xy for b in buses]) / np.array([BOX_W, BOX_H]), HARD)))
-    ok = validate(out, buses, branches, anchor=anchor)
+    ok = validate(out, buses, branches,
+                  anchor=None if args.no_anchor else anchor, equipment=equipment)
     if not args.no_png:
         png = args.png or os.path.splitext(out)[0] + "-preview.png"
-        write_png(png, title, subtitle, buses, symbols, edges, page_w, page_h, args.scale)
+        write_png(png, title, subtitle, buses, symbols, edges, page_w, page_h, args.scale,
+                  bus_symbols=bus_syms)
         print("wrote %s" % png)
     if args.app_export is not None and ok:
         target = args.app_export or os.path.splitext(out)[0] + "-drawio.png"

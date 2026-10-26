@@ -1,6 +1,6 @@
 ---
 name: ipss-case-diagram
-description: Use when asked to draw, create, regenerate or refresh a one-line diagram for an InterPSS simulation case — "draw the one-line diagram for this case", "make a diagram like the template", "put it in the case's diagram folder" — writing <case>/diagram/<stem>-oneline.drawio plus a PNG preview from the case's ACLF result CSVs, in the style of wspace/template/oneline-diagram.drawio.
+description: Use when asked to draw, create, regenerate or refresh a one-line diagram for an InterPSS simulation case — "draw the one-line diagram for this case", "make a diagram like the template", "put it in the case's diagram folder" — writing <case>/diagram/<stem>-oneline-generate.drawio plus a PNG preview from the case's ACLF result CSVs, in the style of wspace/template/oneline-diagram.drawio.
 metadata:
   short-description: Generate a case one-line diagram
 ---
@@ -11,7 +11,7 @@ Draw the **one-line diagram** for a simulation case — vertical bus bars, undir
 two-ring transformer symbols and `Bus-N` labels — and write it into the case's own `diagram/` folder,
 where the **Diagram** tab previews it.
 
-The diagram is **generated, never hand-placed**. `wspace/script/gen_oneline_diagram.py` lays the
+The diagram is **generated, never hand-placed**. `src/main/py/diagram/gen_oneline_diagram.py` lays the
 network out from the case's result tables, routes every branch and writes both the `.drawio` and a
 raster preview. The hand-laid `wspace/template/oneline-diagram.drawio` (IEEE 14-bus) is the style
 contract that generator follows. Hand placement does not scale: the IEEE 118-bus case is 118 buses
@@ -35,13 +35,21 @@ Both CSVs are ACLF output, so a case with no `result/*_DF_bus.csv` must be solve
 # is available (its python/bin/python3); a bare system python3 has numpy but no Pillow.
 PY="${DSH_PYTHON:-$HOME/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3}"
 
-"$PY" wspace/script/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
+"$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
     --title "IEEE 118-Bus One-Line Diagram"
 ```
 
 The run prints the output path, the page size, bus/branch/edge counts and any overlapping
 footprints, then reads the file back and prints its self-check. A non-zero exit means the self-check
 failed.
+
+Add **`--symbols both`** (or `gen` / `load`) when the user wants the equipment marks: a `○~`
+generator circle from the **left** of every bus that has a row in `result/<stem>_DF_gen.csv`, and a
+`↓` load arrow at the end of a lead-and-drop from the **right** of every bus in `_DF_load.csv`
+(the generator always sits on the left, the load on the right). Each
+hangs on a lead **edge anchored to its bus** (source = the bus, target = the symbol), so moving
+the bus or the symbol in draw.io keeps the lead connected. Off by default, so an ordinary request
+draws topology only.
 
 ## Workflow
 
@@ -62,24 +70,25 @@ failed.
 
 | Element | Detail |
 |---|---|
-| Buses | one vertical bar per bus (6 x 52) with its `Bus-N` label above |
+| Buses | one vertical bar per bus (4 x 52; the hand-laid template keeps 6) with its `Bus-N` label above |
 | Branches | one line per `_DF_branch` row, undirected; parallel circuits bow slightly apart |
 | Transformers | `IsXfmr = true` rows as two interlocking rings in one group cell, inline on the branch and clear of every bar and label |
-| Loads / generators | not drawn — the template shows topology only |
+| Loads / generators | **optional**, `--symbols gen|load|both` (default none). A bus gets the generator symbol iff it has **a row** in `result/<stem>_DF_gen.csv`, and the load symbol iff it has one in `_DF_load.csv` — status is row presence only, `InService` and the MW columns are ignored. One symbol per family per bus, on fixed sides of the bar: the generator (`○~` circle) on the **left**, the load (lead-then-drop ending in a `↓` arrow) on the **right**. Each lead is an **edge anchored to the bus** (`sgN` / `slN`, `endArrow=none`, source = the bus, target = the symbol), like a branch stub, so the connection survives moving either end. Both stay inside the bar's own footprint, so the page size does not change |
 | Voltage | Not drawn **in the file**: every bar uses the template's single grey. The Diagram tab paints a bus whose solved `|V|` is outside **0.9–1.1 pu** red when it renders (0.6.18) — render-time only, so never bake a colour in for it. The subtitle names the levels only when the data supports it: the IEEE `Vn` name suffix, else the bus table's `NomVolt` when that is a real voltage, else nothing |
 | Orientation | the case's first bus (**Bus 1**) is the top-left-most bus: the layout is rotated, then eased, until every other bar is right of and below it |
-| Header | title, subtitle (counts and voltage levels), and a symbol legend box |
+| Header | title and subtitle only (counts and voltage levels) — no legend box |
 
 ## Style rules (the template contract)
 
 | Rule | Detail |
 |---|---|
-| Bus shape | vertical bar **6 x 52**, fill `#666666`, stroke `#333333` — the same grey for every bus |
-| Labels | `Bus-N` only (no name, no data), centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
+| Bus shape | vertical bar **4 x 52** (the hand-laid template keeps 6 x 52), fill `#666666`, stroke `#333333` — the same grey for every bus |
+| Labels | `Bus-N` only (no name, no data), **10 px bold**, centred **above** its bar, drawn as a white-filled rect so the paper box masks any wire beneath the text |
 | Branches | black `strokeWidth 1.5`, `endArrow=none`, no edge text; staggered taps so parallel lines leave a bar at different heights |
 | Transformers | two 16 x 16 ellipses, `fillColor=none`, centres 8 px apart, inside **one** `style=group` cell, sitting inline on the branch |
-| Routing | straight by default; one short local hop around a bar only when a straight line would cross one. Explicit waypoints and no `edgeStyle`, so draw.io and the app preview draw the same polyline |
-| Annotations | none: no bus data, no branch P/Q, no voltage colours |
+| Equipment symbols (`--symbols`) | the generator hangs off the bar's **left** edge, the load off its **right** (fixed rule). The body is a `style=group` cell around one vertex (`<i>ggN</i>`/`<i>genN</i>` `ellipse` labelled `~`; `<i>lgN</i>`/`<i>ldN</i>` `shape=triangle;direction=south`), so draw.io moves it as one object; the lead is a real EDGE `<i>sgN</i>`/`<i>slN</i>` (`endArrow=none`, source the bus, target the symbol) with the bar's left edge as the generator's exit and its right edge as the load's, and **no fixed entry** (draw.io maps a pinned entry through the triangle's unrotated box, which lands the wire on the arrow's side — leaving it to draw.io attaches at the actual top-centre) — anchored at both ends like a branch stub, so moving either end keeps the connection. The load lead carries one waypoint for its lead-then-drop shape. Every part stays inside the 52 x 72 footprint |
+| Routing | straight by default; one short local hop around a bar only when a straight line would cross one. Explicit waypoints and no `edgeStyle`, so draw.io and the app preview draw the same polyline. With `--symbols` the force path also hops round the symbols (the lattice path draws wires under them, like it does under bars) |
+| Annotations | none: no bus data, no branch P/Q, no voltage colours (the `--symbols` equipment marks are the only optional mark) |
 
 ## Keeping the app preview working
 
@@ -91,7 +100,19 @@ failed.
 - Every edge needs `endArrow=none` (a one-line diagram is undirected) and an explicit `strokeColor`.
 - Keep the file uncompressed XML under `<mxfile>`, and under **20000 cells** and **4 MiB** — the
   preview's caps since 0.6.19 (the 118-bus diagram uses 465 cells / 137 KB, so the ceiling is only
-  relevant for a case like Texas 2K: ~10.7k cells / ~3 MB, which now fits).
+  relevant for a case like Texas 2K: ~10.7k cells / ~3 MB, which now fits). A 2,000-bus case with
+  both symbol families is ~12.3k cells — still inside it.
+- **A free-end stub still draws (0.7.15+).** draw.io allows one end of an edge on a cell and the
+  other as a bare `sourcePoint`/`targetPoint` — what you get when a stub is dragged off its ring, or
+  an edge is relaid by hand. The preview reads each end independently, so both halves of a
+  hand-adjusted transformer stay visible; before 0.7.15 that edge was dropped and the symbol looked
+  one-sided. The guard's hand-laid checks read `wspace/template/oneline-diagram.drawio`, not the
+  case's working diagram, which may carry symbols or hand edits.
+- **The equipment symbols are inert in the tab.** `genN` / `ldN` are not `busN` ids and carry no
+  branch pair, and their `sgN` / `slN` lead edges resolve to no pair either, so the preview paints
+  them but shows no tooltip and no selection for them; that is deliberate. The load arrow is a draw.io `triangle`, which the preview only learned to draw in
+  **0.7.14** — on an older plugin it degrades to a black rectangle in the Diagram tab (the
+  draw.io desktop app is unaffected).
 - **The flag colours live in a config, not in the file.** `config/net_diagram.json` (edited from the Diagram tab's gear dialog,
   0.6.26) sets the bus band/colour and the two branch flow-flag percents/colours; the tab paints them at render time. The generator
   still writes one grey per bar and no branch colour.
@@ -111,14 +132,15 @@ failed.
 
 | Flag | Detail |
 |---|---|
-| `--out PATH` | write elsewhere (default `<case>/diagram/<stem>-oneline.drawio`) |
+| `--out PATH` | write elsewhere (default `<case>/diagram/<stem>-oneline-generate.drawio`) |
 | `--title TEXT` | page title and diagram name |
 | `--no-png` | skip the PNG preview — the only part that needs Pillow |
 | `--png PATH` | write the preview elsewhere |
 | `--scale N` | preview scale factor (default 1.0; use 2 for a closer look) |
 | `--seed N` | layout seed (default 11) |
 | `--layout auto\|force\|lattice` | placement strategy. `auto` (default) = the force pipeline up to 250 buses, the lattice above; `force` = always the original pipeline; `lattice` = always one cell per bus with the branches drawn under the bars. A large case **must** use the lattice path — the force one cannot separate it |
-| `--check FILE` | validate an existing diagram against the same case, writing nothing |
+| `--symbols none\|gen\|load\|both` | optional bus equipment symbols, default **none**: `gen` draws a `○~` circle on a short lead from the **left** of every bar with a row in `result/<stem>_DF_gen.csv`, `load` a `↓` arrow at the end of a lead-and-drop from the **right** of every bar with a row in `_DF_load.csv`, `both` draws both. Status is **row presence only** (`InService`/MW ignored), one symbol per family per bus; every part sits inside the bus footprint (page size unchanged) and each symbol is one `style=group` cell (`ggN` / `lgN`) around a single body, with a lead **edge** anchored bus→symbol, so it moves as one object and never detaches — 3 cells each — and the arrow needs plugin 0.7.14+ in the Diagram tab. Without the needed table the run exits with the missing path |
+| `--check FILE` | validate an existing diagram against the same case, writing nothing. A file with symbols is checked against the equipment tables; a symbol-less file still passes |
 | `--open` | after a passing self-check, hand the diagram to the draw.io editor through the draw.io MCP server |
 | `--app-export [PNG]` | render it with the local draw.io **desktop app** (authoritative output; default `<stem>-oneline-drawio.png`). `--app PATH` points at another install |
 
@@ -126,7 +148,7 @@ failed.
 
 Every run reads the diagram back the way the plugin's preview does and verifies: a `busN` cell and a
 `Bus-N` label for every bus, no arrowheads, exactly two rings per transformer with the right parent
-group, **no transformer symbol overlapping a bar or a label** (labels paint last, so such a symbol
+group, every equipment symbol in its group with a lead edge anchored `busN` -> the symbol, **no transformer symbol overlapping a bar or a label** (labels paint last, so such a symbol
 renders as a clipped ring), **the first bus at the upper-left corner**, every branch resolving to a
 bus pair, and a sane cell count and page. It
 prints `PASS` or the failing lines and sets the exit code. `--check FILE` re-runs exactly that
@@ -140,7 +162,7 @@ draw.io MCP server (`@drawio/mcp` 1.6.1, pinned at `$DSH_HOME/mcp-servers/drawio
 | Route | When |
 |---|---|
 | `mcp__drawio__*` tools | Preferred. DSH mounts the server from the profile's `mcp-drawio` row (`@deepseek-ai/dsh-mcp-client`, stdio), which must be written with `insert:` — a bare `- id:` patch targets an existing row and a target that matches no row is **skipped silently**, restart after restart. Profile rows are composed when the app starts, so a session that began before the row was added has none of them |
-| `python3 wspace/script/drawio_mcp.py …` | A host without the MCP tools (Codex, Claude Code, a plain shell). Same server, same tools: `list`, `get`, `set`, `open`, `shapes` |
+| `python3 src/main/py/diagram/drawio_mcp.py …` | A host without the MCP tools (Codex, Claude Code, a plain shell). Same server, same tools: `list`, `get`, `set`, `open`, `shapes` |
 | `gen_oneline_diagram.py <case> --open` | Generate, self-check and open the editor in one step |
 
 The **desktop app** is a separate route, no MCP involved: `open -a draw.io <file>` to look at it, or
@@ -177,7 +199,11 @@ resources.
 | Self-check `FAIL … overlapping bus footprints` | The layout shipped a collision. On the lattice path this should be impossible (cells are 1.73 x 1.53 footprints apart) — report it as a bug with the case and seed |
 | Self-check prints `FAIL …` | Report the failing line: an id/parent convention above was broken, a transformer symbol could not be placed clear of a bar/label, or the first bus is not the top-left-most (the run also prints a `note:` line for the last two) |
 | `--check` reports the Bus 1 corner rule on a hand-*laid* file | Expected: the hand-laid IEEE 14-bus template predates the rule. It is a generated-diagram convention |
+| `--symbols gen needs …_DF_gen.csv` (or `load`) | The equipment table for the requested family is missing under `result/` — run ACLF, or drop that family from `--symbols` |
+| `--symbols would make this diagram N cells; the preview limit is 20000` | The case is too large for symbols on top of its bars/edges (e.g. the 78k-bus OpenEInterconnect): re-run without `--symbols`, or draw the symbols on a smaller equivalent case |
+| A bus looks like it should have a symbol but does not | Status is a **row in `_DF_gen.csv` / `_DF_load.csv`** for that bus; check the equipment table (an empty table means no symbols). The `InService` flag is deliberately ignored, and the bus table's `GenP`/`LoadP` columns play no part |
 | The diagram is for the wrong case | `case_dir` is what decides — pass it explicitly |
+| draw.io shows a line the Diagram tab does not (or the two views disagree) | A hand-edited draw.io file: a stray connexion saved into it (often an edge whose end is a group cell, which the tab drops). Regenerate — the run overwrites the file — and note the self-check now fails any edge that is not `eN`/`sgN`/`slN` or connects no bus |
 | The preview shows nothing | The `.drawio` must sit in the **selected** case's `diagram/` folder, and the **Diagram** tab lists `.drawio` files only (the PNG is ignored) |
 
 ## Limitations
@@ -203,7 +229,7 @@ resources.
   branches are drawn *under* the bars (the bars mask the wires, so no hop is needed), which is what
   makes 2000 bars and 3220 branches legible. Small cases keep the force look unchanged.
 - **The preview is approximate** — no orthogonal auto-routing, no arrowheads, one font size — and a
-  fitted 1900 x 1700 page makes 11 px labels small until you zoom. Open the file in draw.io when
+  fitted 1900 x 1700 page makes 10 px labels small until you zoom. Open the file in draw.io when
   exact geometry matters.
 - **The PNG is not a diagrams.net export**; it is a Pillow re-render of the same geometry, for a
   quick look.

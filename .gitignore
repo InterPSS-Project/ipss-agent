@@ -15,7 +15,6 @@
 .DS_Store
 
 /wspace/**/result/
-/config/config.json
 
 /CLAUDE.md
 /GEMINI.md
@@ -30,6 +29,5 @@ build/*
 /.npm-cache-local/
 temp/*
 wspace/data/**/diagram/*.png
+!wspace/data/**/diagram/*-sample.png
 wspace/data/**/diagram/*.bkp
-wspace/data/**/diagram/*.dtmp
-**/__pycache__/*.pyc
