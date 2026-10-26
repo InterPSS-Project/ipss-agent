@@ -98,7 +98,7 @@ BAR_FILL, BAR_STROKE = "#666666", "#333333"      # the template's single bar gre
 BAR_STYLE = "rounded=0;fillColor={fill};strokeColor={stroke};"
 EDGE_STYLE = "endArrow=none;html=1;rounded=0;strokeColor=#000000;strokeWidth=%g;" % LINE_W
 XF_STYLE = "ellipse;fillColor=none;strokeColor=#000000;strokeWidth=%g;aspect=fixed;" % LINE_W
-LABEL_STYLE = ("rounded=0;fillColor=#FFFFFF;strokeColor=none;html=1;align=center;verticalAlign=middle;"
+LABEL_STYLE = ("rounded=0;fillColor=none;strokeColor=none;html=1;align=center;verticalAlign=middle;"
                "fontSize=%d;fontStyle=1;fontColor=#000000;" % LABEL_FONT)
 TEXT_STYLE = "text;html=1;fontSize=%d;%sfontColor=%s;align=%s;verticalAlign=%s;"
 
@@ -1175,7 +1175,7 @@ def write_drawio(path, stem, title, subtitle, buses, symbols, edges, page_w, pag
             '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n'
             % (sy["id"], esc(sy["value"]), sy["style"], parent,
                sy["x"] - ox, sy["y"] - oy, sy["w"], sy["h"]))
-    for b in buses:                      # labels last: their paper box covers wires
+    for b in buses:                      # labels last (transparent fill — wires stay visible)
         add('                <mxCell id="nm%d" value="Bus-%d" style="%s" parent="1" vertex="1">\n'
             '                    <mxGeometry x="%g" y="%g" width="%g" height="%g" as="geometry"/>\n                </mxCell>\n'
             % (b.num, b.num, LABEL_STYLE, b.label_xy[0], b.label_xy[1], LABEL_W, LABEL_H))
@@ -1216,7 +1216,6 @@ def write_png(path, title, subtitle, buses, symbols, edges, page_w, page_h, scal
         x, y = b.bar_xy
         d.rectangle([x * S, y * S, (x + BUS_W) * S, (y + BUS_H) * S], fill=b.fill, outline=b.stroke)
         lx, ly = b.label_xy
-        d.rectangle([lx * S, ly * S, (lx + LABEL_W) * S, (ly + LABEL_H) * S], fill="white")
         d.text(((lx + LABEL_W / 2) * S, (ly + LABEL_H / 2) * S), "Bus-%d" % b.num,
                font=f, fill="#000000", anchor="mm")
     # The optional symbols, after the bars/wires like the .drawio's paint order. Their leads are
