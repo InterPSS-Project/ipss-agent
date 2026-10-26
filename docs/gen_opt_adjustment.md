@@ -379,3 +379,4 @@ named without `SsaResult` in the class name (e.g. `IEEE39_OptBasecase_Sparse_Sam
 - Core implementation: `ipss-core` → `com.interpss.optadj.*`,
   `com.interpss.optadj.algo.lf.BaseAclfNetLoadFlowOptimizer`
 - Voltage / load-Q adjustment: [load-q-adjustment.md](load-q-adjustment.md)
+- Release **0.7.15** (OptAdj config trail + Diagram) — [Release-V0.7.15.md](release_note/Release-V0.7.15.md)

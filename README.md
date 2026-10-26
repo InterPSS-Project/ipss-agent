@@ -72,7 +72,7 @@ Open the iPSS Agent folder as a workspace in DSH. You can then run the power sys
 
 ## Release notes
 
-- Latest: [Release-V0.7.7.md](docs/release_note/Release-V0.7.7.md) (`@deepseek-ai/dsh-interpss` **0.7.7**)
+- Latest: [Release-V0.7.15.md](docs/release_note/Release-V0.7.15.md) (`@deepseek-ai/dsh-interpss` **0.7.15**)
 - Earlier: [docs/release_note/](docs/release_note/)
 
 

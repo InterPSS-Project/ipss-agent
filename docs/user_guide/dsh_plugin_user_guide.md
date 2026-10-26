@@ -65,9 +65,9 @@ You can then run the power system simulation workflow or chat following the proc
 
 The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
 one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
-folder). Plugin **0.7.7** is the recommended install (Diagram line through 0.6.37; BPA Dat
+folder). Plugin **0.7.15** is the recommended install (Diagram line through 0.6.37; BPA Dat
 0.7.1+; CA solver knobs 0.7.2+; OptAdj chat tool 0.7.4+; OptAdj Diagram tooltip loadings
-0.7.7+).
+0.7.7+; click-to-select 0.7.13+; gen/load symbols 0.7.14+; free-end edge preview 0.7.15).
 
 On the tab you can:
 
@@ -553,7 +553,7 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 - OptAdj method and IEEE39 anchors — [gen_opt_adjustment.md](../gen_opt_adjustment.md)
 - Load-Q / OptAdj user workflows — [loadflow-adjustment-user-guide.md](loadflow-adjustment-user-guide.md)
 - InterPSS DSH Chat tools (developer reference) — [interpss-tools.md](../interpss-tools.md)
-- Release **0.7.7** (OptAdj Diagram tooltips) — [Release-V0.7.7.md](../release_note/Release-V0.7.7.md)
+- Release **0.7.15** (free-end edge preview; trail since 0.7.7) — [Release-V0.7.15.md](../release_note/Release-V0.7.15.md)
 - Batch Chat / `/ipss-sim` — [batch_chat_user_guide.md](batch_chat_user_guide.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)
 - Install or update the plugin — [InstallDSHPlugin.md](../../InstallDSHPlugin.md)

@@ -17,6 +17,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 | --------- | -------- |
 | Case already has a `.drawio` under `diagram/` | Open the **Diagram** tab and inspect / zoom / edit |
 | Case has ACLF results but no diagram yet | Ask Chat to draw it (`$ipss-case-diagram`), or run the generator script |
+| You want generator / load marks on the bars | Ask for symbols, or pass `--symbols gen`, `load`, or `both` (**0.7.14+**) — see [Include generators and loads](#include-generators-and-loads-symbols-0714) |
 | Layout looks wrong after generation | Re-run with another `--seed`, or open the file in draw.io and edit |
 | You need the authoritative PNG | Use the Diagram tab’s draw.io button (desktop app), not only the Pillow preview |
 | You are comparing the preview with the draw.io app | Geometry and styles match since **0.6.33** (square bars, label alignment, label masks). These differences are deliberate: near-grey colours become theme tokens (dark mode), flagged buses/branches take the flag colours, a search hit turns **green** (`#2EA043`, **0.6.36+** / **0.7.0**), a filter hides what does not match, a clicked bus/branch takes the blue selection outline (**0.7.13+**, in the tab only — the file stays plain), and the hover areas are padded |
@@ -29,10 +30,11 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 
 ## Prerequisites
 
-- DeepSeek Harness with the InterPSS plugin installed — recommend **0.7.13+** (Diagram tab since **0.6.8**; draw.io button **0.6.12+**, configurable launcher **0.6.16+**; search / filter / gear / birdseye / ACLF–CA loadings through **0.6.37** / **0.7.0**; OptAdj branch-tooltip loadings **0.7.7+**; click-to-select highlighting **0.7.13+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
+- DeepSeek Harness with the InterPSS plugin installed — recommend **0.7.15+** (Diagram tab since **0.6.8**; draw.io button **0.6.12+**, configurable launcher **0.6.16+**; search / filter / gear / birdseye / ACLF–CA loadings through **0.6.37** / **0.7.0**; OptAdj branch-tooltip loadings **0.7.7+**; click-to-select highlighting **0.7.13+**; gen/load symbols **0.7.14+**; free-end edge preview **0.7.15+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 - An **iPSS Agent** workspace (same activation gate as the InterPSS tab)
 - A selected / loaded simulation case under `wspace/data/**`
 - For **generation**: converged ACLF outputs `<case>/result/<stem>_DF_bus.csv` and `_DF_branch.csv` (run ACLF first if missing)
+- For **gen / load symbols** (`--symbols`, **0.7.14+**): the matching equipment tables as well — `_DF_gen.csv` and/or `_DF_load.csv` from the same ACLF run (the generator exits if you ask for a family whose table is missing)
 - Optional: the local **draw.io** desktop app to edit from the Diagram tab. Which executable is launched comes from [`config/ipss_plugin_env.json`](../../config/ipss_plugin_env.json) — `open -a draw.io` on macOS by default, with a Windows and a Linux path shipped as well (see [Configure the draw.io launcher](#configure-the-drawio-launcher-0616))
 
 ---
@@ -71,7 +73,7 @@ Toolbar (plugin **0.6.11+**, zoom picker **0.6.21+**, Fit in the picker **0.6.22
 | **a red bar + red `Bus-N`** (**0.6.18+**) | That bus's solved voltage magnitude is outside the band in `config/net_diagram.json` (default **0.9–1.1 pu**, checked strictly: the endpoints themselves are in band). Hover it for the out-of-band warning. Needs the case's ACLF result tables; a case with no results, or every bus in band, simply shows no red. **The `.drawio` file is not modified** — the colour is chosen when the tab renders the SVG, so the file, the desktop draw.io app and the generator's PNG preview stay exactly as generated |
 | **draw.io** button (upper-right, **0.6.15+**) | Opens the current file in the local draw.io desktop app, using the launcher configured in `config/ipss_plugin_env.json` (**0.6.16+**; `open -a draw.io` on macOS by default). Status text appears to the left of the button (`Launched draw.io…` or the Host error). Restart `dsh web` after a Host change so the button works. |
 
-(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS-tab Diagram modal; **0.6.12** / **0.6.15** / **0.6.16** draw.io button and launcher config; **0.6.18+** voltage / flow flags; **0.6.21–0.6.32** zoom picker, search/filter, gear, birdseye, branch loadings; **0.6.34** removed the `R` / `S` Source view; **0.6.35–0.6.37** bus-id branch search, green highlight, centre-on-OK; **0.7.0** packages that Diagram line; **0.7.6** / **0.7.7** add OptAdj post-redispatch loadings on branch tooltips; **0.7.13** adds click-to-select highlighting — see [Release-V0.7.7.md](../release_note/Release-V0.7.7.md).)
+(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS-tab Diagram modal; **0.6.12** / **0.6.15** / **0.6.16** draw.io button and launcher config; **0.6.18+** voltage / flow flags; **0.6.21–0.6.32** zoom picker, search/filter, gear, birdseye, branch loadings; **0.6.34** removed the `R` / `S` Source view; **0.6.35–0.6.37** bus-id branch search, green highlight, centre-on-OK; **0.7.0** packages that Diagram line; **0.7.6** / **0.7.7** add OptAdj post-redispatch loadings on branch tooltips; **0.7.13** click-to-select; **0.7.14** gen/load symbols; **0.7.15** free-end edge preview — see [Release-V0.7.15.md](../release_note/Release-V0.7.15.md).)
 
 ### Configure the draw.io launcher (0.6.16+)
 
@@ -128,13 +130,48 @@ or:
 /ipss-case-diagram
 ```
 
-The agent runs `$ipss-case-diagram`, which resolves the case folder, checks for `*_DF_bus.csv` / `*_DF_branch.csv`, runs the generator, and reports the `.drawio` path. Switch to the **Diagram** tab to view it.
+The agent runs `$ipss-case-diagram`, which resolves the case folder, checks for `*_DF_bus.csv` / `*_DF_branch.csv`, runs the generator, and reports the `.drawio` path. Switch to the **Diagram** tab to view it. By default the drawing is **topology only** (bars, branches, transformers) — no gen/load marks.
+
+To include equipment symbols, say so explicitly:
+
+```text
+Draw the one-line diagram for the current case with generators and loads
+```
+
+```text
+Draw the one-line with --symbols both
+```
+
+```text
+Regenerate the diagram including only the generator symbols
+```
+
+`$ipss-case-diagram` maps that to `--symbols both` (or `gen` / `load`). ACLF must have written `*_DF_gen.csv` / `*_DF_load.csv` for the families you ask for.
 
 If results are missing first:
 
 ```text
-Run ACLF on the selected case, then draw the one-line diagram
+Run ACLF on the selected case, then draw the one-line diagram with generators and loads
 ```
+
+### Include generators and loads (`--symbols`, 0.7.14+)
+
+Off by default. Pass one of:
+
+| Value | Draws |
+| ----- | ----- |
+| `none` | Topology only (default) |
+| `gen` | A `○~` circle on a short lead from the **left** of every bar that has a row in `result/<stem>_DF_gen.csv` |
+| `load` | A `↓` arrow at the end of a lead-and-drop from the **right** of every bar in `_DF_load.csv` |
+| `both` | Generators on the left **and** loads on the right — a bus with both reads `○~ \| Bar \| ↓` |
+
+Rules that matter in practice:
+
+- **Presence only.** A bus gets the mark if its id appears in that equipment table — `InService` and the MW columns are ignored. One symbol per family per bus.
+- **Fixed sides.** Generator always left, load always right; you cannot flip them with a flag.
+- **Anchored leads.** Each symbol is a `style=group` body plus a real edge (`sgN` / `slN`) from the bus to the symbol, so moving either end in draw.io keeps the connection. Everything stays inside the bar’s 52 × 72 footprint — page size does not grow.
+- **Preview behaviour.** The Diagram tab paints the symbols but they have **no tooltip and no click-select** (they are not `busN` / branch pairs). The load triangle needs plugin **0.7.14+**; on an older plugin it degrades to a black rectangle in the tab (desktop draw.io is fine).
+- **Missing table.** Asking for `gen` without `*_DF_gen.csv` (or `load` without `*_DF_load.csv`) fails the run with the missing path — solve ACLF again, or drop that family from `--symbols`.
 
 ### From the shell
 
@@ -143,12 +180,17 @@ Use the harness Python that has **numpy** and **Pillow** (a bare system `python3
 ```bash
 PY="${DSH_PYTHON:-$HOME/.dsh/dsh-runtimes/dsh-primary-runtime/dependencies/python/bin/python3}"
 
+# topology only (default)
 "$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
     --title "IEEE 118-Bus One-Line Diagram"
 
-# with the equipment symbols (generator circle / load down-arrow on the right of each bar)
+# generators (left ○~) and loads (right ↓)
 "$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
     --title "IEEE 118-Bus One-Line Diagram" --symbols both
+
+# generators only
+"$PY" src/main/py/diagram/gen_oneline_diagram.py wspace/data/ieee/Ieee118Bus \
+    --title "IEEE 118-Bus One-Line Diagram" --symbols gen
 ```
 
 Useful flags:
@@ -158,12 +200,12 @@ Useful flags:
 | `--title TEXT` | Page title and diagram name |
 | `--layout auto\|force\|lattice` | Placement strategy. `auto` (default) uses the force pipeline up to **250 buses** and the lattice above it; `lattice` puts every bus on its own grid cell (the only path that can place a large case — Texas 2K, 2000 buses, produces an 8000 × 6000 page in ~18 s); `force` always uses the original pipeline |
 | `--seed N` | Another valid layout for the same topology (default `11`) |
-| `--symbols none\|gen\|load\|both` | Optional equipment symbols, default `none`. `gen` draws a `○~` circle on the **left** of every bus that has a row in `result/<stem>_DF_gen.csv`, `load` a `↓` arrow at the end of a lead-and-drop on the **right** of every bus in `_DF_load.csv`, `both` draws both. Status is **row presence only** (`InService` and MW are ignored), one symbol per family per bus; each lead is an **edge anchored to the bus** (source = bus, target = symbol), and the body is a group cell, so moving either end keeps the connection. Every part fits inside the bar's footprint, so the page size does not change; each symbol is 3 cells |
+| `--symbols none\|gen\|load\|both` | Optional equipment symbols, default `none` — see [Include generators and loads](#include-generators-and-loads-symbols-0714) |
 | `--no-png` | Skip the Pillow preview |
 | `--check FILE` | Validate an existing diagram; write nothing. A file with symbols is checked against the equipment tables |
 | `--open` | After a passing self-check, open in the draw.io editor (MCP) |
 
-A non-zero exit means the self-check failed (ids, transformers, Bus-1 corner rule, etc.).
+A non-zero exit means the self-check failed (ids, transformers, Bus-1 corner rule, missing equipment table for a requested `--symbols` family, etc.).
 
 ### What gets drawn
 
@@ -173,7 +215,7 @@ A non-zero exit means the self-check failed (ids, transformers, Bus-1 corner rul
 | Buses | Vertical bar per bus with `Bus-N` label above |
 | Branches | One undirected line per branch row; parallel circuits slightly apart |
 | Transformers | Two interlocking rings on `IsXfmr` branches |
-| Loads / generators | **Optional**, with `--symbols gen\|load\|both` (**0.7.14+**): a `○~` circle on the **left** of each bar that has a row in `result/<stem>_DF_gen.csv`, a `↓` arrow at the end of a lead-and-drop on the **right** of each bar in `_DF_load.csv`. Presence, not MW or `InService`; one symbol per family per bus; every lead is an edge **anchored to its bus** (so it never detaches when the bus or the symbol is moved), and the symbols stay inside the bar's footprint, so the page does not grow. They are marks only — the Diagram tab draws them (the arrow needs plugin 0.7.14+) but they have no tooltip |
+| Loads / generators | **Optional** via `--symbols gen\|load\|both` (**0.7.14+**) — see [Include generators and loads](#include-generators-and-loads-symbols-0714). Marks only (no tooltip / no select in the Diagram tab) |
 | Voltage colours | Not drawn **in the file** — the Diagram tab paints out-of-band buses red at render time only |
 | Header | Title, subtitle (counts / voltage levels when available), legend (the equipment line appears only when that family was drawn) |
 
@@ -201,6 +243,14 @@ Regenerating **replaces** the `.drawio`. Hand edits in draw.io are lost on the n
 Load IEEE 118-bus
 Run ACLF on the selected case
 Draw the one-line diagram for the current case
+```
+
+With gen/load marks:
+
+```text
+Load IEEE 118-bus
+Run ACLF on the selected case
+Draw the one-line diagram for the current case with generators and loads
 ```
 
 Then open the **Diagram** tab (or click the draw.io button to edit in the desktop app).
@@ -236,6 +286,11 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 | “too large to preview” / “diagram too large” | The ceilings are **20000 cells** and **4 MiB** since **0.6.20** (they were 2000 cells / 2 MiB before 0.6.19, and 5 MiB in 0.6.19). **The byte ceiling is a Host limit, so it only changes after an app restart** — until then the running app keeps refusing with its old number. A 2000-bus case like Texas 2K now fits (~10.7k cells, ~3 MB); something far bigger — `OpenEInterconnect` is 78k buses — still will not, and is unreadable as one page anyway. The Host cap needs an app restart to take effect |
 | Generating a large case is slow or the self-check fails on overlaps | Use `--layout lattice` (or leave it `auto`, which switches at 250 buses). The force pipeline cannot separate a few thousand footprints: on Texas 2K it wrote a 4000 x 4 907 300 px page with 2193 overlapping footprints, while the lattice path writes an 8000 x 6000 page with none, in about 18 seconds. A large drawing is legible block by block but its long-range tie lines cross the page — that is the case's own structure, not a defect you can fix with another seed |
 | Hand edits disappeared | Regenerating overwrites the default `<stem>-oneline-generate.drawio` — use a separate filename |
+| draw.io shows both transformer stubs, preview shows one | A free-end edge (cell + bare `sourcePoint`/`targetPoint`) needs plugin **0.7.15+**; older previews dropped the free end. Restart the app after upgrading |
+| Triangle load arrow looks wrong / missing | Equipment symbols need generator **0.7.14+** and plugin **0.7.14+** for the `triangle` shape; regenerate with `--symbols load` or `both` |
+| No gen/load marks after generate | Default is `--symbols none`. Ask Chat for “with generators and loads”, or pass `--symbols gen\|load\|both`. Confirm `result/<stem>_DF_gen.csv` / `_DF_load.csv` exist after ACLF |
+| `--symbols gen` (or `load`) exits with a missing CSV path | That equipment table was not written — re-run ACLF, or drop that family from `--symbols` |
+| Clicking a gen/load symbol does nothing | Deliberate: symbols are inert in the Diagram tab (no tooltip, no select). Select the **bus bar** instead |
 
 
 ---
@@ -246,10 +301,9 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 
 - [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Diagram tab entry point, Chat tools
 - [oneline-diagram-process.md](../oneline-diagram-process.md) — layout pipeline, template contract, draw.io MCP
-- [Release-V0.7.7.md](../release_note/Release-V0.7.7.md) — OptAdj tooltip loadings; earlier Diagram line in [Release-V0.7.0.md](../release_note/Release-V0.7.0.md)
-- [Release-V0.7.7.md](../release_note/Release-V0.7.7.md) — OptAdj Diagram tooltips, OptAdj tool, BPA Dat, CA knobs
+- [Release-V0.7.15.md](../release_note/Release-V0.7.15.md) — free-end edge preview, symbols, click-to-select (trail since 0.7.7); earlier Diagram line in [Release-V0.7.0.md](../release_note/Release-V0.7.0.md)
 - [gen_opt_adjustment.md](../gen_opt_adjustment.md) — OptAdj method; branch CSVs the Diagram tab quotes
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
-- Skills: `$ipss-case-diagram` (generate), `$ipss-case-aclf` (result CSVs), `$ipss-case-optadj`, `$ipss-case-load`
+- Skills: `$ipss-case-diagram` (generate), `$ipss-drawio-adjust` (hand layout), `$ipss-case-aclf` (result CSVs), `$ipss-case-optadj`, `$ipss-case-load`
 - Template: `wspace/template/oneline-diagram.drawio`
 - Generator: `src/main/py/diagram/gen_oneline_diagram.py`

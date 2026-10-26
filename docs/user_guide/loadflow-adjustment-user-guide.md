@@ -546,6 +546,7 @@ Suggested follow-on: `$ipss-case-aclf` or `$ipss-case-ca` on the redispatched he
 - [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Chat tools, OptAdj overview
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
 - [IpssCmd.md](../../IpssCmd.md) — CLI `optadj` subcommand
+- [Release-V0.7.15.md](../release_note/Release-V0.7.15.md) — OptAdj config trail (`sparseSenMatrix`, `genAdjCA_N-1`, mode as call arg) through 0.7.15
 - Skills: `$ipss-case-aclf-adjust` (load-Q), `$ipss-case-optadj` (gen redispatch), `$ipss-case-load`,
 `$ipss-case-aclf`, `$ipss-case-ca`, `$ipss-case-script`, `$ipss-case-summary`
 - Load-Q Example A scripts: `wspace/data/ieee/Ieee14Bus_LargeLoadQ/scripts/`
