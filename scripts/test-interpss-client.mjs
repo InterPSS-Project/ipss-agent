@@ -1332,6 +1332,11 @@ check('the gear opens the config dialog and the save asks the Host to write the 
   slice.indexOf('onClick: openConfig') >= 0 && slice.indexOf("setDialog('config')") >= 0
   && slice.indexOf("callRemote('saveNetDiagramOptions'") >= 0
   && slice.indexOf("callRemote('getNetDiagramOptions'") >= 0);
+check('the diagram-config dialog uses the Run Contingency Analysis type scale',
+  slice.indexOf("cfgDialogShell('One-line diagram config options'") >= 0
+  && slice.indexOf("fontSize: '15px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)'") >= 0
+  && slice.indexOf("fontSize: '14px', color: 'var(--dsw-alias-label-primary)'") >= 0
+  && slice.indexOf("padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)'") >= 0);
 
 const cfgDialog = renderTab(withState([
   ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
