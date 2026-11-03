@@ -5,11 +5,10 @@
 // in the `conversation.view` slot (between Chat and Trajectory) and calls the
 // Host half through the `/api` RPC endpoints `interpss/<method>`.
 //
-// Rebuilt from interpss-dynamic/client-body.js: identical UI/behavior to the
-// dynamic plugin (Load button, case/action rows, CA button + contingency CSV
-// viewer, network-info panel, report dialog), with the persistent transport
-// (connection.rpc.call over the /api Typert gateway) substituted for the
-// dynamic host.call bridge.
+// Built from src/client-body.js (Load button, case/action rows, CA button +
+// contingency CSV viewer, network-info panel, report dialog), with the persistent
+// transport (connection.rpc.call over the /api Typert gateway) substituted for the
+// source body's host.call bridge.
 
 window.__ModuleLoader__.load({
   id: "@deepseek-ai/dsh-interpss",

@@ -10,7 +10,7 @@
 
 | Layer                                  | Behavior                                                                                                                       |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| Host (`interpss-dynamic/host-body.js`) | `runAclf` builds classpath (`target/classes` + `lib/ipss_runnable.jar` + `lib/deps/*`) and shells `IpssCmd` with ~180s timeout |
+| Host (`interpss-persistent/lib/index.js`) | `runAclf` builds classpath (`target/classes` + `lib/ipss_runnable.jar` + `lib/deps/*`) and shells `IpssCmd` with ~180s timeout |
 | `IpssCmd`                              | One-shot `main()`: load → ACLF → write CSV / network_info → exit                                                               |
 | `NetworkLoader`                        | Supports **ieee** and **psse** (not IEEE-only)                                                                                 |
 | `SimuModelRepository` (agent)          | Base-case get/set only; **not wired** into runners yet                                                                         |

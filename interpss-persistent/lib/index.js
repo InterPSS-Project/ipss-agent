@@ -1413,10 +1413,20 @@ async function readDrawioLaunchers(fs, root) {
 // One in-process JVM per Host process, started lazily on first bridge use.
 // `java-bridge` is loaded with a dynamic import so the plugin still loads (and
 // runAclf falls back to shell-out) when the native module is not installed.
-let bridgePromise = null
+//
+// The state is held on `globalThis` under a stable symbol, NOT in module scope: a
+// plugin re-install/hot-swap loads a second copy of this module in the same Node
+// process while the JVM from the first copy is still alive. java-bridge then calls
+// JNI_CreateJavaVM again and the native layer refuses with
+// "Failed to create JavaVM: VM already created" -- the tab's Load button dies until
+// the whole app restarts. Handing the existing promise/bridge to the new module
+// instance through the symbol makes the reload reuse the live JVM instead.
+const BRIDGE_STATE = Symbol.for('@deepseek-ai/dsh-interpss/bridge')
+const sharedBridge = globalThis[BRIDGE_STATE]
+let bridgePromise = sharedBridge !== undefined ? sharedBridge.promise : null
 // java-bridge default namespace (carries stdout.enableRedirect in v2.7+),
 // captured during JVM bootstrap so runAclf can intercept JVM stdout/stderr.
-let jbApi = null
+let jbApi = sharedBridge !== undefined ? sharedBridge.jb : null
 // Absolute path of the case the embedded JVM currently holds. Mirrors
 // IpssAgentBridge.loadedInput; every JVM load goes through this module's
 // javaBridge provider, so the two cannot drift. Used by `caseInfo` to reuse a
@@ -1453,7 +1463,17 @@ function rememberLoadedCounts(busCount, branchCount) {
 }
 
 async function ensureBridge(root) {
+  // A module instance loaded after the first one must adopt the live bridge before
+  // touching java-bridge: importing/ensureJvm again would try a second JVM.
+  const adopted = globalThis[BRIDGE_STATE]
+  if (adopted !== undefined && adopted !== null) {
+    bridgePromise = adopted.promise
+    jbApi = adopted.jb
+    return bridgePromise
+  }
   if (bridgePromise === null) {
+    const state = { promise: null, jb: null }
+    globalThis[BRIDGE_STATE] = state
     bridgePromise = (async () => {
       // java-bridge reads JAVA_HOME at ensureJvm() time; self-discover a JDK on
       // Windows (and friends) when the harness env lacks it, then hand it over.
@@ -1464,6 +1484,7 @@ async function ensureBridge(root) {
       // moved them onto the module's default namespace. Pick whichever surface
       // actually carries `appendClasspath` so either installed version works.
       const jb = (mod.default && typeof mod.default.appendClasspath === 'function') ? mod.default : mod
+      state.jb = jb
       jbApi = jb
       // Classpath must be set before the JVM starts.
       jb.appendClasspath([root + '/target/ipss-agent-cmd-1.0.0-uber.jar'])
@@ -1475,9 +1496,15 @@ async function ensureBridge(root) {
       const BridgeClass = await jb.importClass('org.interpss.agent.bridge.IpssAgentBridge')
       return BridgeClass.newInstanceAsync()
     })().catch((e) => {
+      if (globalThis[BRIDGE_STATE] === state) delete globalThis[BRIDGE_STATE]
       bridgePromise = null
+      if (/VM already created/i.test(String(e && e.message))) {
+        throw new Error('an InterPSS JVM from an earlier plugin instance already owns this process; '
+          + 'restart the DeepSeek Harness app once to return to the shared bridge')
+      }
       throw e
     })
+    state.promise = bridgePromise
   }
   return bridgePromise
 }
