@@ -49,6 +49,14 @@ Open the iPSS Agent folder as a workspace in DSH. Create a new chat session unde
 
 ![InterPSS DSH Start](../image/ipss-dsh-chat-start.png)
 
+### InterPSS Workspace on the Start page
+
+The Start page (right sidebar) carries an **InterPSS Workspace** card directly under **Workspace files**.
+It opens a file tab rooted at the session workspace's `wspace/` folder, so case data, `result/` tables
+and `diagram/` files are one click away instead of walking the whole repository tree. Folders list
+lazily when expanded, **Refresh** re-reads the tree, and clicking a file opens it in the normal file
+viewer. Nothing outside `wspace/` is shown; **Workspace files** itself is unchanged.
+
 You can then run the power system simulation workflow or chat following the procedures below.
 
 ### Open the InterPSS tab

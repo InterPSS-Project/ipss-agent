@@ -587,6 +587,31 @@ check('the bridge is shared across plugin module reloads (one JVM per process)',
   rd(LIB_HOST).indexOf("Symbol.for('@deepseek-ai/dsh-interpss/bridge')") >= 0
   && rd(LIB_HOST).indexOf('const adopted = globalThis[BRIDGE_STATE]') >= 0
   && rd(LIB_HOST).indexOf('state.jb = jb') >= 0);
+// 0.7.18: the Start guide's InterPSS Workspace card and its wspace-rooted file tab.
+check('the Start guide carries an InterPSS Workspace card rooted at wspace',
+  rd(LIB_CLIENT).indexOf("const INTERPSS_WORKSPACE_KIND = 'interpss-workspace'") >= 0
+  && rd(LIB_CLIENT).indexOf("const WORKSPACE_ROOT = 'wspace'") >= 0
+  && rd(LIB_CLIENT).indexOf("description: () => 'Browse files in InterPSS workspace'") >= 0
+  && rd(LIB_CLIENT).indexOf('order: 20') >= 0);
+check('the workspace tab lists wspace lazily and opens files through the resource address',
+  rd(LIB_CLIENT).indexOf('remote.workspaceFiles.list(sessionId, path, controller.signal)') >= 0
+  && rd(LIB_CLIENT).indexOf("const listing = result && result.value !== undefined ? result.value : result") >= 0
+  && rd(LIB_CLIENT).indexOf('workspaceFileAddressOf(sessionId, rel)') >= 0
+  && rd(LIB_CLIENT).indexOf('tab.actions.openResource(') >= 0
+  && rd(LIB_CLIENT).indexOf("slots.register(") >= 0
+  && rd(LIB_CLIENT).indexOf("key: INTERPSS_WORKSPACE_ID") >= 0
+  && rd(LIB_CLIENT).indexOf("WORKSPACE_HIDDEN_DIRS = { script: true, scripts: true, template: true }") >= 0
+  && rd(LIB_CLIENT).indexOf("name.charAt(0) === '.'") >= 0
+  && rd(LIB_CLIENT).indexOf("'InterPSS Workspace/'") >= 0
+  && rd(LIB_CLIENT).indexOf('React.createElement(WorkspaceFolderIcon, { size: 15 })') >= 0
+  && rd(LIB_CLIENT).indexOf('entry.name + (isDir') < 0);
+check('the workspace tab declares its sidebar/remote services and client inject packages',
+  rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
+  && [
+    '@deepseek-ai/dsh-client-ui-sidebar-right',
+    '@deepseek-ai/dsh-api-remotes',
+    '@deepseek-ai/dsh-api-workspace-files',
+  ].every((name) => JSON.parse(rd(join(ROOT, 'interpss-persistent', 'package.json'))).dsh.client.inject.indexOf(name) >= 0));
 
 // --- 10. the diagram listing, and no Diagram button on the InterPSS tab ---
 console.log('\n10. the case diagram listing, and the InterPSS action row without a Diagram button');
