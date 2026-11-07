@@ -2051,8 +2051,10 @@ class InterpssService extends TypertRemoteService {
             exitCode: 0,
             timedOut: false,
             aborted: false,
-            stdout: '',
-            stderr: '',
+            // The javaBridge provider captured the JVM's stdout/stderr around the call;
+            // surface them here so the tab's "Show log info" panel is not empty.
+            stdout: parsed.stdout || '',
+            stderr: parsed.stderr || '',
             converged: !!parsed.converged,
             networkInfo: parsed.networkInfo || null,
             input: caseInput,

@@ -2651,6 +2651,8 @@ return {
       const [caRunning, setCaRunning] = React.useState(false)
       const [caError, setCaError] = React.useState(null)
       const [caResult, setCaResult] = React.useState(null)
+      // The CA run's captured JVM stdout/stderr, with its own Show/Hide CA Log control.
+      const [caShowRaw, setCaShowRaw] = React.useState(false)
       const [caOpen, setCaOpen] = React.useState(false)
       const [caLoading, setCaLoading] = React.useState(false)
       const [caForm, setCaForm] = React.useState(null)
@@ -2704,6 +2706,7 @@ return {
         setCaRunning(false)
         setCaError(null)
         setCaResult(null)
+        setCaShowRaw(false)
         setInfoTab('network')
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
@@ -2798,6 +2801,7 @@ return {
         setCaRunning(true)
         setCaError(null)
         setCaResult(null)
+        setCaShowRaw(false)
         const payload = { format: c.format, input: c.input, sessionId }
         if (config !== null && config !== undefined) payload.config = config
         callRemote('runCa', payload).then(
@@ -3450,10 +3454,12 @@ return {
                 ),
               ),
             ),
-            result.loaded ? null : React.createElement('div', null,
-              React.createElement('button', { onClick: () => setShowRaw(!showRaw), style: { ...btn, marginTop: '12px' } }, showRaw ? 'Hide log info' : 'Show log info'),
-              showRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + result.stdout + '\n\n--- stderr ---\n' + result.stderr) : null,
+            React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' } },
+              !result.loaded ? React.createElement('button', { onClick: () => setShowRaw(!showRaw), style: { ...btn } }, showRaw ? 'Hide ACLF Log' : 'Show ACLF Log') : null,
+              caResult !== null ? React.createElement('button', { onClick: () => setCaShowRaw(!caShowRaw), style: { ...btn } }, caShowRaw ? 'Hide CA Log' : 'Show CA Log') : null,
             ),
+            caResult !== null && caShowRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + (caResult.stdout || '') + '\n\n--- stderr ---\n' + (caResult.stderr || '')) : null,
+            !result.loaded && showRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + result.stdout + '\n\n--- stderr ---\n' + result.stderr) : null,
           )
         } else {
           body = React.createElement('div', null,
@@ -3904,7 +3910,18 @@ return {
 
       const caPanel = (caResult !== null || caError !== null) ? React.createElement('div', { style: { marginTop: '16px' } },
         caResult !== null ? React.createElement('div', null,
-          React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Contingency analysis complete'),
+          // The control is part of the completion row itself, so it cannot be separated
+          // from the line that tells the user the run finished.
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.7.28'),
+            React.createElement('button', {
+              onClick: () => setCaShowRaw(!caShowRaw),
+              style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },
+            }, caShowRaw ? 'Hide CA Log' : 'Show CA Log'),
+          ),
+          caShowRaw ? React.createElement('pre', {
+            style: { ...mono, ...panel, maxHeight: '240px' },
+          }, '--- stdout ---\n' + (caResult.stdout || '') + '\n\n--- stderr ---\n' + (caResult.stderr || '')) : null,
         ) : null,
         caError !== null ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px', marginTop: 0 } }, '⚠ ' + caError) : null,
       ) : null

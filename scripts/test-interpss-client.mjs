@@ -605,6 +605,17 @@ check('the workspace tab lists wspace lazily and opens files through the resourc
   && rd(LIB_CLIENT).indexOf("'InterPSS Workspace/'") >= 0
   && rd(LIB_CLIENT).indexOf('React.createElement(WorkspaceFolderIcon, { size: 15 })') >= 0
   && rd(LIB_CLIENT).indexOf('entry.name + (isDir') < 0);
+// The tab's "Show log info" panel reads the ACLF service result: the javaBridge provider
+// captures the JVM's stdout/stderr around the call, and the service must forward it.
+check('the Host runAclf service forwards the captured JVM stdio',
+  rd(LIB_HOST).indexOf('stdout: parsed.stdout ||') >= 0
+  && rd(LIB_HOST).indexOf('stderr: parsed.stderr ||') >= 0);
+check('the CA result panel offers the same Show log info control as ACLF',
+  slice.indexOf('caShowRaw') >= 0
+  && slice.indexOf('caResult.stdout') >= 0
+  && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
+  && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
+  && slice.indexOf('v0.7.28') >= 0);
 check('the workspace tab declares its sidebar/remote services and client inject packages',
   rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
   && [
