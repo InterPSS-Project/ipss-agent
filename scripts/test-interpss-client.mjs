@@ -23,7 +23,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const BODY = join(ROOT, 'interpss-dynamic', 'client-body.js');
+const BODY = join(ROOT, 'interpss-persistent', 'src', 'client-body.js');
 // The hand-laid style reference. The per-case diagram under `Ieee14Bus/diagram` is now a
 // USER-EDITABLE working file (it can carry the generated equipment symbols, moved buses or
 // hand-adjusted stubs), so the guard reads the stable template for the hand-laid contract;
@@ -484,25 +484,15 @@ check('every effect dependency is declared above its own effect',
 // for the view that replaced it. Nothing was renumbered — docs/persistent-plugin-rebuild.md
 // and docs/oneline-diagram-process.md reference these sections by number.
 
-// --- 9. the dynamic and persistent plugins are in sync ---------------------
-console.log('\n9. the dynamic and persistent plugins are in sync');
-// The persistent bundle is derived from the dynamic body, and this whole suite reads the
-// dynamic body — so drift between them means the guard no longer describes what ships.
-// Only the divergences documented in docs/persistent-plugin-rebuild.md are allowed; all
-// of them are asserted explicitly below so a new one cannot slip in unnoticed.
-const DYN_CLIENT = join(ROOT, 'interpss-dynamic', 'client.js');
-const DYN_BODYP = join(ROOT, 'interpss-dynamic', 'client-body.js');
+// --- 9. the packaged client is built from the source body -------------------
+console.log('\n9. the packaged client is built from the source body');
+// The tab's UI lives once, in interpss-persistent/src/client-body.js; lib/client.js is that
+// shared region with the documented timer swap re-applied. The guard reads the source body, so
+// what it asserts is what ships, and a drifted splice fails instead of going unnoticed.
 const LIB_CLIENT = join(ROOT, 'interpss-persistent', 'lib', 'client.js');
-const DYN_HOST = join(ROOT, 'interpss-dynamic', 'index.js');
-const DYN_HOSTB = join(ROOT, 'interpss-dynamic', 'host-body.js');
 const LIB_HOST = join(ROOT, 'interpss-persistent', 'lib', 'index.js');
 const rd = (p) => readFileSync(p, 'utf8');
 
-// 9.1 the two dynamic client files are one artifact extracted twice
-check('dynamic client.js and client-body.js are byte-identical', rd(DYN_CLIENT) === rd(DYN_BODYP));
-
-// 9.2 the persistent tab body differs from the dynamic body ONLY by the documented
-// transport/timer swap (§1.3): re-applying that swap must make them byte-identical
 const PMARK = '    const PRESETS = [';
 const DEND = "    const slots = ctx.get('slots')";
 const LEND = '    // --- ACLF tool-card result explorer';
@@ -527,16 +517,16 @@ const DYN_TIMER = [
   '          stopPolling()',
   '        }',
 ].join('\n');
-const dynBodyText = rd(DYN_BODYP);
-const dynBodyRegion = dynBodyText.slice(dynBodyText.indexOf(PMARK), dynBodyText.indexOf(DEND));
+const sourceText = rd(BODY);
+const sourceRegion = sourceText.slice(sourceText.indexOf(PMARK), sourceText.indexOf(DEND));
 const libClientText = rd(LIB_CLIENT);
 const libBodyRegion = libClientText.slice(libClientText.indexOf(PMARK), libClientText.indexOf(LEND));
-check('the persistent body carries the persistent timer form exactly once',
+check('the packaged body carries the persistent timer form exactly once',
   libBodyRegion.split(PERSIST_TIMER).length - 1 === 1);
-check('the dynamic body carries the dynamic timer form exactly once',
-  dynBodyRegion.split(DYN_TIMER).length - 1 === 1);
-check('the tab bodies are identical apart from the documented timer swap',
-  libBodyRegion.split(PERSIST_TIMER).join(DYN_TIMER) === dynBodyRegion);
+check('the source body carries the dynamic timer form exactly once',
+  sourceRegion.split(DYN_TIMER).length - 1 === 1);
+check('the packaged tab body is the source body with only the timer swap applied',
+  libBodyRegion.split(PERSIST_TIMER).join(DYN_TIMER) === sourceRegion);
 // the helper the tab body shares with the persistent-only ACLF explorer card must live in
 // the body, not in the persistent-only region (hoisting hid this once and the guard stayed green)
 const libTailRegion = libClientText.slice(libClientText.indexOf(LEND), libClientText.indexOf(DEND));
@@ -546,30 +536,21 @@ const leakedFns = [...libTailRegion.matchAll(/^    (?:async )?function ([\w$]+)/
 check('the tab body depends on nothing defined in the persistent-only region',
   leakedFns.length === 0, leakedFns.join(', '));
 
-// 9.3 the dynamic host pair is one file with two export forms
-check('dynamic index.js and host-body.js differ only in the export form',
-  rd(DYN_HOST).split('export default {').join('return {') === rd(DYN_HOSTB));
-
-// 9.4 both hosts expose the same client-facing method set
+// 9.2 one host: it declares the RPC methods the client calls, carries the shared helpers, and
+// keeps the launcher off node:child_process (it goes through the sandbox-aware subprocess service).
 const methodsOf = (s) => {
   const m = /const METHODS = \[([^\]]*)\]/.exec(s);
   if (m === null) return null;
   return m[1].split(',').map((x) => x.trim().replace(/^'|'$/g, '')).filter(Boolean).join(',');
 };
-const dynMethods = methodsOf(rd(DYN_HOST));
-check('both hosts declare the same METHODS list',
-  dynMethods !== null && dynMethods === methodsOf(rd(LIB_HOST)), dynMethods);
+const hostMethods = methodsOf(rd(LIB_HOST));
+check('the host declares the client-facing METHODS list with the draw.io endpoint',
+  hostMethods !== null && hostMethods.split(',').indexOf('openDrawio') >= 0, hostMethods);
 
-// 9.5 features the tab exposes must exist on both host halves
 const sharedHostFeatures = ['applyCsvSort', 'sortColumn', 'sortDesc', 'overloadThreshold'];
-const missingFeature = [];
-for (const f of sharedHostFeatures) {
-  if (rd(DYN_HOST).indexOf(f) < 0) missingFeature.push('dynamic host lacks ' + f);
-  if (rd(LIB_HOST).indexOf(f) < 0) missingFeature.push('persistent host lacks ' + f);
-}
-check('both hosts implement the shared features (CSV sort, CA overload threshold)',
-  missingFeature.length === 0, missingFeature.join('; '));
-// the sorter governs the row order, so require the two copies to be one implementation
+check('the host implements the shared features (CSV sort, CA overload threshold)',
+  sharedHostFeatures.every((f) => rd(LIB_HOST).indexOf(f) >= 0));
+
 function applyCsvSortOf(src) {
   const a = src.indexOf('// Sort CSV data rows by one header column.');
   const open = src.indexOf('{', src.indexOf('function applyCsvSort(', a));
@@ -578,13 +559,10 @@ function applyCsvSortOf(src) {
   for (; e < src.length; e += 1) { if (src[e] === '{') depth += 1; else if (src[e] === '}') { depth -= 1; if (depth === 0) { e += 1; break; } } }
   return src.slice(a, e);
 }
-check('applyCsvSort is byte-identical in both hosts',
-  applyCsvSortOf(rd(DYN_HOST)).length > 100 && applyCsvSortOf(rd(DYN_HOST)) === applyCsvSortOf(rd(LIB_HOST)));
+check('the host carries the CSV sorter', applyCsvSortOf(rd(LIB_HOST)).length > 100);
 
-// The draw.io launcher is shared by both hosts too: the Diagram tab's edit button asks the
-// Host, and the Host must answer the same way whichever half is loaded. The dynamic half is an
-// injected body with no imports, so neither copy may reach for node:child_process — the launch
-// goes through the sandbox-aware `subprocess` service.
+// The draw.io launcher: the Host must answer the Diagram tab's edit button, and it must go
+// through the sandbox-aware `subprocess` service rather than node:child_process.
 const SPAWN_MARK = '// --- Launch the local draw.io app';
 const SPAWN_END = '// --- end draw.io launcher';
 function drawioLauncherOf(src) {
@@ -592,33 +570,69 @@ function drawioLauncherOf(src) {
   const b = src.indexOf(SPAWN_END);
   return a < 0 || b < 0 ? '' : src.slice(a, b);
 }
-check('the draw.io launcher is present in both hosts and byte-identical',
-  drawioLauncherOf(rd(DYN_HOST)).length > 1000
-  && drawioLauncherOf(rd(DYN_HOST)) === drawioLauncherOf(rd(LIB_HOST)),
-  drawioLauncherOf(rd(DYN_HOST)).length + ' chars');
-check('both hosts declare the openDrawio endpoint and launch through the subprocess service',
-  dynMethods !== null && dynMethods.split(',').indexOf('openDrawio') >= 0
-  && rd(LIB_HOST).indexOf('async openDrawio(') >= 0 && rd(DYN_HOST).indexOf('async openDrawio(') >= 0
-  && rd(LIB_HOST).indexOf("get('subprocess')") >= 0 && rd(DYN_HOST).indexOf("get('subprocess')") >= 0
-  // the comment above the launcher names node:child_process to say why it is NOT used, so look
-  // for an actual import of it rather than for the word
-  && rd(DYN_HOST).indexOf("'node:child_process'") < 0 && rd(LIB_HOST).indexOf("'node:child_process'") < 0);
+check('the draw.io launcher is present in the host', drawioLauncherOf(rd(LIB_HOST)).length > 1000,
+  drawioLauncherOf(rd(LIB_HOST)).length + ' chars');
+check('the host declares the openDrawio endpoint and launches through the subprocess service',
+  hostMethods !== null && hostMethods.split(',').indexOf('openDrawio') >= 0
+  && rd(LIB_HOST).indexOf('async openDrawio(') >= 0
+  && rd(LIB_HOST).indexOf("get('subprocess')") >= 0
+  && rd(LIB_HOST).indexOf("'node:child_process'") < 0);
 
-// 9.6 the accepted divergences stay put: the chat tools are persistent-only (the dynamic
-// host is an injected body with no imports, so it cannot carry node:fs helpers either)
-check('the chat tools remain persistent-only',
-  rd(LIB_HOST).indexOf('interpss_run_ca') >= 0 && rd(DYN_HOST).indexOf('interpss_run_ca') < 0);
+// 9.3 the chat tools belong to the host that ships them
+check('the chat tools are present in the host', rd(LIB_HOST).indexOf('interpss_run_ca') >= 0);
+// A plugin re-install loads a second copy of this module in the same Node process while the
+// first copy's JVM is still alive; the state must therefore live on globalThis (stable symbol),
+// and a later instance must adopt it instead of calling ensureJvm again.
+check('the bridge is shared across plugin module reloads (one JVM per process)',
+  rd(LIB_HOST).indexOf("Symbol.for('@deepseek-ai/dsh-interpss/bridge')") >= 0
+  && rd(LIB_HOST).indexOf('const adopted = globalThis[BRIDGE_STATE]') >= 0
+  && rd(LIB_HOST).indexOf('state.jb = jb') >= 0);
+// 0.7.18: the Start guide's InterPSS Workspace card and its wspace-rooted file tab.
+check('the Start guide carries an InterPSS Workspace card rooted at wspace',
+  rd(LIB_CLIENT).indexOf("const INTERPSS_WORKSPACE_KIND = 'interpss-workspace'") >= 0
+  && rd(LIB_CLIENT).indexOf("const WORKSPACE_ROOT = 'wspace'") >= 0
+  && rd(LIB_CLIENT).indexOf("description: () => 'Browse files in InterPSS workspace'") >= 0
+  && rd(LIB_CLIENT).indexOf('order: 20') >= 0);
+check('the workspace tab lists wspace lazily and opens files through the resource address',
+  rd(LIB_CLIENT).indexOf('remote.workspaceFiles.list(sessionId, path, controller.signal)') >= 0
+  && rd(LIB_CLIENT).indexOf("const listing = result && result.value !== undefined ? result.value : result") >= 0
+  && rd(LIB_CLIENT).indexOf('workspaceFileAddressOf(sessionId, rel)') >= 0
+  && rd(LIB_CLIENT).indexOf('tab.actions.openResource(') >= 0
+  && rd(LIB_CLIENT).indexOf("slots.register(") >= 0
+  && rd(LIB_CLIENT).indexOf("key: INTERPSS_WORKSPACE_ID") >= 0
+  && rd(LIB_CLIENT).indexOf("WORKSPACE_HIDDEN_DIRS = { script: true, scripts: true, template: true }") >= 0
+  && rd(LIB_CLIENT).indexOf("name.charAt(0) === '.'") >= 0
+  && rd(LIB_CLIENT).indexOf("'InterPSS Workspace/'") >= 0
+  && rd(LIB_CLIENT).indexOf('React.createElement(WorkspaceFolderIcon, { size: 15 })') >= 0
+  && rd(LIB_CLIENT).indexOf('entry.name + (isDir') < 0);
+// The tab's "Show log info" panel reads the ACLF service result: the javaBridge provider
+// captures the JVM's stdout/stderr around the call, and the service must forward it.
+check('the Host runAclf service forwards the captured JVM stdio',
+  rd(LIB_HOST).indexOf('stdout: parsed.stdout ||') >= 0
+  && rd(LIB_HOST).indexOf('stderr: parsed.stderr ||') >= 0);
+check('the CA result panel offers the same Show log info control as ACLF',
+  slice.indexOf('caShowRaw') >= 0
+  && slice.indexOf('caResult.stdout') >= 0
+  && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
+  && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
+  && slice.indexOf('v0.8.0') >= 0);
+check('the workspace tab declares its sidebar/remote services and client inject packages',
+  rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
+  && [
+    '@deepseek-ai/dsh-client-ui-sidebar-right',
+    '@deepseek-ai/dsh-api-remotes',
+    '@deepseek-ai/dsh-api-workspace-files',
+  ].every((name) => JSON.parse(rd(join(ROOT, 'interpss-persistent', 'package.json'))).dsh.client.inject.indexOf(name) >= 0));
 
 // --- 10. the diagram listing, and no Diagram button on the InterPSS tab ---
 console.log('\n10. the case diagram listing, and the InterPSS action row without a Diagram button');
 // A diagram belongs to a case, so the Host lists <case>/diagram and the Diagram tab shows
 // that answer. Both hosts must scope it there, and neither keeps the workspace-wide scanner
 // the first version used.
-check('both hosts scope the listing to the case diagram folder and dropped the workspace scan',
-  rd(DYN_HOST).indexOf("'diagram'") >= 0 && rd(LIB_HOST).indexOf("'diagram'") >= 0
-  && rd(DYN_HOST).indexOf('scanDrawio') < 0 && rd(LIB_HOST).indexOf('scanDrawio') < 0);
-check('both hosts require a case argument for the listing',
-  rd(DYN_HOST).indexOf('args.case') >= 0 && rd(LIB_HOST).indexOf('input.case') >= 0);
+check('the host scopes the listing to the case diagram folder and dropped the workspace scan',
+  rd(LIB_HOST).indexOf("'diagram'") >= 0 && rd(LIB_HOST).indexOf('scanDrawio') < 0);
+check('the host requires a case argument for the listing',
+  rd(LIB_HOST).indexOf('input.case') >= 0);
 
 // 0.6.9 removed the InterPSS tab's Diagram button and the modal behind it, because the
 // Diagram tab is the preview surface now. Both absences are asserted, so re-adding either
@@ -856,8 +870,8 @@ if (scene) {
     JSON.stringify(optFlags));
   // Both Hosts must list both tables in `checkResult`, exactly like the CA table: that list is the
   // only way the tab discovers them, so a missing entry means the lines can never appear.
-  check('both hosts list both OptAdj branch results in checkResult',
-    ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) => {
+  check('the host lists both OptAdj branch results in checkResult',
+    ['interpss-persistent/lib/index.js'].every((p) => {
       const s = readFileSync(join(ROOT, p), 'utf8');
       return s.indexOf("stem + '_DF_optadj_branch.csv'") >= 0
         && s.indexOf("stem + '_DF_optadj_N1_branch.csv'") >= 0;
@@ -869,8 +883,7 @@ if (scene) {
   // never there. 0.7.6 shipped these tooltip lines against a list that lacked both OptAdj families,
   // and nothing failed loudly. The shipped pattern is extracted from each half and RUN here, so a
   // new family cannot be added on one side only.
-  const HOST_HALVES = ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js',
-    'interpss-dynamic/index.js'];
+  const HOST_HALVES = ['interpss-persistent/lib/index.js'];
   const readCsvPattern = (path) => {
     const m = /!?(\/\^[^\n]*?\$\/)\.test\(path\)/.exec(rd(join(ROOT, path)));
     if (m === null) return null;
@@ -1332,6 +1345,11 @@ check('the gear opens the config dialog and the save asks the Host to write the 
   slice.indexOf('onClick: openConfig') >= 0 && slice.indexOf("setDialog('config')") >= 0
   && slice.indexOf("callRemote('saveNetDiagramOptions'") >= 0
   && slice.indexOf("callRemote('getNetDiagramOptions'") >= 0);
+check('the diagram-config dialog uses the Run Contingency Analysis type scale',
+  slice.indexOf("cfgDialogShell('One-line diagram config options'") >= 0
+  && slice.indexOf("fontSize: '15px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)'") >= 0
+  && slice.indexOf("fontSize: '14px', color: 'var(--dsw-alias-label-primary)'") >= 0
+  && slice.indexOf("padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)'") >= 0);
 
 const cfgDialog = renderTab(withState([
   ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
@@ -1656,10 +1674,9 @@ if (launchApi !== null) {
     JSON.stringify(windows.spawned));
 
   // The endpoint must actually read the file, in both halves.
-  check('both hosts read the config file for their launchers',
-    rd(LIB_HOST).indexOf('readDrawioLaunchers') >= 0 && rd(DYN_HOST).indexOf('readDrawioLaunchers') >= 0
-    && rd(LIB_HOST).indexOf("'/config/ipss_plugin_env.json'") >= 0
-    && rd(DYN_HOST).indexOf("'/config/ipss_plugin_env.json'") >= 0);
+  check('the host reads the config file for its launcher',
+    rd(LIB_HOST).indexOf('readDrawioLaunchers') >= 0
+    && rd(LIB_HOST).indexOf("'/config/ipss_plugin_env.json'") >= 0);
 }
 
 
@@ -1795,9 +1812,8 @@ const GENERATOR = join(PY_DIAGRAM, 'gen_oneline_diagram.py');
 const DRAWIO_MCP = join(PY_DIAGRAM, 'drawio_mcp.py');
 const generatorSrc = readFileSync(GENERATOR, 'utf8');
 check('the preview cap is 20000 cells', api.DRAWIO_MAX_CELLS === 20000, String(api.DRAWIO_MAX_CELLS));
-check('both hosts read up to 4 MiB of diagram',
+check('the host reads up to 4 MiB of diagram',
   rd(LIB_HOST).indexOf('MAX_DRAWIO_BYTES = 4 * 1024 * 1024') >= 0
-  && rd(DYN_HOST).indexOf('MAX_DRAWIO_BYTES = 4 * 1024 * 1024') >= 0
   && rd(LIB_HOST).indexOf('MAX_DRAWIO_BYTES = 2 * 1024 * 1024') < 0);
 check('the generator self-check allows 20000 cells',
   generatorSrc.indexOf('PREVIEW_MAX_CELLS = 20000') >= 0
@@ -2142,8 +2158,8 @@ check('the shipped config is valid as written: the sanitizer changes nothing',
   JSON.stringify(api.drawioNetConfig(shippedCfg)) === JSON.stringify(shippedCfg)
   && JSON.stringify(api.drawioNetConfig(api.DRAWIO_NET_DEFAULTS)) === JSON.stringify(api.DRAWIO_NET_DEFAULTS),
   JSON.stringify(api.drawioNetConfig(shippedCfg)));
-check('both hosts carry the same defaults and the same seven keys',
-  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) => {
+check('the host carries the defaults and the same seven keys',
+  ['interpss-persistent/lib/index.js'].every((p) => {
     const src = readFileSync(join(ROOT, p), 'utf8');
     return src.indexOf('const DEFAULT_NET_DIAGRAM_CONFIG = {') >= 0
       && cfgKeys.every((k) => src.indexOf(k + ':') >= 0)
@@ -2213,8 +2229,8 @@ check('the flow columns are read by header name, not by position',
   })());
 // 0.6.31: both Hosts must list the contingency result in `checkResult`, because that list is the only
 // way the tab discovers it -- a missing entry means the contingency family can never appear.
-check('both hosts list the contingency result in checkResult',
-  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js'].every((p) =>
+check('the host lists the contingency result in checkResult',
+  ['interpss-persistent/lib/index.js'].every((p) =>
     readFileSync(join(ROOT, p), 'utf8').indexOf("stem + '_DF_contingency.csv'") >= 0),
   'checkResult files');
 check('a threshold the config raises stops PAINTING what it used to',
@@ -2566,16 +2582,16 @@ check('the path placeholder follows the selected type',
 // Both halves of every artifact must know the third type. The Host gate is what lets a `.dat`
 // reach the bridge at all — a Client-only change would list the file, pick it, and then answer
 // "Invalid case path" — and the sync script keeps the two client copies identical.
-check('every host half accepts a .dat path and maps it to the bpa format',
-  ['interpss-persistent/lib/index.js', 'interpss-dynamic/host-body.js', 'interpss-dynamic/index.js'].every((p) => {
+check('the host accepts a .dat path and maps it to the bpa format',
+  ['interpss-persistent/lib/index.js'].every((p) => {
     const src = readFileSync(join(ROOT, p), 'utf8');
     return src.indexOf('/^data\\/[A-Za-z0-9_.\\/-]+\\.(ieee|raw|dat)$/i') >= 0
       && src.indexOf("if (/\\.dat$/i.test(casePath)) return 'bpa'") >= 0
       && src.indexOf("else if (/\\.dat$/i.test(entry.name)) out.push({ path: rel, format: 'bpa' })") >= 0
       && src.indexOf('function normalizeCaseFormat(') >= 0;
   }));
-check('both client copies carry the BPA Dat row and the path->format rule',
-  [DYN_BODYP, LIB_CLIENT].every((p) => {
+check('the source body and the packaged client carry the BPA Dat row and the path->format rule',
+  [BODY, LIB_CLIENT].every((p) => {
     const src = rd(p);
     return src.indexOf("{ format: 'bpa', label: 'BPA Dat', badge: 'BPA', ext: '.dat'") >= 0
       && src.indexOf('function caseFormatOfPath(') >= 0
@@ -2626,17 +2642,13 @@ const hostCaDefaults = (path) => {
   return out;
 };
 const libDefaults = hostCaDefaults(LIB_HOST);
-const dynDefaults = hostCaDefaults(DYN_HOSTB);
 const clientKeys = api.CA_SOLVER_FIELDS.map((f) => f.key);
 check('the CA config has the five case-input keys plus the fifteen solver knobs',
   libDefaults !== null && Object.keys(libDefaults).length === 20
   && clientKeys.length === 15 && Object.keys(clientKeys.reduce((a, k) => (a[k] = 1, a), {})).length === 15,
   libDefaults === null ? 'no DEFAULT_CA_CONFIG' : Object.keys(libDefaults).length + ' host keys / ' + clientKeys.length + ' client fields');
-check('every client solver field is a host key, and both hosts agree',
-  clientKeys.every((k) => Object.prototype.hasOwnProperty.call(libDefaults, k))
-  && dynDefaults !== null
-  && clientKeys.concat(['contingencyMode', 'contingencyFile', 'monitorMode', 'monitoredBranchFile', 'overloadThreshold'])
-    .every((k) => Object.prototype.hasOwnProperty.call(dynDefaults, k)),
+check('every client solver field is a host key',
+  clientKeys.every((k) => Object.prototype.hasOwnProperty.call(libDefaults, k)),
   JSON.stringify(Object.keys(libDefaults)));
 check('the client field defaults are the host defaults',
   api.CA_SOLVER_FIELDS.every((f) => String(f.def) === String(libDefaults[f.key]).replace(/^'|'$/g, '')),
@@ -2736,12 +2748,9 @@ const hostOptAdjDefaults = (path) => {
   return out;
 };
 const optAdjLibDefaults = hostOptAdjDefaults(LIB_HOST);
-const optAdjDynDefaults = hostOptAdjDefaults(DYN_HOSTB);
-check('the six OptAdj file keys are the same in all three host halves',
+check('the six OptAdj file keys are the Host\'s',
   optAdjLibDefaults !== null && Object.keys(optAdjLibDefaults).length === 6
-  && !Object.prototype.hasOwnProperty.call(optAdjLibDefaults, 'optAdjType')
-  && optAdjDynDefaults !== null
-  && Object.keys(optAdjLibDefaults).every((k) => Object.prototype.hasOwnProperty.call(optAdjDynDefaults, k)),
+  && !Object.prototype.hasOwnProperty.call(optAdjLibDefaults, 'optAdjType'),
   optAdjLibDefaults === null ? 'no DEFAULT_OPTADJ_CONFIG' : Object.keys(optAdjLibDefaults).join(', '));
 check('the Java OptAdj defaults and mode tokens are the Host\'s',
   optAdjJava.indexOf('GEN_ADJ_BASE_CASE = "genAdjBaseCase"') >= 0
@@ -2757,7 +2766,7 @@ check('the Java OptAdj defaults and mode tokens are the Host\'s',
   && optAdjJava.indexOf('scanLoadingThresholdOrDefault(String') >= 0
   && String(optAdjLibDefaults.optAdjLoadingThreshold) === '100'
   && String(optAdjLibDefaults.threads) === '0'
-  && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
+  && [LIB_HOST].every((p) => {
     const s = rd(p);
     return s.indexOf("const OPTADJ_TYPES = ['genAdjBaseCase', 'genAdjCA_N-1']") >= 0
       && s.indexOf("const OPTADJ_DEFAULT_TYPE = 'genAdjBaseCase'") >= 0
@@ -2767,7 +2776,7 @@ check('the Java OptAdj defaults and mode tokens are the Host\'s',
 // The sparse/dense knob is one field per half plus the Java record, and the runner must actually
 // hand it to both optimizers; a half that dropped the key, or a runner that kept the old literal
 // `true`, would silently run the other sensitivity setting.
-check('the sparse-sensitivity knob reaches both Java optimizers from every host half',
+check('the sparse-sensitivity knob reaches both Java optimizers from the Host',
   optAdjJava.indexOf('Boolean sparseSenMatrix, Integer threads') >= 0
   && optAdjJava.indexOf('DEFAULT_SPARSE_SEN_MATRIX = true') >= 0
   && optAdjJava.indexOf('sparseSenMatrixOrDefault()') >= 0
@@ -2775,11 +2784,10 @@ check('the sparse-sensitivity knob reaches both Java optimizers from every host 
     .indexOf('new AclfNetContigencyOptimizer(sparseSenMatrix)') >= 0
   && rd(join(JAVA_SRC, 'org', 'interpss', 'agent', 'runner', 'OptAdjRunner.java'))
     .indexOf('new AclfNetLoadFlowOptimizer(sparseSenMatrix)') >= 0
-  && [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => /sparseSenMatrix: true/.test(rd(p)))
+  && [LIB_HOST].every((p) => /sparseSenMatrix: true/.test(rd(p)))
   && rd(LIB_HOST).indexOf('sparseSenMatrix must be true or false') >= 0
-  && rd(DYN_HOST).indexOf('sparseSenMatrix must be true or false') >= 0
   && String(optAdjLibDefaults.sparseSenMatrix) === 'true'
-  && String(optAdjDynDefaults.sparseSenMatrix) === 'true');
+  );
 // The tool, its RPC and its card: a registered tool without the RPC (or without the card) is a
 // row that fails the moment it is called, or one that renders nothing.
 check('the tool, its RPC and its card are all registered',
@@ -2873,7 +2881,7 @@ const optAdjScopeFn = (path) => {
       Object.keys(defaults), 'genAdjBaseCase');
   } catch (e) { return null; }
 };
-const optAdjScopes = [LIB_HOST, DYN_HOSTB, DYN_HOST].map(optAdjScopeFn);
+const optAdjScopes = [LIB_HOST].map(optAdjScopeFn);
 const optAdjHostFns = optAdjScopes.map((scope) => (scope === null ? null : scope.optAdjResultNames));
 const optAdjNamesOf = (fn, type) => {
   try { return fn === null ? null : fn('ieee39', type); } catch (e) { return null; }
@@ -2892,8 +2900,8 @@ check('the Host mirrors the runner\'s names for both modes, retired spelling inc
 // own test pins that), so every half's resolveOptAdjType maps it before the mode reaches the
 // bridge — and the tool schema still advertises the canonical token only. The mode is a call
 // argument, not a config-file key.
-check('every host half normalises the retired mode token before the bridge sees it',
-  [LIB_HOST, DYN_HOSTB, DYN_HOST].every((p) => {
+check('the host normalises the retired mode token before the bridge sees it',
+  [LIB_HOST].every((p) => {
     const s = rd(p);
     return s.indexOf('function resolveOptAdjType(') >= 0
       && s.indexOf('const OPTADJ_LEGACY_TYPES = { genAdjCaN_1:') >= 0;
@@ -2921,7 +2929,7 @@ check('the Java mode is a call argument, not a record field',
 const optAdjPayloadOf = (scope, config, type) => {
   try { return scope === null ? null : scope.optAdjConfigPayload(config, type); } catch (e) { return null; }
 };
-check('every host half sends the six Java file keys and no mode',
+check('the host sends the six Java file keys and no mode',
   optAdjScopes.every((scope) => {
     const payload = optAdjPayloadOf(scope, { scanLoadingThreshold: null, contingencyFile: null }, 'genAdjCA_N-1');
     if (payload === null) return false;
@@ -2937,14 +2945,14 @@ check('every host half sends the six Java file keys and no mode',
     const p = optAdjPayloadOf(scope, { scanLoadingThreshold: null }, 'genAdjCA_N-1');
     return p === null ? 'null' : Object.keys(p).join(',');
   }).join(' / '));
-check('every host half passes the mode beside the payload and reads it back from a file or object',
-  [LIB_HOST, DYN_HOST, DYN_HOSTB].every((p) => {
+check('the host passes the mode beside the payload and reads it back from a file or object',
+  [LIB_HOST].every((p) => {
     const s = rd(p);
     return s.indexOf('optAdjType, JSON.stringify(optAdjConfigPayload(') >= 0
       || s.indexOf('reload === true, optAdjType, optAdjConfigJson') >= 0;
   })
   && rd(LIB_HOST).indexOf('reload === true, optAdjType, optAdjConfigJson') >= 0
-  && [LIB_HOST, DYN_HOST, DYN_HOSTB].every((p) => rd(p).indexOf('const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])') >= 0
+  && [LIB_HOST].every((p) => rd(p).indexOf('const OPTADJ_INPUT_KEYS = OPTADJ_CONFIG_KEYS.concat([OPTADJ_MODE_KEY])') >= 0
     && rd(p).indexOf('const rawType = value[OPTADJ_MODE_KEY]') >= 0)
   && rd(LIB_HOST).indexOf('config[OPTADJ_MODE_KEY]') >= 0,
   rd(LIB_HOST).indexOf('OPTADJ_INPUT_KEYS') >= 0 ? 'mode accepted as an input key' : 'no mode input key');

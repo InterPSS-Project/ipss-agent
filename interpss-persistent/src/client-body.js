@@ -2651,6 +2651,8 @@ return {
       const [caRunning, setCaRunning] = React.useState(false)
       const [caError, setCaError] = React.useState(null)
       const [caResult, setCaResult] = React.useState(null)
+      // The CA run's captured JVM stdout/stderr, with its own Show/Hide CA Log control.
+      const [caShowRaw, setCaShowRaw] = React.useState(false)
       const [caOpen, setCaOpen] = React.useState(false)
       const [caLoading, setCaLoading] = React.useState(false)
       const [caForm, setCaForm] = React.useState(null)
@@ -2704,6 +2706,7 @@ return {
         setCaRunning(false)
         setCaError(null)
         setCaResult(null)
+        setCaShowRaw(false)
         setInfoTab('network')
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
@@ -2798,6 +2801,7 @@ return {
         setCaRunning(true)
         setCaError(null)
         setCaResult(null)
+        setCaShowRaw(false)
         const payload = { format: c.format, input: c.input, sessionId }
         if (config !== null && config !== undefined) payload.config = config
         callRemote('runCa', payload).then(
@@ -3450,10 +3454,12 @@ return {
                 ),
               ),
             ),
-            result.loaded ? null : React.createElement('div', null,
-              React.createElement('button', { onClick: () => setShowRaw(!showRaw), style: { ...btn, marginTop: '12px' } }, showRaw ? 'Hide log info' : 'Show log info'),
-              showRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + result.stdout + '\n\n--- stderr ---\n' + result.stderr) : null,
+            React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' } },
+              !result.loaded ? React.createElement('button', { onClick: () => setShowRaw(!showRaw), style: { ...btn } }, showRaw ? 'Hide ACLF Log' : 'Show ACLF Log') : null,
+              caResult !== null ? React.createElement('button', { onClick: () => setCaShowRaw(!caShowRaw), style: { ...btn } }, caShowRaw ? 'Hide CA Log' : 'Show CA Log') : null,
             ),
+            caResult !== null && caShowRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + (caResult.stdout || '') + '\n\n--- stderr ---\n' + (caResult.stderr || '')) : null,
+            !result.loaded && showRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + result.stdout + '\n\n--- stderr ---\n' + result.stderr) : null,
           )
         } else {
           body = React.createElement('div', null,
@@ -3904,7 +3910,18 @@ return {
 
       const caPanel = (caResult !== null || caError !== null) ? React.createElement('div', { style: { marginTop: '16px' } },
         caResult !== null ? React.createElement('div', null,
-          React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Contingency analysis complete'),
+          // The control is part of the completion row itself, so it cannot be separated
+          // from the line that tells the user the run finished.
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.0'),
+            React.createElement('button', {
+              onClick: () => setCaShowRaw(!caShowRaw),
+              style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },
+            }, caShowRaw ? 'Hide CA Log' : 'Show CA Log'),
+          ),
+          caShowRaw ? React.createElement('pre', {
+            style: { ...mono, ...panel, maxHeight: '240px' },
+          }, '--- stdout ---\n' + (caResult.stdout || '') + '\n\n--- stderr ---\n' + (caResult.stderr || '')) : null,
         ) : null,
         caError !== null ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px', marginTop: 0 } }, '⚠ ' + caError) : null,
       ) : null
@@ -4855,6 +4872,30 @@ return {
         ),
       ))
 
+      // The diagram-config dialog wears the Run Contingency Analysis dialog's type scale and
+      // button weight (title 16/600, section titles 15/600, 14 px primary labels, brand-text OK)
+      // while keeping its narrower 440 px column: the user asked for one settings family, not a
+      // second look. Search/Filter keep the compact shell above.
+      const cfgDialogShell = (title, bodyEl, onOk, okDisabled) => React.createElement('div', {
+        style: { position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '24px' },
+        onClick: () => { if (okDisabled !== true) closeDialog() },
+      }, React.createElement('div', {
+        role: 'dialog',
+        'aria-label': title,
+        onClick: (e) => e.stopPropagation(),
+        style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '18px', width: '100%', maxWidth: '440px', maxHeight: '86vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)' },
+      },
+        React.createElement('div', { style: { fontSize: '16px', fontWeight: 600 } }, title),
+        bodyEl,
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '12px' } },
+          React.createElement('button', { key: 'cancel', onClick: closeDialog, disabled: okDisabled === true, style: { ...btn, padding: '6px 22px', opacity: okDisabled === true ? 0.6 : 1 } }, 'Cancel'),
+          React.createElement('button', {
+            key: 'ok', onClick: onOk, disabled: okDisabled === true,
+            style: { ...btn, padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)', fontWeight: 600, opacity: okDisabled === true ? 0.6 : 1 },
+          }, 'OK'),
+        ),
+      ))
+
       const fieldRow = (label, control) => React.createElement('label', {
         style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', fontSize: '12px' },
       }, React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, label), control)
@@ -4895,21 +4936,25 @@ return {
             })
             : input
         return React.createElement('div', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '2px' } },
-          fieldRow(field.label, control),
-          bad ? React.createElement('div', { style: { fontSize: '10px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
+          cfgRow(field.label, control),
+          bad ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
       }
+      const cfgRow = (label, control) => React.createElement('label', {
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', fontSize: '14px', color: 'var(--dsw-alias-label-primary)' },
+      }, React.createElement('span', null, label), control)
+      const cfgHintStyle = { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }
       const cfgSection = (title, fields) => React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-        React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, title),
+        React.createElement('div', { style: { fontSize: '15px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, title),
         fields.map(cfgField))
       const dialogEl = dialog === 'config'
-        ? dialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+        ? cfgDialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
           cfgSection('Bus flags', DRAWIO_NET_FIELDS.slice(0, 3)),
           cfgSection('Branch flow flags', DRAWIO_NET_FIELDS.slice(3, 7)),
           cfgSection('View', DRAWIO_NET_FIELDS.slice(7)),
-          React.createElement('div', { style: hintStyle },
+          React.createElement('div', { style: cfgHintStyle },
             'Writes ' + netConfigPath + ' \u2014 one flag style for every case. Flags are a preview: the .drawio keeps no colour.'),
-          netConfigWarning !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigWarning) : null,
-          netConfigError !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigError) : null,
+          netConfigWarning !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigWarning) : null,
+          netConfigError !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigError) : null,
         ), applyConfig, netConfigSaving)
         : dialog === 'search'
         ? dialogShell('Search the diagram', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },

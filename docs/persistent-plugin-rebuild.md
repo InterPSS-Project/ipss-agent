@@ -1,9 +1,10 @@
 # Persistent InterPSS Plugin — Rebuild Guide
 
-Rebuild `@deepseek-ai/dsh-interpss` (`interpss-persistent/`) **from the dynamic
-plugin** (`interpss-dynamic/`) so both deliver identical behavior/UI.
+Rebuild `@deepseek-ai/dsh-interpss` (`interpss-persistent/`) from its own source body. The
+package is self-contained: `src/client-body.js` is the tab's UI source, `lib/client.js` the
+packaged client and `lib/index.js` the Host. There is no second (dynamic) plugin to keep in sync.
 
-## 1. Client (rebuild `lib/client.js` from `interpss-dynamic/client-body.js`)
+## 1. Client (rebuild `lib/client.js` from `interpss-persistent/src/client-body.js`)
 
 Wrap the dynamic body in the persistent module loader, with three substitutions:
 
@@ -35,34 +36,33 @@ window.__ModuleLoader__.load({
   }});
 ```
 
-3. **Timers and globals.** A dynamic Client half gets only `ctx`, `React`, `host`,
-   `styles` and `console` — no `setInterval`, `clearInterval` or `window`. The
-   bridge-case mirroring effect therefore uses the Cordis timer service
-   (`inject: ['slots', 'timer']` with `ctx.timer.interval(sync, 4000)`, whose
-   disposer is returned from the effect) and has no window-focus refresh. The
-   persistent browser bundle uses `setInterval(sync, 4000)` plus
-   `window.addEventListener('focus', …)` and keeps that version. This is the one
-   deliberate divergence between the two tab bodies; everything else stays
-   byte-identical, so a rebuild must re-apply it. Anything new in the shared body must
+3. **Timers and globals.** The source body is written against the dynamic host form: it
+   gets only `ctx`, `React`, `host`, `styles` and `console` — no `setInterval`,
+   `clearInterval` or `window`. The bridge-case mirroring effect therefore uses the Cordis
+   timer service (`ctx.timer.interval(sync, 4000)`, whose disposer is returned from the
+   effect) and has no window-focus refresh. The packaged browser bundle instead uses
+   `setInterval(sync, 4000)` plus `window.addEventListener('focus', …)`. This is the one
+   deliberate divergence between the source body and the packaged client; everything else
+   stays identical, so the build must re-apply it. Anything new in the shared body must
    respect this: the draw.io preview's Escape handling rides the focused overlay's
    `onKeyDown` rather than a `window` listener for exactly this reason, so it needed no
    divergence of its own.
 
-Mechanically, only the **tab body** changes between rebuilds: splice the dynamic
-file's region from `    const PRESETS = [` up to (excluding) its
-`    const slots = ctx.get('slots')` into the persistent file between the
+Mechanically, only the **tab body** changes between rebuilds: splice the source
+body's region from `    const PRESETS = [` up to (excluding) its
+`    const slots = ctx.get('slots')` into the packaged file between the
 transport block and the `    // --- ACLF tool-card result explorer` section. That
 keeps the persistent-only tool-card section, all six `slots.inject`
 registrations, and the module footer intact — copying only up to
 `const slots` drops the tool cards, and diffing the result against the previous
 `lib/client.js` should show your UI change alone.
 
-`node scripts/sync-persistent-client.mjs` performs that splice for you — it also rewrites
-`interpss-dynamic/client.js` as a byte copy of the body, and it refuses to run when the
-markers or the timer form have drifted, so a half-splice cannot be written silently. The
-manual procedure below is what it automates, and §9 asserts the same invariants.
+`node scripts/sync-persistent-client.mjs` performs that splice for you — it rewrites only
+`interpss-persistent/lib/client.js`, and it refuses to run when the markers or the timer form
+have drifted, so a half-splice cannot be written silently. The manual procedure below is what
+it automates, and §9 asserts the same invariants.
 
-**Since 0.6.3 the two bodies differ only by that timer swap**, so the splice is safe again
+**The source body and the packaged client differ only by that timer swap**, so the splice is safe
 — with one mandatory correction. Baseline the change first:
 `node scripts/test-interpss-client.mjs` must be green, and its §9 asserts the invariant this
 procedure depends on. Then:
@@ -518,13 +518,13 @@ node --check lib/index.js && node --check lib/client.js
 COREPACK_ENABLE_PROJECT_SPEC=0 pnpm pack --pack-destination .   # npm pack where npm is on PATH
 
 # tarball == source (under pnpm pack the only difference is package.json's final newline)
-tar -xzf deepseek-ai-dsh-interpss-0.7.15.tgz -C /tmp/pkgv
+tar -xzf deepseek-ai-dsh-interpss-0.7.16.tgz -C /tmp/pkgv
 diff -q lib/index.js  /tmp/pkgv/package/lib/index.js
 diff -q lib/client.js /tmp/pkgv/package/lib/client.js
 
 # install into the Desktop profile — a NEW version only needs `add`; do not `pnpm remove` first.
 # In the Desktop app this is the plugin manager's own install action; the CLI equivalent is
-#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.15.tgz
+#   dsh plugin --profile desktop add <abs path>/deepseek-ai-dsh-interpss-0.7.16.tgz
 # Verify against the profile that actually serves the GUI (~/.dsh/profiles/desktop):
 diff -q lib/client.js ~/.dsh/profiles/desktop/node_modules/@deepseek-ai/dsh-interpss/lib/client.js
 ```
@@ -565,10 +565,10 @@ two failures `node --check` cannot see: a render-time ordering error (which blan
 and a geometry regression in the diagram:
 
 ```bash
-node scripts/test-interpss-client.mjs    # 409 checks; non-zero exit on failure
+node scripts/test-interpss-client.mjs    # 414 checks; non-zero exit on failure
 ```
 
-It reads `interpss-dynamic/client-body.js`,
+It reads `interpss-persistent/src/client-body.js`,
 `wspace/data/ieee/Ieee14Bus/diagram/ieee14-oneline.drawio` and the style reference
 `wspace/template/oneline-diagram.drawio` directly, so it needs no build, no browser and no
 dependencies. It has been verified to fail
@@ -746,18 +746,17 @@ mechanism caught the 0.6.0 modal defect as
     local draw.io edit that nudged transformer group 3 to `x=503` failed both before this change
     while breaking nothing the preview depends on.
 
-Since 0.6.3 **§9 asserts the two plugins are in sync**, which is what makes this rebuild
-guide trustworthy: the suite reads only the dynamic body, so silent drift had made it
-describe something other than what ships. §9 requires
-- `interpss-dynamic/client.js` and `client-body.js` to be **byte-identical**;
-- the persistent and dynamic tab bodies to be identical once the documented timer swap is
-  re-applied, with each side carrying its own timer form exactly once;
+**§9 asserts the packaged client is built from the source body**, which is what makes this
+rebuild guide trustworthy: the suite reads the source body, so what it checks is what ships.
+§9 requires
+- the source body to carry the dynamic timer form exactly once, and the packaged body the
+  persistent form exactly once;
+- the packaged tab body to equal the source body once the documented timer swap is re-applied;
 - nothing the tab body calls to be defined in the persistent-only region (the `nextCsvSort`
   trap: it was defined among the tool cards and reached the body only through hoisting);
-- `index.js` and `host-body.js` to differ only in `export default {` vs `return {`;
-- both hosts to declare the same `METHODS` and to carry the shared features (CSV sort, CA
-  overload threshold), with `applyCsvSort` byte-identical;
-- the chat tools to stay persistent-only.
+- the Host to declare the client-facing `METHODS`, the shared features (CSV sort, CA overload
+  threshold), the draw.io launcher (through `subprocess`, never `node:child_process`) and the
+  chat tools.
 
 Verified by mutation in both drift directions: deleting the threshold from both dynamic host
 files fails with `dynamic host lacks overloadThreshold`; deleting the sort plumbing fails

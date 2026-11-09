@@ -5,11 +5,12 @@
 // in the `conversation.view` slot (between Chat and Trajectory) and calls the
 // Host half through the `/api` RPC endpoints `interpss/<method>`.
 //
-// Rebuilt from interpss-dynamic/client-body.js: identical UI/behavior to the
-// dynamic plugin (Load button, case/action rows, CA button + contingency CSV
-// viewer, network-info panel, report dialog), with the persistent transport
-// (connection.rpc.call over the /api Typert gateway) substituted for the
-// dynamic host.call bridge.
+// Built from src/client-body.js (Load button, case/action rows, CA button +
+// contingency CSV viewer, network-info panel, report dialog), with the persistent
+// transport (connection.rpc.call over the /api Typert gateway) substituted for the
+// source body's host.call bridge. It also contributes the Start guide's
+// "InterPSS Workspace" card: a sidebar tab rooted at the workspace's wspace/
+// folder (0.7.18).
 
 window.__ModuleLoader__.load({
   id: "@deepseek-ai/dsh-interpss",
@@ -20,7 +21,7 @@ window.__ModuleLoader__.load({
 
     var React = require("react");
 module.exports = {
-  inject: ['slots'],
+  inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles'],
   apply(ctx) {
     const callRemote = (method, input) => {
       const connection = ctx.get('connection')
@@ -2679,6 +2680,8 @@ module.exports = {
       const [caRunning, setCaRunning] = React.useState(false)
       const [caError, setCaError] = React.useState(null)
       const [caResult, setCaResult] = React.useState(null)
+      // The CA run's captured JVM stdout/stderr, with its own Show/Hide CA Log control.
+      const [caShowRaw, setCaShowRaw] = React.useState(false)
       const [caOpen, setCaOpen] = React.useState(false)
       const [caLoading, setCaLoading] = React.useState(false)
       const [caForm, setCaForm] = React.useState(null)
@@ -2732,6 +2735,7 @@ module.exports = {
         setCaRunning(false)
         setCaError(null)
         setCaResult(null)
+        setCaShowRaw(false)
         setInfoTab('network')
         if (input === '') return
         callRemote('checkResult', { input, sessionId }).then(
@@ -2826,6 +2830,7 @@ module.exports = {
         setCaRunning(true)
         setCaError(null)
         setCaResult(null)
+        setCaShowRaw(false)
         const payload = { format: c.format, input: c.input, sessionId }
         if (config !== null && config !== undefined) payload.config = config
         callRemote('runCa', payload).then(
@@ -3478,10 +3483,12 @@ module.exports = {
                 ),
               ),
             ),
-            result.loaded ? null : React.createElement('div', null,
-              React.createElement('button', { onClick: () => setShowRaw(!showRaw), style: { ...btn, marginTop: '12px' } }, showRaw ? 'Hide log info' : 'Show log info'),
-              showRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + result.stdout + '\n\n--- stderr ---\n' + result.stderr) : null,
+            React.createElement('div', { style: { display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '12px' } },
+              !result.loaded ? React.createElement('button', { onClick: () => setShowRaw(!showRaw), style: { ...btn } }, showRaw ? 'Hide ACLF Log' : 'Show ACLF Log') : null,
+              caResult !== null ? React.createElement('button', { onClick: () => setCaShowRaw(!caShowRaw), style: { ...btn } }, caShowRaw ? 'Hide CA Log' : 'Show CA Log') : null,
             ),
+            caResult !== null && caShowRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + (caResult.stdout || '') + '\n\n--- stderr ---\n' + (caResult.stderr || '')) : null,
+            !result.loaded && showRaw ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '240px' } }, '--- stdout ---\n' + result.stdout + '\n\n--- stderr ---\n' + result.stderr) : null,
           )
         } else {
           body = React.createElement('div', null,
@@ -3932,7 +3939,18 @@ module.exports = {
 
       const caPanel = (caResult !== null || caError !== null) ? React.createElement('div', { style: { marginTop: '16px' } },
         caResult !== null ? React.createElement('div', null,
-          React.createElement('div', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600, marginBottom: '8px' } }, '✓ Contingency analysis complete'),
+          // The control is part of the completion row itself, so it cannot be separated
+          // from the line that tells the user the run finished.
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.0'),
+            React.createElement('button', {
+              onClick: () => setCaShowRaw(!caShowRaw),
+              style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },
+            }, caShowRaw ? 'Hide CA Log' : 'Show CA Log'),
+          ),
+          caShowRaw ? React.createElement('pre', {
+            style: { ...mono, ...panel, maxHeight: '240px' },
+          }, '--- stdout ---\n' + (caResult.stdout || '') + '\n\n--- stderr ---\n' + (caResult.stderr || '')) : null,
         ) : null,
         caError !== null ? React.createElement('pre', { style: { ...mono, ...panel, maxHeight: '200px', marginTop: 0 } }, '⚠ ' + caError) : null,
       ) : null
@@ -4883,6 +4901,30 @@ module.exports = {
         ),
       ))
 
+      // The diagram-config dialog wears the Run Contingency Analysis dialog's type scale and
+      // button weight (title 16/600, section titles 15/600, 14 px primary labels, brand-text OK)
+      // while keeping its narrower 440 px column: the user asked for one settings family, not a
+      // second look. Search/Filter keep the compact shell above.
+      const cfgDialogShell = (title, bodyEl, onOk, okDisabled) => React.createElement('div', {
+        style: { position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: '24px' },
+        onClick: () => { if (okDisabled !== true) closeDialog() },
+      }, React.createElement('div', {
+        role: 'dialog',
+        'aria-label': title,
+        onClick: (e) => e.stopPropagation(),
+        style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '18px', width: '100%', maxWidth: '440px', maxHeight: '86vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)' },
+      },
+        React.createElement('div', { style: { fontSize: '16px', fontWeight: 600 } }, title),
+        bodyEl,
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '12px' } },
+          React.createElement('button', { key: 'cancel', onClick: closeDialog, disabled: okDisabled === true, style: { ...btn, padding: '6px 22px', opacity: okDisabled === true ? 0.6 : 1 } }, 'Cancel'),
+          React.createElement('button', {
+            key: 'ok', onClick: onOk, disabled: okDisabled === true,
+            style: { ...btn, padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)', fontWeight: 600, opacity: okDisabled === true ? 0.6 : 1 },
+          }, 'OK'),
+        ),
+      ))
+
       const fieldRow = (label, control) => React.createElement('label', {
         style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', fontSize: '12px' },
       }, React.createElement('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, label), control)
@@ -4923,21 +4965,25 @@ module.exports = {
             })
             : input
         return React.createElement('div', { key: field.key, style: { display: 'flex', flexDirection: 'column', gap: '2px' } },
-          fieldRow(field.label, control),
-          bad ? React.createElement('div', { style: { fontSize: '10px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
+          cfgRow(field.label, control),
+          bad ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
       }
+      const cfgRow = (label, control) => React.createElement('label', {
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', fontSize: '14px', color: 'var(--dsw-alias-label-primary)' },
+      }, React.createElement('span', null, label), control)
+      const cfgHintStyle = { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }
       const cfgSection = (title, fields) => React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
-        React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' } }, title),
+        React.createElement('div', { style: { fontSize: '15px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, title),
         fields.map(cfgField))
       const dialogEl = dialog === 'config'
-        ? dialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+        ? cfgDialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
           cfgSection('Bus flags', DRAWIO_NET_FIELDS.slice(0, 3)),
           cfgSection('Branch flow flags', DRAWIO_NET_FIELDS.slice(3, 7)),
           cfgSection('View', DRAWIO_NET_FIELDS.slice(7)),
-          React.createElement('div', { style: hintStyle },
+          React.createElement('div', { style: cfgHintStyle },
             'Writes ' + netConfigPath + ' \u2014 one flag style for every case. Flags are a preview: the .drawio keeps no colour.'),
-          netConfigWarning !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigWarning) : null,
-          netConfigError !== null ? React.createElement('div', { style: { fontSize: '11px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigError) : null,
+          netConfigWarning !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigWarning) : null,
+          netConfigError !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, netConfigError) : null,
         ), applyConfig, netConfigSaving)
         : dialog === 'search'
         ? dialogShell('Search the diagram', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
@@ -5772,6 +5818,272 @@ module.exports = {
         openFile: props && props.openFile,
       }),
     ))
+
+    // --- InterPSS Workspace: the Start guide's wspace-rooted file tab ---------
+    // "Workspace files" lists the whole Session workspace; this card is the same reader
+    // rooted at `wspace`, so cases, results and diagrams are one click away. It is a
+    // page-type tab (no address globs): the guide card opens the kind, and the body
+    // lazily lists one directory at a time through the workspaceFiles Remote, opening a
+    // file in the normal viewer through its dsh-resource address.
+    const INTERPSS_WORKSPACE_ID = '@deepseek-ai/dsh-interpss/workspace'
+    const INTERPSS_WORKSPACE_KIND = 'interpss-workspace'
+    const WORKSPACE_ROOT = 'wspace'
+    const workspaceButtonStyle = {
+      border: '1px solid var(--dsw-alias-border-l1)',
+      borderRadius: '6px',
+      background: 'var(--dsw-alias-bg-layer-1)',
+      color: 'var(--dsw-alias-label-primary)',
+      cursor: 'pointer',
+    }
+
+    function workspacePathOf(rel) {
+      return rel === '' ? WORKSPACE_ROOT : WORKSPACE_ROOT + '/' + rel
+    }
+    // The dsh-resource grammar from @deepseek-ai/dsh-util-workspace-path, inlined: this
+    // bundle must not require a non-client util package. Segments are component-encoded,
+    // with ':' left literal for Windows drive letters.
+    function workspaceEncodeSegment(segment) {
+      return encodeURIComponent(segment).replace(/%3A/gi, ':')
+    }
+    function workspaceFileAddressOf(sessionId, rel) {
+      const path = workspacePathOf(rel).replace(/\\/g, '/').replace(/^(?:\.\/)+/, '')
+      return 'dsh-resource://file/session/' + workspaceEncodeSegment(sessionId) + '/'
+        + path.split('/').map(workspaceEncodeSegment).join('/')
+    }
+    function WorkspaceFolderIcon(props) {
+      const size = (props && props.size) || 20
+      return React.createElement('svg', {
+        width: size, height: size, viewBox: '0 0 24 24', fill: 'none',
+        stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+      },
+        React.createElement('path', { d: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' }),
+      )
+    }
+    // The card is a workspace browser, not a repository browser: dot entries (`.DS_Store`,
+    // `.git`, …) never appear, and the generator's `script`/`scripts`/`template` helper
+    // folders are hidden at every depth.
+    const WORKSPACE_HIDDEN_DIRS = { script: true, scripts: true, template: true }
+    function workspaceVisible(entry) {
+      const name = String(entry.name)
+      if (name.charAt(0) === '.') return false
+      if (entry.type === 'directory' && WORKSPACE_HIDDEN_DIRS[name.toLowerCase()] === true) return false
+      return true
+    }
+    function workspaceSort(entries) {
+      return entries.slice().sort((a, b) => {
+        const da = a.type === 'directory' ? 0 : 1
+        const db = b.type === 'directory' ? 0 : 1
+        return da - db || String(a.name).localeCompare(String(b.name))
+      })
+    }
+
+    function InterPssWorkspaceTab(props) {
+      const sessionId = props && props.sessionId
+      const remote = props && props.remote
+      const tab = props.useTabInfo().tab
+      // List through the absolute session workspace root, like the builtin files body:
+      // the workspaceFiles Remote accepts a relative path, but the absolute root is the
+      // spelling that body has always used.
+      const cwd = props.useSessions((sessions) => sessions.byId[sessionId] && sessions.byId[sessionId].cwd)
+      const rootPath = cwd === undefined || cwd === null || cwd === ''
+        ? WORKSPACE_ROOT
+        : String(cwd).replace(/[/\\]+$/, '') + '/' + WORKSPACE_ROOT
+      const [levels, setLevels] = React.useState({})
+      const [expanded, setExpanded] = React.useState({ '': true })
+      const [refreshToken, setRefreshToken] = React.useState(0)
+      const controllers = React.useRef({})
+
+      const load = React.useCallback((rel) => {
+        if (remote === undefined) return
+        const previous = controllers.current[rel]
+        if (previous !== undefined) previous.abort()
+        const controller = new AbortController()
+        controllers.current[rel] = controller
+        setLevels((cur) => Object.assign({}, cur, {
+          [rel]: Object.assign({}, cur[rel], { loading: true, error: null }),
+        }))
+        const path = rel === '' ? rootPath : rootPath + '/' + rel
+        return remote.workspaceFiles.list(sessionId, path, controller.signal).then(
+          (result) => {
+            if (controller.signal.aborted) return
+            // The generated Remote returns a RemoteResult: {ok:true,value} or {ok:false,error}.
+            if (result && result.ok === false) throw (result.error || new Error('workspace listing failed'))
+            const listing = result && result.value !== undefined ? result.value : result
+            setLevels((cur) => Object.assign({}, cur, {
+              [rel]: {
+                entries: workspaceSort(((listing && listing.entries) || []).filter(workspaceVisible)),
+                truncated: !!(listing && listing.truncated),
+                loading: false,
+                error: null,
+              },
+            }))
+          },
+          (error) => {
+            if (controller.signal.aborted) return
+            setLevels((cur) => Object.assign({}, cur, {
+              [rel]: { entries: [], loading: false, error: String((error && error.message) || error) },
+            }))
+          },
+        )
+      }, [sessionId, remote, rootPath])
+
+      React.useEffect(() => {
+        if (!sessionId) return undefined
+        load('')
+        return () => {
+          for (const controller of Object.values(controllers.current)) controller.abort()
+        }
+      }, [load, refreshToken, sessionId])
+
+      if (!sessionId) {
+        return React.createElement('div', {
+          style: { padding: '12px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
+        }, 'No workspace is available for this session.')
+      }
+
+      const toggle = (rel) => {
+        if (expanded[rel] === true) {
+          setExpanded((cur) => {
+            const next = Object.assign({}, cur)
+            delete next[rel]
+            return next
+          })
+          return
+        }
+        setExpanded((cur) => Object.assign({}, cur, { [rel]: true }))
+        if (levels[rel] === undefined) load(rel)
+      }
+
+      const open = (rel, entry) => {
+        if (entry.type === 'directory') {
+          toggle(rel)
+          return
+        }
+        if (entry.type === 'file' && tab !== undefined) {
+          tab.actions.openResource(workspaceFileAddressOf(sessionId, rel))
+        }
+      }
+
+      const refresh = () => {
+        for (const controller of Object.values(controllers.current)) controller.abort()
+        controllers.current = {}
+        setLevels({})
+        setExpanded({ '': true })
+        setRefreshToken((n) => n + 1)
+      }
+
+      const rows = []
+      const renderLevel = (rel, depth) => {
+        const level = levels[rel]
+        if (level === undefined) return
+        if (level.error !== null && level.error !== undefined) {
+          rows.push(React.createElement('div', {
+            key: rel + ':error',
+            style: { padding: '6px 10px', fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' },
+          }, level.error))
+          return
+        }
+        if (level.loading === true && level.entries === undefined) {
+          rows.push(React.createElement('div', {
+            key: rel + ':loading',
+            style: { padding: '6px 10px', fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
+          }, 'loading…'))
+          return
+        }
+        if (level.entries.length === 0) {
+          rows.push(React.createElement('div', {
+            key: rel + ':empty',
+            style: { padding: '6px 10px', fontSize: '12px', color: 'var(--dsw-alias-label-tertiary)' },
+          }, 'empty'))
+          return
+        }
+        for (const entry of level.entries) {
+          const childRel = rel === '' ? entry.name : rel + '/' + entry.name
+          const isDir = entry.type === 'directory'
+          const isOpen = isDir && expanded[childRel] === true
+          rows.push(React.createElement('div', {
+            key: childRel,
+            style: {
+              display: 'flex', alignItems: 'center', minHeight: '22px',
+              paddingLeft: (8 + depth * 14) + 'px', paddingRight: '8px',
+            },
+          },
+            React.createElement('button', {
+              type: 'button',
+              onClick: () => open(childRel, entry),
+              title: workspacePathOf(childRel),
+              style: {
+                display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 auto', minWidth: 0,
+                padding: '1px 0', border: 'none', background: 'transparent', textAlign: 'left',
+                cursor: 'pointer', font: 'inherit', fontSize: '12px',
+                color: isDir ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
+              },
+            },
+              isDir
+                ? React.createElement(WorkspaceFolderIcon, { size: 15 })
+                : React.createElement('span', { style: { width: '15px', flex: 'none' } }),
+              React.createElement('span', {
+                style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+              }, entry.name),
+            ),
+          ))
+          if (isOpen) renderLevel(childRel, depth + 1)
+        }
+      }
+      renderLevel('', 0)
+
+      return React.createElement('div', {
+        style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 },
+      },
+        React.createElement('div', {
+          style: {
+            display: 'flex', alignItems: 'center', gap: '8px', padding: '8px',
+            borderBottom: '1px solid var(--dsw-alias-border-l1)', flex: 'none',
+          },
+        },
+          React.createElement('span', {
+            style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' },
+          }, 'InterPSS Workspace/'),
+          React.createElement('span', { style: { flex: '1 1 auto' } }),
+          React.createElement('button', {
+            type: 'button',
+            onClick: refresh,
+            title: 'Refresh the wspace tree',
+            style: Object.assign({}, workspaceButtonStyle, { padding: '3px 8px', fontSize: '11px' }),
+          }, 'Refresh'),
+        ),
+        React.createElement('div', {
+          style: { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: '4px 0' },
+        }, rows),
+      )
+    }
+
+    const sidebarRightTabs = ctx.get('sidebarRightTabs')
+    const remote = ctx.get('remote')
+    if (sidebarRightTabs !== undefined && remote !== undefined) {
+      slots.inject('sidebar.right.pane.tab', () => slots.register(
+        { name: 'sidebar.right.pane.tab', key: INTERPSS_WORKSPACE_ID },
+        (props) => React.createElement(InterPssWorkspaceTab, Object.assign({}, props, { remote: remote })),
+      ))
+      slots.inject('sidebar.right.pane.tab.title', () => slots.register(
+        { name: 'sidebar.right.pane.tab.title', key: INTERPSS_WORKSPACE_ID },
+        () => React.createElement('span', null, 'InterPSS Workspace'),
+      ))
+      ctx.effect(() => sidebarRightTabs.register({
+        id: INTERPSS_WORKSPACE_ID,
+        kind: INTERPSS_WORKSPACE_KIND,
+        priority: 'builtin',
+        title: () => 'InterPSS Workspace',
+        guide: [{
+          id: 'wspace',
+          order: 20,
+          title: () => 'InterPSS Workspace',
+          description: () => 'Browse files in InterPSS workspace',
+          icon: WorkspaceFolderIcon,
+        }],
+      }), 'interpss: workspace tab type')
+    }
   },
 }
 

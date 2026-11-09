@@ -79,7 +79,6 @@ ipss-agent/
 ├── target/                              # ipss-agent-cmd-1.0.0-uber.jar
 ├── .agents/skills/                      # Canonical agent skills (DSH, Codex)
 ├── interpss-persistent/                 # DSH persistent Cordis plugin
-├── interpss-dynamic/                    # Legacy dynamic DSH injection (superseded)
 ├── scripts/                             # sync_ipss_skills.sh, bridge setup
 └── docs/                                # Architecture and integration notes
 ```
@@ -407,7 +406,7 @@ The plugin activates only when the workspace `README.md` first H1 is exactly `# 
 
 Install instructions: [InstallDSHPlugin.md](../InstallDSHPlugin.md).
 
-`interpss-dynamic/` is an older per-session injection variant; `interpss-persistent/` is the supported distribution path.
+`interpss-persistent/` is the single distribution path: its `src/client-body.js` is the tab UI source and `lib/` the packaged Host and Client.
 
 ---
 
