@@ -51,11 +51,13 @@ Open the iPSS Agent folder as a workspace in DSH. Create a new chat session unde
 
 ### InterPSS Workspace on the Start page
 
-The Start page (right sidebar) carries an **InterPSS Workspace** card directly under **Workspace files**.
-It opens a file tab rooted at the session workspace's `wspace/` folder, so case data, `result/` tables
-and `diagram/` files are one click away instead of walking the whole repository tree. Folders list
-lazily when expanded, **Refresh** re-reads the tree, and clicking a file opens it in the normal file
-viewer. Nothing outside `wspace/` is shown; **Workspace files** itself is unchanged.
+The Start page (right sidebar) carries an **InterPSS Workspace** card directly under **Workspace files**
+(**0.7.18+**). It opens a page tab rooted at the session workspace's `wspace/` folder, so case data,
+`result/` tables and `diagram/` files are one click away instead of walking the whole repository tree.
+Folders list lazily when expanded (folder glyph, no trailing slash — **0.7.21+**), **Refresh**
+re-reads the tree, and clicking a file opens it in the normal file viewer. Dotfiles and helper dirs
+named `script` / `scripts` / `template` are hidden (**0.7.20+**). Nothing outside `wspace/` is shown;
+**Workspace files** itself is unchanged.
 
 You can then run the power system simulation workflow or chat following the procedures below.
 
@@ -73,10 +75,11 @@ You can then run the power system simulation workflow or chat following the proc
 
 The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
 one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
-folder). Plugin **0.7.16** is the recommended install (Diagram line through 0.6.37; BPA Dat
+folder). Plugin **0.8.0** is the recommended install (Diagram line through 0.6.37; BPA Dat
 0.7.1+; CA solver knobs 0.7.2+; OptAdj chat tool 0.7.4+; OptAdj Diagram tooltip loadings
 0.7.7+; click-to-select 0.7.13+; gen/load symbols 0.7.14+; free-end edge preview 0.7.15+;
-settings-family dialogs 0.7.16).
+settings-family dialogs 0.7.16+; InterPSS Workspace 0.7.18+; ACLF/CA log toggles 0.7.22–0.7.28;
+CA build stamp `v0.8.0`).
 
 On the tab you can:
 
@@ -136,7 +139,7 @@ On success:
 - `✓ Load flow converged`
 - Result directory and file list
 - **Explore result files** buttons: Bus, Branch, Gen, Load
-- **Show log info** / **Hide log info** for stdout/stderr (not shown for auto-loaded prior results)
+- **Show ACLF Log** / **Hide ACLF Log** for stdout/stderr (**0.7.22+**; labels since **0.7.28**; not shown for auto-loaded prior results)
 
 On failure, the tab shows `✗ Load flow failed` with error and log output.
 
@@ -332,9 +335,13 @@ An unusable value blocks **OK** with the field's own message (for example `Solut
 
 On success:
 
-- `✓ Contingency analysis complete`
+- `✓ Contingency analysis complete · v0.8.0` (build stamp since **0.7.24**; if the stamp is missing or still says `v0.7.28`, hard-reload / restart — the page is on an older bundle)
+- **Show CA Log** on the same completion row (**0.7.23+**; label since **0.7.28**) for the CA run's stdout/stderr
 - Contingency result file name (typically `<stem>_DF_contingency.csv`)
 - A **Contingency** button to open that CSV in the explorer
+
+When both ACLF and CA results are present, the result panel also carries **Show ACLF Log** (left) and
+**Show CA Log** (right) — each opens its own log block (**0.7.26+**).
 
 CA requires a loaded case. You can run CA after Load even if you have not clicked **ACLF** in this session; contingency CSV exploration for the new CA run appears once CA succeeds.
 
@@ -562,7 +569,7 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 - OptAdj method and IEEE39 anchors — [gen_opt_adjustment.md](../gen_opt_adjustment.md)
 - Load-Q / OptAdj user workflows — [loadflow-adjustment-user-guide.md](loadflow-adjustment-user-guide.md)
 - InterPSS DSH Chat tools (developer reference) — [interpss-tools.md](../interpss-tools.md)
-- Release **0.7.16** (settings-family dialogs; earlier trail in 0.7.15) — [Release-V0.7.16.md](../release_note/Release-V0.7.16.md)
+- Release **0.8.0** (Workspace, logs, settings-family dialogs; trail since 0.7.15) — [Release-V0.8.0.md](../release_note/Release-V0.8.0.md)
 - Batch Chat / `/ipss-sim` — [batch_chat_user_guide.md](batch_chat_user_guide.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)
 - Install or update the plugin — [InstallDSHPlugin.md](../../InstallDSHPlugin.md)

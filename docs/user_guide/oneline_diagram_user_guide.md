@@ -30,7 +30,7 @@ This guide is the practical how-to for the DSH plugin. For the InterPSS tab and 
 
 ## Prerequisites
 
-- DeepSeek Harness with the InterPSS plugin installed — recommend **0.7.15+** (Diagram tab since **0.6.8**; draw.io button **0.6.12+**, configurable launcher **0.6.16+**; search / filter / gear / birdseye / ACLF–CA loadings through **0.6.37** / **0.7.0**; OptAdj branch-tooltip loadings **0.7.7+**; click-to-select highlighting **0.7.13+**; gen/load symbols **0.7.14+**; free-end edge preview **0.7.15+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
+- DeepSeek Harness with the InterPSS plugin installed — recommend **0.8.0+** (Diagram tab since **0.6.8**; draw.io button **0.6.12+**, configurable launcher **0.6.16+**; search / filter / gear / birdseye / ACLF–CA loadings through **0.6.37** / **0.7.0**; OptAdj branch-tooltip loadings **0.7.7+**; click-to-select highlighting **0.7.13+**; gen/load symbols **0.7.14+**; free-end edge preview **0.7.15+**; gear dialog settings-family type scale **0.7.16+**) — see [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
 - An **iPSS Agent** workspace (same activation gate as the InterPSS tab)
 - A selected / loaded simulation case under `wspace/data/**`
 - For **generation**: converged ACLF outputs `<case>/result/<stem>_DF_bus.csv` and `_DF_branch.csv` (run ACLF first if missing)
@@ -73,7 +73,7 @@ Toolbar (plugin **0.6.11+**, zoom picker **0.6.21+**, Fit in the picker **0.6.22
 | **a red bar + red `Bus-N`** (**0.6.18+**) | That bus's solved voltage magnitude is outside the band in `config/net_diagram.json` (default **0.9–1.1 pu**, checked strictly: the endpoints themselves are in band). Hover it for the out-of-band warning. Needs the case's ACLF result tables; a case with no results, or every bus in band, simply shows no red. **The `.drawio` file is not modified** — the colour is chosen when the tab renders the SVG, so the file, the desktop draw.io app and the generator's PNG preview stay exactly as generated |
 | **draw.io** button (upper-right, **0.6.15+**) | Opens the current file in the local draw.io desktop app, using the launcher configured in `config/ipss_plugin_env.json` (**0.6.16+**; `open -a draw.io` on macOS by default). Status text appears to the left of the button (`Launched draw.io…` or the Host error). Restart `dsh web` after a Host change so the button works. |
 
-(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS-tab Diagram modal; **0.6.12** / **0.6.15** / **0.6.16** draw.io button and launcher config; **0.6.18+** voltage / flow flags; **0.6.21–0.6.32** zoom picker, search/filter, gear, birdseye, branch loadings; **0.6.34** removed the `R` / `S` Source view; **0.6.35–0.6.37** bus-id branch search, green highlight, centre-on-OK; **0.7.0** packages that Diagram line; **0.7.6** / **0.7.7** add OptAdj post-redispatch loadings on branch tooltips; **0.7.13** click-to-select; **0.7.14** gen/load symbols; **0.7.15** free-end edge preview — see [Release-V0.7.15.md](../release_note/Release-V0.7.15.md).)
+(Plugin history in brief: **0.6.8** added the tab; **0.6.9** removed the InterPSS-tab Diagram modal; **0.6.12** / **0.6.15** / **0.6.16** draw.io button and launcher config; **0.6.18+** voltage / flow flags; **0.6.21–0.6.32** zoom picker, search/filter, gear, birdseye, branch loadings; **0.6.34** removed the `R` / `S` Source view; **0.6.35–0.6.37** bus-id branch search, green highlight, centre-on-OK; **0.7.0** packages that Diagram line; **0.7.6** / **0.7.7** add OptAdj post-redispatch loadings on branch tooltips; **0.7.13** click-to-select; **0.7.14** gen/load symbols; **0.7.15** free-end edge preview; **0.7.16** gear dialog settings-family type scale — packaged through **0.8.0**; see [Release-V0.8.0.md](../release_note/Release-V0.8.0.md).)
 
 ### Configure the draw.io launcher (0.6.16+)
 
@@ -301,7 +301,7 @@ Then open the **Diagram** tab (or click the draw.io button to edit in the deskto
 
 - [dsh_plugin_user_guide.md](dsh_plugin_user_guide.md) — InterPSS tab, Diagram tab entry point, Chat tools
 - [oneline-diagram-process.md](../oneline-diagram-process.md) — layout pipeline, template contract, draw.io MCP
-- [Release-V0.7.15.md](../release_note/Release-V0.7.15.md) — free-end edge preview, symbols, click-to-select (trail since 0.7.7); earlier Diagram line in [Release-V0.7.0.md](../release_note/Release-V0.7.0.md)
+- [Release-V0.8.0.md](../release_note/Release-V0.8.0.md) — gear dialog polish, Workspace, logs (trail since 0.7.15); earlier Diagram line in [Release-V0.7.15.md](../release_note/Release-V0.7.15.md) / [Release-V0.7.0.md](../release_note/Release-V0.7.0.md)
 - [gen_opt_adjustment.md](../gen_opt_adjustment.md) — OptAdj method; branch CSVs the Diagram tab quotes
 - [batch_chat_user_guide.md](batch_chat_user_guide.md) — batch `/ipss-sim` style runs
 - Skills: `$ipss-case-diagram` (generate), `$ipss-drawio-adjust` (hand layout), `$ipss-case-aclf` (result CSVs), `$ipss-case-optadj`, `$ipss-case-load`
