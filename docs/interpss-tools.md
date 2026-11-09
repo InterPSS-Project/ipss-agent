@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.7.28**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.8.0**.
 
 ## Tool surface
 
@@ -790,6 +790,7 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.7.26 | **CA and ACLF log controls are separate and labelled.** After a CA run the result panel still showed the ACLF result block, whose unlabelled **Show log info** printed the ACLF log (`Using config file: …/aclf_run.json`) — exactly what a CA user should not see. The result panel now carries **Show CA log info** (when a CA result exists) and **Show ACLF log info** (when a load-flow result exists), each opening its own `--- stdout ---` / `--- stderr ---` block; the CA completion row keeps the same CA control. Client-only. 414 checks |
 | 0.7.27 | **Log-toggle order.** In the result panel the **Show ACLF log info** control always sits on the left, with **Show CA log info** to its right (it was CA-first); with only one result present the single control takes that left position. Labels and per-run content are unchanged. Client-only; 414 checks |
 | 0.7.28 | **Shorter log labels.** The result-panel controls are now **Show ACLF Log** (left) and **Show CA Log** (right), with **Hide ACLF Log** / **Hide CA Log** expanded; the CA completion row uses the same **Show CA Log** label. Behaviour is unchanged. Client-only; 414 checks |
+| 0.8.0 | **Version bump to 0.8.0.** No behavior change beyond 0.7.28; the CA completion-row build stamp now reads `v0.8.0`, so a page still showing `v0.7.28` is on the previous bundle. 414 checks |
 
 ## Troubleshooting
 

@@ -3942,7 +3942,7 @@ module.exports = {
           // The control is part of the completion row itself, so it cannot be separated
           // from the line that tells the user the run finished.
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.7.28'),
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.0'),
             React.createElement('button', {
               onClick: () => setCaShowRaw(!caShowRaw),
               style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },

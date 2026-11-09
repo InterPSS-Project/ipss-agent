@@ -615,7 +615,7 @@ check('the CA result panel offers the same Show log info control as ACLF',
   && slice.indexOf('caResult.stdout') >= 0
   && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
   && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
-  && slice.indexOf('v0.7.28') >= 0);
+  && slice.indexOf('v0.8.0') >= 0);
 check('the workspace tab declares its sidebar/remote services and client inject packages',
   rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
   && [
