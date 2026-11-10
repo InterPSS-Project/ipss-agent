@@ -153,6 +153,17 @@ return {
     }
     let selectedCaseInput = selectionCaseInput()
 
+    // Listeners for the shared selection. A view that is already mounted (the InterPSS
+    // Workspace explorer) follows a case picked in the InterPSS tab immediately, instead
+    // of waiting for its next mount.
+    const selectionListeners = new Set()
+    function publishSelection(input) {
+      selectedCaseInput = input
+      for (const listener of selectionListeners) {
+        try { listener(input) } catch (e) {}
+      }
+    }
+
     // Adopt a case the Host holds into the shared selection. The InterPSS picker does this
     // with its own UI bookkeeping (`adoptBridgeCase`); the Diagram tab needs only the
     // picker state to follow, so that opening the InterPSS tab lands on the same case.
@@ -161,7 +172,7 @@ return {
       lastSelection.mode = selection.mode
       lastSelection.customInput = selection.customInput === '' ? lastSelection.customInput : selection.customInput
       lastSelection.customFormat = selection.customFormat
-      selectedCaseInput = input
+      publishSelection(input)
     }
 
     // Which diagram the Diagram tab shows for a case: the one the user last opened
@@ -2697,7 +2708,7 @@ return {
         const seq = ++checkSeq
         // This tab owns the current case; the Diagram tab reads the shared value when it
         // mounts, so selecting a case here is what decides what that tab draws.
-        selectedCaseInput = input
+        publishSelection(input)
         clearResults()
         setCaseLoaded(false)
         setCaseLoadError(null)
@@ -3913,7 +3924,7 @@ return {
           // The control is part of the completion row itself, so it cannot be separated
           // from the line that tells the user the run finished.
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.0'),
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.4'),
             React.createElement('button', {
               onClick: () => setCaShowRaw(!caShowRaw),
               style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },

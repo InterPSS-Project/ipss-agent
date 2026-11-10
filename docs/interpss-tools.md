@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.8.0**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.8.4**.
 
 ## Tool surface
 
@@ -791,6 +791,9 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.7.27 | **Log-toggle order.** In the result panel the **Show ACLF log info** control always sits on the left, with **Show CA log info** to its right (it was CA-first); with only one result present the single control takes that left position. Labels and per-run content are unchanged. Client-only; 414 checks |
 | 0.7.28 | **Shorter log labels.** The result-panel controls are now **Show ACLF Log** (left) and **Show CA Log** (right), with **Hide ACLF Log** / **Hide CA Log** expanded; the CA completion row uses the same **Show CA Log** label. Behaviour is unchanged. Client-only; 414 checks |
 | 0.8.0 | **Version bump to 0.8.0.** No behavior change beyond 0.7.28; the CA completion-row build stamp now reads `v0.8.0`, so a page still showing `v0.7.28` is on the previous bundle. 414 checks |
+| 0.8.2 | **The InterPSS Workspace opens on the selected simulation case.** On mount (and after **Refresh**) the tab reads the shared `selectedCaseInput`, normalizes it to a `wspace`-relative path, expands and loads each ancestor folder, scrolls the case row into view and highlights it (hover background, brand text, semibold). Clicking another file still opens it without moving the highlight — the highlight is the current Simu Case. A case outside `wspace` or a missing file leaves the ancestors expanded with no highlight. 414 checks |
+| 0.8.3 | **The explorer follows a live Simu Case change.** The shared `selectedCaseInput` is now published through a small `selectionListeners` set: `onCaseChanged` (InterPSS tab) and `adoptSelectedCase` call `publishSelection`, and the mounted Workspace tab subscribes, re-running the reveal/highlight immediately when the user picks another case. Opening the tab still reveals on mount and on **Refresh**. 414 checks |
+| 0.8.4 | **A case switch resets the explorer.** Before revealing the newly selected Simu Case, the tab now collapses the tree back to `InterPSS Workspace/` and clears the previous expansion/highlight, then expands only the new case's ancestors and highlights it. A `revealSeq` guard drops an in-flight reveal when another selection arrives. **Refresh** uses the same reset. 414 checks |
 
 ## Troubleshooting
 

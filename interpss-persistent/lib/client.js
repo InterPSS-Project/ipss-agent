@@ -183,6 +183,17 @@ module.exports = {
     }
     let selectedCaseInput = selectionCaseInput()
 
+    // Listeners for the shared selection. A view that is already mounted (the InterPSS
+    // Workspace explorer) follows a case picked in the InterPSS tab immediately, instead
+    // of waiting for its next mount.
+    const selectionListeners = new Set()
+    function publishSelection(input) {
+      selectedCaseInput = input
+      for (const listener of selectionListeners) {
+        try { listener(input) } catch (e) {}
+      }
+    }
+
     // Adopt a case the Host holds into the shared selection. The InterPSS picker does this
     // with its own UI bookkeeping (`adoptBridgeCase`); the Diagram tab needs only the
     // picker state to follow, so that opening the InterPSS tab lands on the same case.
@@ -191,7 +202,7 @@ module.exports = {
       lastSelection.mode = selection.mode
       lastSelection.customInput = selection.customInput === '' ? lastSelection.customInput : selection.customInput
       lastSelection.customFormat = selection.customFormat
-      selectedCaseInput = input
+      publishSelection(input)
     }
 
     // Which diagram the Diagram tab shows for a case: the one the user last opened
@@ -2726,7 +2737,7 @@ module.exports = {
         const seq = ++checkSeq
         // This tab owns the current case; the Diagram tab reads the shared value when it
         // mounts, so selecting a case here is what decides what that tab draws.
-        selectedCaseInput = input
+        publishSelection(input)
         clearResults()
         setCaseLoaded(false)
         setCaseLoadError(null)
@@ -3942,7 +3953,7 @@ module.exports = {
           // The control is part of the completion row itself, so it cannot be separated
           // from the line that tells the user the run finished.
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.0'),
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.4'),
             React.createElement('button', {
               onClick: () => setCaShowRaw(!caShowRaw),
               style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },
@@ -5893,6 +5904,11 @@ module.exports = {
       const [expanded, setExpanded] = React.useState({ '': true })
       const [refreshToken, setRefreshToken] = React.useState(0)
       const controllers = React.useRef({})
+      // The currently selected simulation case, highlighted in the tree (0.8.1).
+      const [selectedRel, setSelectedRel] = React.useState(null)
+      const selectedRowRef = React.useRef(null)
+      const scrolledRelRef = React.useRef(null)
+      const revealSeq = React.useRef(0)
 
       const load = React.useCallback((rel) => {
         if (remote === undefined) return
@@ -5928,13 +5944,77 @@ module.exports = {
         )
       }, [sessionId, remote, rootPath])
 
+      // Expand the tree down to the selected case and remember its row. `selectedCaseInput`
+      // is the same module-level value the InterPSS tab writes, so a tab reopened after a
+      // selection change reveals the new case.
+      const revealSelectedCase = React.useCallback(async () => {
+        const seq = ++revealSeq.current
+        const raw = typeof selectedCaseInput === 'string' ? selectedCaseInput : ''
+        let rel = raw.replace(/\\/g, '/')
+        const marker = '/wspace/'
+        const at = rel.indexOf(marker)
+        if (at !== -1) rel = rel.slice(at + marker.length)
+        else if (rel.indexOf('wspace/') === 0) rel = rel.slice('wspace/'.length)
+        rel = rel.replace(/^\.?\/+/, '')
+        if (seq !== revealSeq.current) return
+        if (rel === '' || rel.indexOf('..') !== -1) {
+          setSelectedRel(null)
+          return
+        }
+        setSelectedRel(rel)
+        const parts = rel.split('/').filter(Boolean)
+        let acc = ''
+        for (let i = 0; i < parts.length - 1; i += 1) {
+          if (seq !== revealSeq.current) return
+          acc = acc === '' ? parts[i] : acc + '/' + parts[i]
+          setExpanded((cur) => Object.assign({}, cur, { [acc]: true }))
+          await load(acc)
+        }
+      }, [load])
+
+      // Collapse back to the root: a case switch starts a fresh explorer, so folders
+      // expanded for the previous case do not linger beside the new one.
+      const resetTree = React.useCallback(() => {
+        revealSeq.current += 1
+        for (const controller of Object.values(controllers.current)) controller.abort()
+        controllers.current = {}
+        scrolledRelRef.current = null
+        setLevels({})
+        setExpanded({ '': true })
+        setSelectedRel(null)
+      }, [])
+
       React.useEffect(() => {
         if (!sessionId) return undefined
-        load('')
+        let cancelled = false
+        load('').then(() => {
+          if (!cancelled) revealSelectedCase()
+        })
         return () => {
+          cancelled = true
           for (const controller of Object.values(controllers.current)) controller.abort()
         }
-      }, [load, refreshToken, sessionId])
+      }, [load, refreshToken, sessionId, revealSelectedCase])
+
+      // Follow a case picked while the explorer is already open: the InterPSS tab publishes
+      // every selection change, so the tree re-reveals and re-highlights immediately.
+      React.useEffect(() => {
+        const onSelection = () => {
+          resetTree()
+          setRefreshToken((n) => n + 1)
+        }
+        selectionListeners.add(onSelection)
+        return () => { selectionListeners.delete(onSelection) }
+      }, [resetTree])
+
+      // Bring the highlighted row into view once its level has rendered.
+      React.useEffect(() => {
+        if (selectedRel === null || scrolledRelRef.current === selectedRel) return
+        const node = selectedRowRef.current
+        if (node === null || node === undefined) return
+        if (typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'center' })
+        scrolledRelRef.current = selectedRel
+      }, [selectedRel, levels])
 
       if (!sessionId) {
         return React.createElement('div', {
@@ -5966,10 +6046,7 @@ module.exports = {
       }
 
       const refresh = () => {
-        for (const controller of Object.values(controllers.current)) controller.abort()
-        controllers.current = {}
-        setLevels({})
-        setExpanded({ '': true })
+        resetTree()
         setRefreshToken((n) => n + 1)
       }
 
@@ -6002,11 +6079,15 @@ module.exports = {
           const childRel = rel === '' ? entry.name : rel + '/' + entry.name
           const isDir = entry.type === 'directory'
           const isOpen = isDir && expanded[childRel] === true
+          const isSelected = selectedRel !== null && childRel === selectedRel
           rows.push(React.createElement('div', {
             key: childRel,
+            ref: isSelected ? (node) => { selectedRowRef.current = node } : undefined,
             style: {
               display: 'flex', alignItems: 'center', minHeight: '22px',
               paddingLeft: (8 + depth * 14) + 'px', paddingRight: '8px',
+              background: isSelected ? 'var(--dsw-alias-interactive-bg-hover)' : 'transparent',
+              borderRadius: '4px',
             },
           },
             React.createElement('button', {
@@ -6017,7 +6098,10 @@ module.exports = {
                 display: 'flex', alignItems: 'center', gap: '6px', flex: '1 1 auto', minWidth: 0,
                 padding: '1px 0', border: 'none', background: 'transparent', textAlign: 'left',
                 cursor: 'pointer', font: 'inherit', fontSize: '12px',
-                color: isDir ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
+                color: isSelected
+                  ? 'var(--dsw-alias-brand-primary)'
+                  : (isDir ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)'),
+                fontWeight: isSelected ? 600 : 400,
               },
             },
               isDir

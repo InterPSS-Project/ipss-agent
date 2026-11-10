@@ -604,7 +604,16 @@ check('the workspace tab lists wspace lazily and opens files through the resourc
   && rd(LIB_CLIENT).indexOf("name.charAt(0) === '.'") >= 0
   && rd(LIB_CLIENT).indexOf("'InterPSS Workspace/'") >= 0
   && rd(LIB_CLIENT).indexOf('React.createElement(WorkspaceFolderIcon, { size: 15 })') >= 0
-  && rd(LIB_CLIENT).indexOf('entry.name + (isDir') < 0);
+  && rd(LIB_CLIENT).indexOf('entry.name + (isDir') < 0
+  && rd(LIB_CLIENT).indexOf('const revealSelectedCase = React.useCallback') >= 0
+  && rd(LIB_CLIENT).indexOf('selectionListeners.add(onSelection)') >= 0
+  && rd(LIB_CLIENT).indexOf('const resetTree = React.useCallback') >= 0
+  && rd(LIB_CLIENT).indexOf('revealSeq') >= 0
+  && slice.indexOf('function publishSelection(input)') >= 0
+  && slice.indexOf('publishSelection(input)') >= 0
+  && rd(LIB_CLIENT).indexOf('selectedRowRef') >= 0
+  && rd(LIB_CLIENT).indexOf('scrollIntoView') >= 0
+  && rd(LIB_CLIENT).indexOf('const isSelected = selectedRel !== null') >= 0);
 // The tab's "Show log info" panel reads the ACLF service result: the javaBridge provider
 // captures the JVM's stdout/stderr around the call, and the service must forward it.
 check('the Host runAclf service forwards the captured JVM stdio',
@@ -615,7 +624,7 @@ check('the CA result panel offers the same Show log info control as ACLF',
   && slice.indexOf('caResult.stdout') >= 0
   && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
   && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
-  && slice.indexOf('v0.8.0') >= 0);
+  && slice.indexOf('v0.8.4') >= 0);
 check('the workspace tab declares its sidebar/remote services and client inject packages',
   rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
   && [
@@ -923,7 +932,8 @@ check('the Diagram tab is registered beside the InterPSS tab',
 // render can observe that contract, so assert the wiring itself: the owning tab publishes
 // the selection, the following tab seeds from it and adopts a case the Host loaded.
 check('the InterPSS tab publishes its selection to the shared case',
-  /function onCaseChanged\(input\) \{[\s\S]{0,400}?selectedCaseInput = input/.test(body));
+  /function onCaseChanged\(input\) \{[\s\S]{0,400}?publishSelection\(input\)/.test(body)
+  && /function publishSelection\(input\)[\s\S]{0,200}?selectedCaseInput = input/.test(body));
 check('the Diagram tab seeds from the shared case and follows a bridge-loaded one',
   body.indexOf('React.useState(selectedCaseInput)') >= 0 && body.indexOf('adoptSelectedCase(input)') >= 0);
 check('the shared case defaults to the InterPSS preset rather than to nothing',
