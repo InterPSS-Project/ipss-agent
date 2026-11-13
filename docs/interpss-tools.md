@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.8.4**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.8.7**.
 
 ## Tool surface
 
@@ -794,6 +794,9 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.8.2 | **The InterPSS Workspace opens on the selected simulation case.** On mount (and after **Refresh**) the tab reads the shared `selectedCaseInput`, normalizes it to a `wspace`-relative path, expands and loads each ancestor folder, scrolls the case row into view and highlights it (hover background, brand text, semibold). Clicking another file still opens it without moving the highlight — the highlight is the current Simu Case. A case outside `wspace` or a missing file leaves the ancestors expanded with no highlight. 414 checks |
 | 0.8.3 | **The explorer follows a live Simu Case change.** The shared `selectedCaseInput` is now published through a small `selectionListeners` set: `onCaseChanged` (InterPSS tab) and `adoptSelectedCase` call `publishSelection`, and the mounted Workspace tab subscribes, re-running the reveal/highlight immediately when the user picks another case. Opening the tab still reveals on mount and on **Refresh**. 414 checks |
 | 0.8.4 | **A case switch resets the explorer.** Before revealing the newly selected Simu Case, the tab now collapses the tree back to `InterPSS Workspace/` and clears the previous expansion/highlight, then expands only the new case's ancestors and highlights it. A `revealSeq` guard drops an in-flight reveal when another selection arrives. **Refresh** uses the same reset. 414 checks |
+| 0.8.5 | **More room in the one-line diagram options dialog.** Padding 18 → 22 px, dialog/section gaps 12 → 16/10 px, field rows get 2 px vertical padding, and each section's fields sit behind a 1 px left rule with 16 px indentation (matching the spaced layout). Footer separation 12 → 16 px. 414 checks |
+| 0.8.6 | **More room in the Run Contingency Analysis dialog.** Padding 18 → 22 px; header/threshold/case spacing 10/12 → 14/16 px; the advanced solver grid sits behind a 1 px left rule with 16 px indentation and 10×14 px gaps; section titles get 8 px separation; footer 16/12 → 20/16 px. 415 checks |
+| 0.8.7 | **Run CA dialog reordered.** The Case line now sits under the threshold, above the branch definitions; each branch section's radios and count message sit behind the same 1 px left rule with 16 px indentation; **Advanced solver settings** moves below the two sections, just above the footer. Divider 18 px, warning spacing 12 px. 415 checks |
 
 ## Troubleshooting
 

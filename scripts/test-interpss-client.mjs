@@ -624,7 +624,7 @@ check('the CA result panel offers the same Show log info control as ACLF',
   && slice.indexOf('caResult.stdout') >= 0
   && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
   && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
-  && slice.indexOf('v0.8.4') >= 0);
+  && slice.indexOf('v0.8.7') >= 0);
 check('the workspace tab declares its sidebar/remote services and client inject packages',
   rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
   && [
@@ -1359,7 +1359,17 @@ check('the diagram-config dialog uses the Run Contingency Analysis type scale',
   slice.indexOf("cfgDialogShell('One-line diagram config options'") >= 0
   && slice.indexOf("fontSize: '15px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)'") >= 0
   && slice.indexOf("fontSize: '14px', color: 'var(--dsw-alias-label-primary)'") >= 0
-  && slice.indexOf("padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)'") >= 0);
+  && slice.indexOf("padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)'") >= 0
+  && slice.indexOf("paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)'") >= 0
+  && slice.indexOf("padding: '22px'") >= 0);
+
+check('the Run Contingency Analysis dialog gives its advanced options room',
+  slice.indexOf("padding: '22px', width: '100%', maxWidth: '620px'") >= 0
+  && slice.indexOf("marginTop: '12px', marginLeft: '2px', paddingLeft: '16px', borderLeft") >= 0
+  && slice.indexOf("marginTop: '20px', borderTop") >= 0
+  && slice.indexOf("paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)', display: 'flex', flexDirection: 'column'") >= 0
+  && slice.indexOf("Case: ' + caCase.displayName") < slice.indexOf("caSection('contingency'")
+  && slice.indexOf("caSection('monitored'") < slice.indexOf("'Advanced solver settings'"));
 
 const cfgDialog = renderTab(withState([
   ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],

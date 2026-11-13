@@ -3750,8 +3750,7 @@ module.exports = {
         if (caForm === null) return null
         const mode = kind === 'contingency' ? caForm.contingencyMode : caForm.monitorMode
         const message = caMessage(kind)
-        const children = [
-          React.createElement('div', { key: 'title', style: { fontWeight: 600, fontSize: '15px', marginBottom: '4px' } }, title),
+        const bodyChildren = [
           caRadio(kind, 'all', allLabel),
           React.createElement('div', { key: 'custom', style: { display: 'flex', alignItems: 'center', gap: '8px' } },
             caRadio(kind, 'custom', customLabel),
@@ -3780,12 +3779,12 @@ module.exports = {
                   note === '' ? null : React.createElement('span', { style: { opacity: 0.65 } }, note),
                 )
               })
-          children.push(React.createElement('div', {
+          bodyChildren.push(React.createElement('div', {
             key: 'picker',
             style: { marginTop: '6px', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '8px', maxHeight: '200px', overflowY: 'auto', background: 'var(--dsw-alias-bg-layer-1)' },
           }, rows))
         }
-        children.push(React.createElement('div', {
+        bodyChildren.push(React.createElement('div', {
           key: 'message',
           style: {
             marginTop: '6px',
@@ -3795,7 +3794,12 @@ module.exports = {
               : (message.kind === 'ok' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)'),
           },
         }, message === null ? '' : message.text))
-        return React.createElement('div', { key: kind }, children)
+        return React.createElement('div', { key: kind },
+          React.createElement('div', { key: 'title', style: { fontWeight: 600, fontSize: '15px', marginBottom: '8px' } }, title),
+          React.createElement('div', {
+            key: 'body',
+            style: { marginLeft: '2px', paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)', display: 'flex', flexDirection: 'column', gap: '2px' },
+          }, bodyChildren))
       }
 
       const caModal = caOpen ? React.createElement('div', {
@@ -3804,13 +3808,13 @@ module.exports = {
       },
         React.createElement('div', {
           onClick: (e) => e.stopPropagation(),
-          style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '18px', width: '100%', maxWidth: '620px', maxHeight: '86vh', display: 'flex', flexDirection: 'column' },
+          style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '22px', width: '100%', maxWidth: '620px', maxHeight: '86vh', display: 'flex', flexDirection: 'column' },
         },
-          React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' } },
+          React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' } },
             React.createElement('div', { style: { fontWeight: 600, fontSize: '16px' } }, 'Run Contingency Analysis'),
             React.createElement('button', { onClick: cancelCaDialog, style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
           ),
-          caForm !== null ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' } },
+          caForm !== null ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' } },
             React.createElement('span', { style: { fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, 'Over Loading Threshold(%):'),
             React.createElement('input', {
               type: 'number',
@@ -3823,29 +3827,29 @@ module.exports = {
               style: { width: '92px', padding: '4px 8px', borderRadius: '6px', border: '1px solid var(--dsw-alias-border-l1)', background: 'var(--dsw-alias-bg-layer-1)', color: 'var(--dsw-alias-label-primary)', textAlign: 'center' },
             }),
           ) : null,
-          // The solver knobs, behind a disclosure: the two case-input sections stay the dialog's
-          // main job, and a run that never opens this panel writes the defaults back unchanged.
-          caForm !== null ? React.createElement('div', { style: { marginBottom: '12px' } },
+          caCase !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginBottom: '14px' } }, 'Case: ' + caCase.displayName) : null,
+          caLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
+          caForm === null ? React.createElement('pre', { style: { ...mono, maxHeight: '180px', overflow: 'auto' } }, caDialogError || 'no run configuration available') :
+          React.createElement('div', { style: { flex: '1 1 auto', overflowY: 'auto', minHeight: 0 } },
+            caSection('contingency', 'Define Contingency Branches:', 'Consider all N-1 contingencies', 'User-defined contingency'),
+            React.createElement('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1)', margin: '18px 0' } }),
+            caSection('monitored', 'Define Monitored Branches:', 'Monitor all branches (default)', 'Monitor selected branches'),
+          ),
+          // The solver knobs sit after the two case-input sections: the branch definitions are the
+          // dialog's main job, and a run that never opens this panel writes the defaults back.
+          caForm !== null ? React.createElement('div', { style: { marginTop: '16px' } },
             React.createElement('button', {
               onClick: () => setCaAdvanced(!caAdvanced),
               'aria-expanded': caAdvanced ? 'true' : 'false',
               style: { ...btn, padding: '4px 10px', fontSize: '12px' },
             }, (caAdvanced ? '▾ ' : '▸ ') + 'Advanced solver settings'),
             caAdvanced ? React.createElement('div', {
-              style: { marginTop: '8px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '8px 12px' },
+              style: { marginTop: '12px', marginLeft: '2px', paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px 14px' },
             }, CA_SOLVER_FIELDS.map((field) => renderCaSolverField(field))) : null,
           ) : null,
-          caCase !== null ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)', marginBottom: '10px' } }, 'Case: ' + caCase.displayName) : null,
-          caLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
-          caForm === null ? React.createElement('pre', { style: { ...mono, maxHeight: '180px', overflow: 'auto' } }, caDialogError || 'no run configuration available') :
-          React.createElement('div', { style: { flex: '1 1 auto', overflowY: 'auto', minHeight: 0 } },
-            caSection('contingency', 'Define Contingency Branches:', 'Consider all N-1 contingencies', 'User-defined contingency'),
-            React.createElement('div', { style: { borderTop: '1px solid var(--dsw-alias-border-l1)', margin: '14px 0' } }),
-            caSection('monitored', 'Define Monitored Branches:', 'Monitor all branches (default)', 'Monitor selected branches'),
-          ),
-          caWarning !== null ? React.createElement('div', { style: { marginTop: '10px', fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caWarning) : null,
-          caDialogError !== null && caForm !== null ? React.createElement('div', { style: { marginTop: '10px', fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caDialogError) : null,
-          React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '16px', borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '12px' } },
+          caWarning !== null ? React.createElement('div', { style: { marginTop: '12px', fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caWarning) : null,
+          caDialogError !== null && caForm !== null ? React.createElement('div', { style: { marginTop: '12px', fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)' } }, '⚠ ' + caDialogError) : null,
+          React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '20px', borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '16px' } },
             React.createElement('button', { onClick: cancelCaDialog, disabled: caSaving, style: { ...btn, padding: '6px 22px', opacity: caSaving ? 0.6 : 1 } }, 'Cancel'),
             React.createElement('button', { onClick: okCaDialog, disabled: caSaving || caLoading || caFilesLoading || caForm === null, style: { ...btn, padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)', color: 'var(--dsw-alias-brand-primary)', fontWeight: 600, opacity: (caSaving || caLoading || caFilesLoading || caForm === null) ? 0.6 : 1 } }, caSaving ? 'Saving…' : 'OK'),
           ),
@@ -3953,7 +3957,7 @@ module.exports = {
           // The control is part of the completion row itself, so it cannot be separated
           // from the line that tells the user the run finished.
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.4'),
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.7'),
             React.createElement('button', {
               onClick: () => setCaShowRaw(!caShowRaw),
               style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },
@@ -4923,11 +4927,11 @@ module.exports = {
         role: 'dialog',
         'aria-label': title,
         onClick: (e) => e.stopPropagation(),
-        style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '18px', width: '100%', maxWidth: '440px', maxHeight: '86vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '12px', boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)' },
+        style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '22px', width: '100%', maxWidth: '440px', maxHeight: '86vh', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', boxShadow: '0 8px 30px rgba(0, 0, 0, 0.35)' },
       },
         React.createElement('div', { style: { fontSize: '16px', fontWeight: 600 } }, title),
         bodyEl,
-        React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '12px' } },
+        React.createElement('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: '8px', borderTop: '1px solid var(--dsw-alias-border-l1)', paddingTop: '16px' } },
           React.createElement('button', { key: 'cancel', onClick: closeDialog, disabled: okDisabled === true, style: { ...btn, padding: '6px 22px', opacity: okDisabled === true ? 0.6 : 1 } }, 'Cancel'),
           React.createElement('button', {
             key: 'ok', onClick: onOk, disabled: okDisabled === true,
@@ -4980,14 +4984,16 @@ module.exports = {
           bad ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
       }
       const cfgRow = (label, control) => React.createElement('label', {
-        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', fontSize: '14px', color: 'var(--dsw-alias-label-primary)' },
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '2px 0', fontSize: '14px', color: 'var(--dsw-alias-label-primary)' },
       }, React.createElement('span', null, label), control)
       const cfgHintStyle = { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }
-      const cfgSection = (title, fields) => React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '8px' } },
+      const cfgSection = (title, fields) => React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
         React.createElement('div', { style: { fontSize: '15px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, title),
-        fields.map(cfgField))
+        React.createElement('div', {
+          style: { display: 'flex', flexDirection: 'column', gap: '10px', marginLeft: '2px', paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)' },
+        }, fields.map(cfgField)))
       const dialogEl = dialog === 'config'
-        ? cfgDialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '12px' } },
+        ? cfgDialogShell('One-line diagram config options', React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '16px' } },
           cfgSection('Bus flags', DRAWIO_NET_FIELDS.slice(0, 3)),
           cfgSection('Branch flow flags', DRAWIO_NET_FIELDS.slice(3, 7)),
           cfgSection('View', DRAWIO_NET_FIELDS.slice(7)),
