@@ -64,18 +64,16 @@ monitored-branch selection.
 `caConfig` (plugin 0.7.2+) carries the DC contingency **solver** knobs — the fields of the engine's
 `DclfContingencyConfig` plus the worker count — as a partial object keyed like
 `config/ca_run.json`. It is merged per key over the case config (and `overloadThreshold` still wins
-over `caConfig.overloadThreshold`); the tab's dialog edits the same fifteen knobs in its **Advanced
+over `caConfig.overloadThreshold`); the tab's dialog edits the same thirteen knobs in its **Advanced
 solver settings** panel. Every default is the value the runner used before the keys existed, so a
 call that omits `caConfig` behaves exactly as it always did.
 
 | `caConfig` key | Default | Values |
 |---|---|---|
 | `dclfInclLoss` | `true` | bool — DC model with losses |
-| `dclfScreening` | `false` | bool — the engine's screening pass |
-| `dcLoadingCutoff` | `100` | `0`-`1000` percent (`0` = no cutoff) |
-| `dcFlowChangeCutoff` | `200` | `0`-`1000` percent |
 | `solutionMethod` | `SparseEqnSolve` | `SparseEqnSolve` \| `WoodburyMatrixUpdate` |
 | `kluEndpointRhsBatchSize` | `0` | integer `>= 0` |
+| `woodburyMonitorBatchSize` | `0` | integer `>= 0`; `0` = off |
 | `cacheViolationCombinedShiftFactors` | `false` | bool |
 | `islandingTreatment` | `ANCHORED_COMPENSATE_ONE_BUS` | `SKIP` \| `ANCHORED_COMPENSATE_ONE_BUS` \| `FULL_DCLF_REPLAY` |
 | `n1IslandingReplayEnabled` | `false` | bool |
@@ -85,6 +83,10 @@ call that omits `caConfig` behaves exactly as it always did.
 | `autoTurnLine2Xfr` | `true` | bool |
 | `ratingProvider` | `default` | `default` \| `RATING_A` \| `RATING_B` — which branch rating the overload check uses (`RATING_A` = rating MVA 1; `RATING_B` = rating MVA 2, falling back to rating MVA 1 × 1.15 for a line / × 1.35 for a transformer when MVA 2 is zero) |
 | `threads` | `0` | integer `>= 0`; `0` = one per available processor |
+
+Older `ca_run.json` files that name `dclfScreening`, `dcLoadingCutoff` or `dcFlowChangeCutoff`
+still load; ipss.core.lib 1.4.9 removed those fields from the solver config, so they are ignored.
+They are **not** part of `caConfig` any more.
 
 ```
 interpss_run_ca({ caConfig: { ratingProvider: 'RATING_A', threads: 4 } })

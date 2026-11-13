@@ -31,10 +31,10 @@ ipss-agent/
 │   ├── log4j2.xml                 # Runtime logging config (level/file, sys-property overridable)
 │   └── gen_report.json            # Report band thresholds (used by org.interpss.agent.report)
 ├── lib/
-│   ├── ipss_runnable.jar          # Main InterPSS runnable JAR (ipss.plugin.core 1.4.2)
+│   ├── ipss_runnable.jar          # Main InterPSS runnable JAR (ipss.plugin.core 1.4.7)
 │   ├── m2-repo/                   # Local Maven POMs + jar symlinks for InterPSS artifacts
 │   └── deps/                      # Runtime JARs (core + third-party resolved by Maven)
-│       ├── ipss.core.lib-1.4.0.jar
+│       ├── ipss.core.lib-1.4.9.jar
 │       ├── slf4j-api-1.7.36.jar
 │       ├── log4j-api-2.25.4.jar / log4j-core-2.25.4.jar / log4j-slf4j-impl-2.25.4.jar
 │       ├── org.eclipse.emf.common-2.45.0.jar / .ecore-2.42.0.jar
@@ -111,8 +111,8 @@ local Maven cache so `~/.m2` does not keep a stale `ipss-runnable:1.0`:
   -Dfile=lib/ipss_runnable.jar \
   -DpomFile=lib/m2-repo/com/interpss/ipss-runnable/1.0/ipss-runnable-1.0.pom
 ./mvnw -q install:install-file \
-  -Dfile=lib/deps/ipss.core.lib-1.4.0.jar \
-  -DpomFile=lib/m2-repo/com/interpss/ipss.core.lib/1.4.0/ipss.core.lib-1.4.0.pom
+  -Dfile=lib/deps/ipss.core.lib-1.4.9.jar \
+  -DpomFile=lib/m2-repo/com/interpss/ipss.core.lib/1.4.9/ipss.core.lib-1.4.9.pom
 ```
 
 The compiled `target/` output and downloaded Maven distribution are local build
@@ -151,8 +151,8 @@ artifacts).
 
 | JAR                          | Source         | Purpose                                        |
 | ---------------------------- | -------------- | ---------------------------------------------- |
-| `ipss_runnable.jar`          | InterPSS build | Plugin core 1.4.2 (adapters, ACLF, contingency) |
-| `ipss.core.lib-1.4.0.jar`    | InterPSS build | ACLF engine, algorithms, EMF model             |
+| `ipss_runnable.jar`          | InterPSS build | Plugin core 1.4.7 (adapters, ACLF, contingency) |
+| `ipss.core.lib-1.4.9.jar`    | InterPSS build | ACLF engine, algorithms, EMF model             |
 
 IEEE CDF / PSS/E / BPA import no longer requires separate IEEE ODM JARs; parsers live in
 `ipss_runnable.jar` (`org.interpss.fadapter`).

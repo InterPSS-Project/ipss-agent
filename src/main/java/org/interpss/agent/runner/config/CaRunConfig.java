@@ -24,11 +24,9 @@ import com.google.gson.Gson;
  *   "monitoredBranchFile": "data/psse/Texas2K/2k_monitored_branches.json",
  *   "overloadThreshold": 90,
  *   "dclfInclLoss": true,
- *   "dclfScreening": false,
- *   "dcLoadingCutoff": 100,
- *   "dcFlowChangeCutoff": 200,
  *   "solutionMethod": "SparseEqnSolve" | "WoodburyMatrixUpdate",
  *   "kluEndpointRhsBatchSize": 0,
+ *   "woodburyMonitorBatchSize": 0,
  *   "cacheViolationCombinedShiftFactors": false,
  *   "islandingTreatment": "SKIP" | "ANCHORED_COMPENSATE_ONE_BUS" | "FULL_DCLF_REPLAY",
  *   "n1IslandingReplayEnabled": false,
@@ -52,18 +50,23 @@ import com.google.gson.Gson;
  * <p>
  * The keys from {@code dclfInclLoss} on are the solver knobs of
  * {@code com.interpss.core.algo.dclf.DclfContingencyConfig} (plus the runner's
- * worker count). Every one of them is optional and the {@code …OrDefault()}
- * accessors below return the value the runner used before they were exposed, so
- * a config file that names none of them behaves exactly as it always did.
- * {@link #load} validates them — an unknown enum value, a negative count or a
- * cutoff outside {@code 0..1000} is rejected rather than silently defaulted,
- * because a run that quietly ignores what the dialog selected is worse than one
- * that says why it cannot.
+ * worker count). {@code dclfScreening}, {@code dcLoadingCutoff}, and
+ * {@code dcFlowChangeCutoff} remain accepted for older payloads but are not
+ * applied after ipss.core.lib 1.4.9 removed those fields from the solver config.
+ * {@code woodburyMonitorBatchSize} is the matching batch-size knob for the
+ * Woodbury solution method ({@code 0} = off). Every knob is optional and the
+ * {@code …OrDefault()} accessors below return the value the runner used before
+ * they were exposed, so a config file that names none of them behaves exactly as
+ * it always did. {@link #load} validates them — an unknown enum value, a negative
+ * count or a cutoff outside {@code 0..1000} is rejected rather than silently
+ * defaulted, because a run that quietly ignores what the dialog selected is worse
+ * than one that says why it cannot.
  */
 public record CaRunConfig(String contingencyMode, String contingencyFile,
         String monitorMode, String monitoredBranchFile, Double overloadThreshold,
         Boolean dclfInclLoss, Boolean dclfScreening, Double dcLoadingCutoff, Double dcFlowChangeCutoff,
-        String solutionMethod, Integer kluEndpointRhsBatchSize, Boolean cacheViolationCombinedShiftFactors,
+        String solutionMethod, Integer kluEndpointRhsBatchSize, Integer woodburyMonitorBatchSize,
+        Boolean cacheViolationCombinedShiftFactors,
         String islandingTreatment, Boolean n1IslandingReplayEnabled, String multiOutageReplayMode,
         Double highImpedanceReactancePu, Boolean turnOffIslandBus, Boolean autoTurnLine2Xfr,
         String ratingProvider, Integer threads) {
@@ -74,8 +77,15 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
     /** Violation-check loading (%) used when the file does not set one. */
     public static final double DEFAULT_OVERLOAD_THRESHOLD = 90.0;
 
-    /** {@code DclfContingencyConfig} defaults, as measured on ipss.core.lib 1.4.0. */
+    /** {@code DclfContingencyConfig} defaults, as measured on ipss.core.lib 1.4.9. */
     public static final boolean DEFAULT_DCLF_INCL_LOSS = true;
+    /** Woodbury monitor batch size; {@code 0} means no batching (the library default). */
+    public static final int DEFAULT_WOODBURY_MONITOR_BATCH_SIZE = 0;
+    /**
+     * Retained for older {@code ca_run.json} / dialog payloads. Screening cutoffs were
+     * removed from {@code DclfContingencyConfig} in ipss.core.lib 1.4.9 and are not
+     * copied onto the solver.
+     */
     public static final boolean DEFAULT_DCLF_SCREENING = false;
     public static final double DEFAULT_DC_LOADING_CUTOFF = 100.0;
     public static final double DEFAULT_DC_FLOW_CHANGE_CUTOFF = 200.0;
@@ -86,7 +96,7 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
     public static final boolean DEFAULT_AUTO_TURN_LINE2XFR = true;
 
     /**
-     * The library's own branch-rating provider. Measured on ipss.core.lib 1.4.0 this is
+     * The library's own branch-rating provider. Measured on ipss.core.lib 1.4.9 this is
      * {@code BranchRatingProvider.RATING_B} (rating MVA 2); {@code RATING_A} is the other,
      * lower-rating choice and reports more overloads.
      */
@@ -105,7 +115,8 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
 
     /** All N-1 contingencies / monitor every branch / 90% threshold / solver defaults. */
     public static final CaRunConfig DEFAULT = new CaRunConfig(ALL, null, ALL, null, null,
-            null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+            null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+            null);
 
     /**
      * Read {@code configFile}. Unknown keys are ignored, blank values become
@@ -143,6 +154,7 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
                 cutoff(raw.dcFlowChangeCutoff(), source, "dcFlowChangeCutoff"),
                 choice(raw.solutionMethod(), SOLUTION_METHODS, source, "solutionMethod"),
                 count(raw.kluEndpointRhsBatchSize(), source, "kluEndpointRhsBatchSize"),
+                count(raw.woodburyMonitorBatchSize(), source, "woodburyMonitorBatchSize"),
                 raw.cacheViolationCombinedShiftFactors(),
                 choice(raw.islandingTreatment(), ISLANDING_TREATMENTS, source, "islandingTreatment"),
                 raw.n1IslandingReplayEnabled(),
@@ -181,9 +193,9 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
     public CaRunConfig withOverloadThreshold(double value) {
         return new CaRunConfig(contingencyMode, contingencyFile, monitorMode, monitoredBranchFile, value,
                 dclfInclLoss, dclfScreening, dcLoadingCutoff, dcFlowChangeCutoff, solutionMethod,
-                kluEndpointRhsBatchSize, cacheViolationCombinedShiftFactors, islandingTreatment,
-                n1IslandingReplayEnabled, multiOutageReplayMode, highImpedanceReactancePu, turnOffIslandBus,
-                autoTurnLine2Xfr, ratingProvider, threads);
+                kluEndpointRhsBatchSize, woodburyMonitorBatchSize, cacheViolationCombinedShiftFactors,
+                islandingTreatment, n1IslandingReplayEnabled, multiOutageReplayMode, highImpedanceReactancePu,
+                turnOffIslandBus, autoTurnLine2Xfr, ratingProvider, threads);
     }
 
     public boolean dclfInclLossOrDefault() {
@@ -208,6 +220,11 @@ public record CaRunConfig(String contingencyMode, String contingencyFile,
 
     public int kluEndpointRhsBatchSizeOrDefault() {
         return kluEndpointRhsBatchSize == null ? 0 : kluEndpointRhsBatchSize;
+    }
+
+    public int woodburyMonitorBatchSizeOrDefault() {
+        return woodburyMonitorBatchSize == null
+                ? DEFAULT_WOODBURY_MONITOR_BATCH_SIZE : woodburyMonitorBatchSize;
     }
 
     public boolean cacheViolationCombinedShiftFactorsOrDefault() {

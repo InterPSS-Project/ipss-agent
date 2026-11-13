@@ -624,7 +624,7 @@ check('the CA result panel offers the same Show log info control as ACLF',
   && slice.indexOf('caResult.stdout') >= 0
   && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
   && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
-  && slice.indexOf('v0.8.7') >= 0);
+  && slice.indexOf('v0.8.8') >= 0);
 check('the workspace tab declares its sidebar/remote services and client inject packages',
   rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
   && [
@@ -2663,9 +2663,9 @@ const hostCaDefaults = (path) => {
 };
 const libDefaults = hostCaDefaults(LIB_HOST);
 const clientKeys = api.CA_SOLVER_FIELDS.map((f) => f.key);
-check('the CA config has the five case-input keys plus the fifteen solver knobs',
-  libDefaults !== null && Object.keys(libDefaults).length === 20
-  && clientKeys.length === 15 && Object.keys(clientKeys.reduce((a, k) => (a[k] = 1, a), {})).length === 15,
+check('the CA config has the five case-input keys plus the thirteen solver knobs',
+  libDefaults !== null && Object.keys(libDefaults).length === 18
+  && clientKeys.length === 13 && Object.keys(clientKeys.reduce((a, k) => (a[k] = 1, a), {})).length === 13,
   libDefaults === null ? 'no DEFAULT_CA_CONFIG' : Object.keys(libDefaults).length + ' host keys / ' + clientKeys.length + ' client fields');
 check('every client solver field is a host key',
   clientKeys.every((k) => Object.prototype.hasOwnProperty.call(libDefaults, k)),
@@ -2677,6 +2677,7 @@ check('the client field defaults are the host defaults',
 // constant names: they are what the runner will accept.
 check('the Java CaRunConfig carries the same solver defaults',
   caJava.indexOf('DEFAULT_DCLF_INCL_LOSS = true') >= 0
+  && caJava.indexOf('DEFAULT_WOODBURY_MONITOR_BATCH_SIZE = 0') >= 0
   && caJava.indexOf('DEFAULT_DCLF_SCREENING = false') >= 0
   && caJava.indexOf('DEFAULT_DC_LOADING_CUTOFF = 100.0') >= 0
   && caJava.indexOf('DEFAULT_DC_FLOW_CHANGE_CUTOFF = 200.0') >= 0
@@ -2715,9 +2716,10 @@ check('the client\'s select options are the host\'s lists',
 const caDefaultForm = {};
 for (const f of api.CA_SOLVER_FIELDS) caDefaultForm[f.key] = api.caSolverFieldValue(f, {});
 check('an empty answer seeds the form with the defaults',
-  caDefaultForm.dclfInclLoss === true && caDefaultForm.dclfScreening === false
-  && caDefaultForm.dcLoadingCutoff === '100' && caDefaultForm.dcFlowChangeCutoff === '200'
+  caDefaultForm.dclfInclLoss === true
   && caDefaultForm.solutionMethod === 'SparseEqnSolve'
+  && caDefaultForm.kluEndpointRhsBatchSize === '0'
+  && caDefaultForm.woodburyMonitorBatchSize === '0'
   && caDefaultForm.islandingTreatment === 'ANCHORED_COMPENSATE_ONE_BUS'
   && caDefaultForm.multiOutageReplayMode === 'EXACT_TOPOLOGY'
   && caDefaultForm.ratingProvider === 'default' && caDefaultForm.threads === '0',
@@ -2726,12 +2728,12 @@ check('a valid form has no solver error and its payload is all numbers and boole
   api.caSolverError(caDefaultForm) === null
   && (function () {
     const p = api.caSolverPayload(caDefaultForm);
-    return p.dcLoadingCutoff === 100 && p.threads === 0 && p.dclfInclLoss === true
-      && p.ratingProvider === 'default' && Object.keys(p).length === 15;
+    return p.woodburyMonitorBatchSize === 0 && p.threads === 0 && p.dclfInclLoss === true
+      && p.ratingProvider === 'default' && Object.keys(p).length === 13;
   })());
 check('an unusable solver value is reported, not defaulted',
-  api.caSolverError({ ...caDefaultForm, dcLoadingCutoff: '-1' }) !== null
-  && api.caSolverError({ ...caDefaultForm, dcLoadingCutoff: 'x' }) !== null
+  api.caSolverError({ ...caDefaultForm, woodburyMonitorBatchSize: '-1' }) !== null
+  && api.caSolverError({ ...caDefaultForm, woodburyMonitorBatchSize: 'x' }) !== null
   && api.caSolverError({ ...caDefaultForm, threads: '-1' }) !== null
   && api.caSolverError({ ...caDefaultForm, threads: '2.5' }) !== null
   && api.caSolverError({ ...caDefaultForm, solutionMethod: 'Nope' }) !== null

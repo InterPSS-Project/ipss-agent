@@ -78,11 +78,9 @@ module.exports = {
     // the Java `CaRunConfig`, so the three cannot disagree about a knob's name or its default.
     const CA_SOLVER_FIELDS = [
       { key: 'dclfInclLoss', label: 'Include losses (INC_LOSS)', kind: 'bool', def: true },
-      { key: 'dclfScreening', label: 'Screening pass', kind: 'bool', def: false },
-      { key: 'dcLoadingCutoff', label: 'DC loading cutoff (%)', kind: 'number', min: 0, max: 1000, def: 100 },
-      { key: 'dcFlowChangeCutoff', label: 'DC flow change cutoff (%)', kind: 'number', min: 0, max: 1000, def: 200 },
       { key: 'solutionMethod', label: 'Solution method', kind: 'select', options: ['SparseEqnSolve', 'WoodburyMatrixUpdate'], def: 'SparseEqnSolve' },
       { key: 'kluEndpointRhsBatchSize', label: 'KLU RHS batch size (0 = off)', kind: 'number', min: 0, max: 1000000, integer: true, def: 0 },
+      { key: 'woodburyMonitorBatchSize', label: 'Woodbury monitor batch size (0 = off)', kind: 'number', min: 0, max: 1000000, integer: true, def: 0 },
       { key: 'cacheViolationCombinedShiftFactors', label: 'Cache violation shift factors', kind: 'bool', def: false },
       { key: 'islandingTreatment', label: 'Islanding treatment', kind: 'select', options: ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY'], def: 'ANCHORED_COMPENSATE_ONE_BUS' },
       { key: 'n1IslandingReplayEnabled', label: 'N-1 islanding replay', kind: 'bool', def: false },
@@ -3957,7 +3955,7 @@ module.exports = {
           // The control is part of the completion row itself, so it cannot be separated
           // from the line that tells the user the run finished.
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.7'),
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.8'),
             React.createElement('button', {
               onClick: () => setCaShowRaw(!caShowRaw),
               style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },

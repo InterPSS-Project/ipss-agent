@@ -91,7 +91,7 @@ public final class ContingencyRunner {
     /**
      * As above, driven by the whole {@link CaRunConfig}: the threshold plus every
      * solver knob the config sets is copied onto the
-     * {@code DclfContingencyConfig} the parallel analyzer takes (ipss.core.lib 1.4.0
+     * {@code DclfContingencyConfig} the parallel analyzer takes (ipss.core.lib 1.4.9
      * moved the analyzer and its config into {@code com.interpss.core.algo.dclf}),
      * so the dialog's choices reach the solver instead of the runner guessing them.
      */
@@ -160,12 +160,13 @@ public final class ContingencyRunner {
         DclfContingencyConfig dclfConfig = new DclfContingencyConfig();
         dclfConfig.setOverloadThreshold(cfg.overloadThresholdOrDefault());
         dclfConfig.setDclfInclLoss(cfg.dclfInclLossOrDefault());
-        dclfConfig.setDclfScreening(cfg.dclfScreeningOrDefault());
-        dclfConfig.setDcLoadingCutoff(cfg.dcLoadingCutoffOrDefault());
-        dclfConfig.setDcFlowChangeCutoff(cfg.dcFlowChangeCutoffOrDefault());
+        // dclfScreening / dcLoadingCutoff / dcFlowChangeCutoff were removed from
+        // DclfContingencyConfig in ipss.core.lib 1.4.9 (unused by analyzers). CaRunConfig
+        // still accepts those JSON keys for older ca_run.json / dialog payloads.
         dclfConfig.setSolutionMethod(
                 DclfContingencySolutionMethod.valueOf(cfg.solutionMethodOrDefault()));
         dclfConfig.setKluEndpointRhsBatchSize(cfg.kluEndpointRhsBatchSizeOrDefault());
+        dclfConfig.setWoodburyMonitorBatchSize(cfg.woodburyMonitorBatchSizeOrDefault());
         dclfConfig.setCacheViolationCombinedShiftFactors(cfg.cacheViolationCombinedShiftFactorsOrDefault());
         dclfConfig.setIslandingTreatment(
                 DclfIslandingTreatment.valueOf(cfg.islandingTreatmentOrDefault()));

@@ -176,16 +176,16 @@ GvyScriptRunner.runOnNet(net, <case dir>/scripts/<name>.gvy)
 ContingencyRunner.run(paths, cli, net, resultsDir, stem)
   1. resolveInputs(): explicit CLI args → case ca_run.json → built-in defaults
   2. Load contingency + monitored-branch JSON (ContingencyFileUtil)
-  3. dclfConfig(CaRunConfig) → DclfContingencyConfig (ipss.core.lib 1.4.0)
+  3. dclfConfig(CaRunConfig) → DclfContingencyConfig (ipss.core.lib 1.4.9)
   4. ParallelDclfContingencyAnalyzer.executeContingencyAnalysis(net, conts, monitored, config, threads)
   5. DclfContingencyDFrameAdapter → stem_DF_contingency.csv
 ```
 
 The analyzer and its config live in `com.interpss.core.algo.dclf` (the
 `org.interpss.plugin.contingency` copies are thin shims now), and the runner hands the
-analyzer a **complete** config: `CaRunConfig` carries `overloadThreshold` plus the fifteen
-solver knobs — `dclfInclLoss`, `dclfScreening`, `dcLoadingCutoff`, `dcFlowChangeCutoff`,
-`solutionMethod`, `kluEndpointRhsBatchSize`, `cacheViolationCombinedShiftFactors`,
+analyzer a **complete** config: `CaRunConfig` carries `overloadThreshold` plus the thirteen
+solver knobs — `dclfInclLoss`, `solutionMethod`, `kluEndpointRhsBatchSize`,
+`woodburyMonitorBatchSize`, `cacheViolationCombinedShiftFactors`,
 `islandingTreatment`, `n1IslandingReplayEnabled`, `multiOutageReplayMode`,
 `highImpedanceReactancePu`, `turnOffIslandBus`, `autoTurnLine2Xfr`, `ratingProvider` and
 `threads` (0 = one per available processor). Each defaults to the value the runner used
@@ -508,8 +508,8 @@ JUnit 5 + AssertJ; fixtures under `src/test/resources/`.
 
 | Artifact | Version | Role |
 |----------|---------|------|
-| `com.interpss:ipss-runnable` | 1.0 | Runnable bundle (`ipss.plugin.core` 1.4.2) |
-| `com.interpss:ipss.core.lib` | 1.4.0 | Core engine: `AclfNetwork`, algorithms |
+| `com.interpss:ipss-runnable` | 1.0 | Runnable bundle (`ipss.plugin.core` 1.4.7) |
+| `com.interpss:ipss.core.lib` | 1.4.9 | Core engine: `AclfNetwork`, algorithms |
 
 ### ipss-plugin classes (inside `ipss_runnable.jar`)
 

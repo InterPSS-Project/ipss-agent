@@ -672,11 +672,12 @@ const DEFAULT_CA_CONFIG = {
   // became selectable, so a `ca_run.json` (or tool call) that names none of them behaves
   // exactly as it always did.
   dclfInclLoss: true,
-  dclfScreening: false,
-  dcLoadingCutoff: 100,
-  dcFlowChangeCutoff: 200,
   solutionMethod: 'SparseEqnSolve',
   kluEndpointRhsBatchSize: 0,
+  // Woodbury solution method's monitor batch size; 0 = off (the library default). Added by
+  // ipss.core.lib 1.4.9; the three screening/cutoff keys the earlier core exposed were
+  // removed there and are no longer offered (legacy ca_run.json files are still read).
+  woodburyMonitorBatchSize: 0,
   cacheViolationCombinedShiftFactors: false,
   islandingTreatment: 'ANCHORED_COMPENSATE_ONE_BUS',
   n1IslandingReplayEnabled: false,
@@ -685,7 +686,7 @@ const DEFAULT_CA_CONFIG = {
   turnOffIslandBus: true,
   autoTurnLine2Xfr: true,
   // Which branch rating the overload check compares against: the library's own provider
-  // (`RATING_B` on ipss.core.lib 1.4.0 — rating MVA 2, or rating MVA 1 × 1.15 for a line /
+  // (`RATING_B` on ipss.core.lib 1.4.9 — rating MVA 2, or rating MVA 1 × 1.15 for a line /
   // × 1.35 for a transformer when MVA 2 is zero), or either rating pinned.
   ratingProvider: 'default',
   // 0 = one worker per available processor, the runner's historical choice.
@@ -699,7 +700,7 @@ const CA_SOLUTION_METHODS = ['SparseEqnSolve', 'WoodburyMatrixUpdate']
 const CA_ISLANDING_TREATMENTS = ['SKIP', 'ANCHORED_COMPENSATE_ONE_BUS', 'FULL_DCLF_REPLAY']
 const CA_MULTI_OUTAGE_REPLAY_MODES = ['EXACT_TOPOLOGY', 'HIGH_IMPEDANCE']
 const CA_RATING_PROVIDERS = ['default', 'RATING_A', 'RATING_B']
-const CA_BOOL_KEYS = ['dclfInclLoss', 'dclfScreening', 'cacheViolationCombinedShiftFactors',
+const CA_BOOL_KEYS = ['dclfInclLoss', 'cacheViolationCombinedShiftFactors',
   'n1IslandingReplayEnabled', 'turnOffIslandBus', 'autoTurnLine2Xfr']
 const CA_CHOICE_KEYS = [
   ['solutionMethod', CA_SOLUTION_METHODS],
@@ -707,8 +708,7 @@ const CA_CHOICE_KEYS = [
   ['multiOutageReplayMode', CA_MULTI_OUTAGE_REPLAY_MODES],
   ['ratingProvider', CA_RATING_PROVIDERS],
 ]
-const CA_COUNT_KEYS = ['kluEndpointRhsBatchSize', 'threads']
-const CA_CUTOFF_KEYS = ['dcLoadingCutoff', 'dcFlowChangeCutoff']
+const CA_COUNT_KEYS = ['kluEndpointRhsBatchSize', 'woodburyMonitorBatchSize', 'threads']
 const CA_POSITIVE_KEYS = ['highImpedanceReactancePu']
 
 // The file's key order, and the exact payload written to config/ca_run.json and handed to
@@ -1035,10 +1035,6 @@ async function validateCaConfig(ctx, root, value, requireFiles) {
     const bad = number(key, 0, Number.MAX_SAFE_INTEGER, key + ' must be 0 or more')
     if (bad !== null) return { ok: false, error: bad }
     out[key] = Math.floor(out[key])
-  }
-  for (const key of CA_CUTOFF_KEYS) {
-    const bad = number(key, 0, 1000, key + ' must be a percentage between 0 and 1000')
-    if (bad !== null) return { ok: false, error: bad }
   }
   for (const key of CA_POSITIVE_KEYS) {
     const bad = number(key, Number.MIN_VALUE, Number.MAX_SAFE_INTEGER, key + ' must be a positive number')
@@ -3764,13 +3760,15 @@ function runCaTool(ctx) {
       '(*contingenc*.json / *monitor*.json), otherwise from the Java defaults (N-1 outages on every branch ' +
       'not connected to the reference bus, every branch monitored). `overloadThreshold` sets the ' +
       'over loading threshold in percent (default 90, overridable per call or in config/ca_run.json). ' +
-      '`caConfig` carries the solver knobs — dclfInclLoss, dclfScreening, dcLoadingCutoff, ' +
-      'dcFlowChangeCutoff, solutionMethod (SparseEqnSolve|WoodburyMatrixUpdate), kluEndpointRhsBatchSize, ' +
+      '`caConfig` carries the solver knobs — dclfInclLoss, solutionMethod ' +
+      '(SparseEqnSolve|WoodburyMatrixUpdate), kluEndpointRhsBatchSize, woodburyMonitorBatchSize, ' +
       'cacheViolationCombinedShiftFactors, islandingTreatment (SKIP|ANCHORED_COMPENSATE_ONE_BUS|' +
       'FULL_DCLF_REPLAY), n1IslandingReplayEnabled, multiOutageReplayMode (EXACT_TOPOLOGY|HIGH_IMPEDANCE), ' +
       'highImpedanceReactancePu, turnOffIslandBus, autoTurnLine2Xfr, ratingProvider ' +
       '(default|RATING_A|RATING_B) and threads (0 = one per processor) — with the case file\'s values ' +
-      'as defaults. Overload detection compares post-contingency flow against a branch rating: a case ' +
+      'as defaults. The screening/cutoff keys of older ca_run.json files are still read but no longer ' +
+      'applied (ipss.core.lib 1.4.9 removed them), and are not part of caConfig. Overload detection ' +
+      'compares post-contingency flow against a branch rating: a case ' +
       'whose branch tables carry none reports no overloads at any threshold. Writes ' +
       '<stem>_DF_contingency.csv under wspace/<case dir>/result/ — the file the NERC TPL-001-5 report and ' +
       'the ACLF card Report button consume. The runner solves its own DC load flow, so the case only has ' +
@@ -3813,9 +3811,9 @@ function runCaTool(ctx) {
           description:
             'Optional solver overrides, merged over the case config/ca_run.json (and overridden by ' +
             '`overloadThreshold` when both are given). Keys: dclfInclLoss (bool, default true), ' +
-            'dclfScreening (bool, false), dcLoadingCutoff (0-1000 percent, 100), dcFlowChangeCutoff ' +
-            '(0-1000 percent, 200), solutionMethod ("SparseEqnSolve" | "WoodburyMatrixUpdate"), ' +
-            'kluEndpointRhsBatchSize (int >= 0, 0), cacheViolationCombinedShiftFactors (bool, false), ' +
+            'solutionMethod ("SparseEqnSolve" | "WoodburyMatrixUpdate"), kluEndpointRhsBatchSize ' +
+            '(int >= 0, 0), woodburyMonitorBatchSize (int >= 0, 0 = off), ' +
+            'cacheViolationCombinedShiftFactors (bool, false), ' +
             'islandingTreatment ("SKIP" | "ANCHORED_COMPENSATE_ONE_BUS" | "FULL_DCLF_REPLAY"), ' +
             'n1IslandingReplayEnabled (bool, false), multiOutageReplayMode ("EXACT_TOPOLOGY" | ' +
             '"HIGH_IMPEDANCE"), highImpedanceReactancePu (number > 0, 10000), turnOffIslandBus (bool, ' +

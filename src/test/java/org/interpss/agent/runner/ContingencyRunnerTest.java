@@ -248,8 +248,8 @@ class ContingencyRunnerTest {
     @Test
     void dclfConfig_copiesEveryKnobOntoTheSolverConfig() {
         CaRunConfig config = CaRunConfig.fromJson("{\"overloadThreshold\":75,\"dclfInclLoss\":false,"
-                + "\"dclfScreening\":true,\"dcLoadingCutoff\":0,\"dcFlowChangeCutoff\":250,"
                 + "\"solutionMethod\":\"WoodburyMatrixUpdate\",\"kluEndpointRhsBatchSize\":8,"
+                + "\"woodburyMonitorBatchSize\":16,"
                 + "\"cacheViolationCombinedShiftFactors\":true,\"islandingTreatment\":\"SKIP\","
                 + "\"n1IslandingReplayEnabled\":true,\"multiOutageReplayMode\":\"HIGH_IMPEDANCE\","
                 + "\"highImpedanceReactancePu\":1234.5,\"turnOffIslandBus\":false,"
@@ -259,11 +259,9 @@ class ContingencyRunnerTest {
 
         assertThat(dclf.getOverloadThreshold()).isEqualTo(75.0);
         assertThat(dclf.isDclfInclLoss()).isFalse();
-        assertThat(dclf.isDclfScreening()).isTrue();
-        assertThat(dclf.getDcLoadingCutoff()).isZero();
-        assertThat(dclf.getDcFlowChangeCutoff()).isEqualTo(250.0);
         assertThat(dclf.getSolutionMethod()).isEqualTo(DclfContingencySolutionMethod.WoodburyMatrixUpdate);
         assertThat(dclf.getKluEndpointRhsBatchSize()).isEqualTo(8);
+        assertThat(dclf.getWoodburyMonitorBatchSize()).isEqualTo(16);
         assertThat(dclf.isCacheViolationCombinedShiftFactors()).isTrue();
         assertThat(dclf.getIslandingTreatment()).isEqualTo(DclfIslandingTreatment.SKIP);
         assertThat(dclf.isN1IslandingReplayEnabled()).isTrue();
@@ -275,7 +273,7 @@ class ContingencyRunnerTest {
     }
 
     /**
-     * `default` is the library's own provider. Measured on ipss.core.lib 1.4.0 that provider
+     * `default` is the library's own provider. Measured on ipss.core.lib 1.4.9 that provider
      * *is* {@code RATING_B} (the branch's rating MVA 2 — 690 MVA on the IEEE 39 case, where
      * RATING_A's 600 MVA reports five more overloads), so `default` never picks RATING_A.
      */

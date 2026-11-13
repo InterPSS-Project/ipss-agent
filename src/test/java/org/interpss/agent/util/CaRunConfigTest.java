@@ -115,6 +115,7 @@ class CaRunConfigTest {
         assertThat(config.dcFlowChangeCutoffOrDefault()).isEqualTo(200.0);
         assertThat(config.solutionMethodOrDefault()).isEqualTo("SparseEqnSolve");
         assertThat(config.kluEndpointRhsBatchSizeOrDefault()).isZero();
+        assertThat(config.woodburyMonitorBatchSizeOrDefault()).isZero();
         assertThat(config.cacheViolationCombinedShiftFactorsOrDefault()).isFalse();
         assertThat(config.islandingTreatmentOrDefault()).isEqualTo("ANCHORED_COMPENSATE_ONE_BUS");
         assertThat(config.n1IslandingReplayEnabledOrDefault()).isFalse();
@@ -136,6 +137,7 @@ class CaRunConfigTest {
                 + "  \"dcFlowChangeCutoff\": 250,\n"
                 + "  \"solutionMethod\": \"WoodburyMatrixUpdate\",\n"
                 + "  \"kluEndpointRhsBatchSize\": 8,\n"
+                + "  \"woodburyMonitorBatchSize\": 16,\n"
                 + "  \"cacheViolationCombinedShiftFactors\": true,\n"
                 + "  \"islandingTreatment\": \"SKIP\",\n"
                 + "  \"n1IslandingReplayEnabled\": true,\n"
@@ -156,6 +158,7 @@ class CaRunConfigTest {
         assertThat(config.dcFlowChangeCutoffOrDefault()).isEqualTo(250.0);
         assertThat(config.solutionMethodOrDefault()).isEqualTo("WoodburyMatrixUpdate");
         assertThat(config.kluEndpointRhsBatchSizeOrDefault()).isEqualTo(8);
+        assertThat(config.woodburyMonitorBatchSizeOrDefault()).isEqualTo(16);
         assertThat(config.cacheViolationCombinedShiftFactorsOrDefault()).isTrue();
         assertThat(config.islandingTreatmentOrDefault()).isEqualTo("SKIP");
         assertThat(config.n1IslandingReplayEnabledOrDefault()).isTrue();
@@ -195,6 +198,9 @@ class CaRunConfigTest {
         assertThatThrownBy(() -> CaRunConfig.fromJson("{\"kluEndpointRhsBatchSize\":-1}", "test"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("kluEndpointRhsBatchSize must be 0 or more");
+        assertThatThrownBy(() -> CaRunConfig.fromJson("{\"woodburyMonitorBatchSize\":-1}", "test"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("woodburyMonitorBatchSize must be 0 or more");
         assertThatThrownBy(() -> CaRunConfig.fromJson("{\"highImpedanceReactancePu\":0}", "test"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("highImpedanceReactancePu must be a positive number");
@@ -208,12 +214,14 @@ class CaRunConfigTest {
     /** The tool's per-call threshold override is a copy, not a mutation. */
     @Test
     void withOverloadThreshold_keepsEveryOtherKnob() {
-        CaRunConfig strict = CaRunConfig.fromJson("{\"threads\":3,\"ratingProvider\":\"RATING_B\"}", "test")
+        CaRunConfig strict = CaRunConfig.fromJson(
+                "{\"threads\":3,\"ratingProvider\":\"RATING_B\",\"woodburyMonitorBatchSize\":32}", "test")
                 .withOverloadThreshold(55.0);
 
         assertThat(strict.overloadThresholdOrDefault()).isEqualTo(55.0);
         assertThat(strict.threadsOrDefault()).isEqualTo(3);
         assertThat(strict.ratingProviderOrDefault()).isEqualTo("RATING_B");
+        assertThat(strict.woodburyMonitorBatchSizeOrDefault()).isEqualTo(32);
         assertThat(CaRunConfig.DEFAULT.overloadThresholdOrDefault()).isEqualTo(90.0);
     }
 
