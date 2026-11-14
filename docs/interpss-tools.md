@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.8.8**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.8.9**.
 
 ## Tool surface
 
@@ -796,6 +796,7 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.8.6 | **More room in the Run Contingency Analysis dialog.** Padding 18 → 22 px; header/threshold/case spacing 10/12 → 14/16 px; the advanced solver grid sits behind a 1 px left rule with 16 px indentation and 10×14 px gaps; section titles get 8 px separation; footer 16/12 → 20/16 px. 415 checks |
 | 0.8.7 | **Run CA dialog reordered.** The Case line now sits under the threshold, above the branch definitions; each branch section's radios and count message sit behind the same 1 px left rule with 16 px indentation; **Advanced solver settings** moves below the two sections, just above the footer. Divider 18 px, warning spacing 12 px. 415 checks |
 | 0.8.8 | **ipss_runnable.jar refreshed (plugin core 1.4.7 / ipss.core.lib 1.4.9).** `DclfContingencyConfig` dropped `dclfScreening`/`dcLoadingCutoff`/`dcFlowChangeCutoff` (still read from legacy `ca_run.json`, never applied) and gained `woodburyMonitorBatchSize`. `CaRunConfig` carries the new key, `ContingencyRunner` copies it, and the CA dialog/tool/host offer it while the three retired knobs leave the dialog and `caConfig`. JKLU 2.0.2 is the only new transitive and was already bundled. Java tests cover the new knob and legacy keys. 415 checks |
+| 0.8.9 | **Bigger CA disclosure glyph.** The **▸ / ▾** on the Run CA dialog's **Advanced solver settings** button is now its own 16 px span (line-height 1) with a 6 px gap, instead of a 12 px text prefix, so the control reads clearly at the button's normal size. Client-only; 415 checks |
 
 ## Troubleshooting
 

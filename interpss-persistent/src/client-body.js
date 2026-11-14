@@ -3810,8 +3810,13 @@ return {
             React.createElement('button', {
               onClick: () => setCaAdvanced(!caAdvanced),
               'aria-expanded': caAdvanced ? 'true' : 'false',
-              style: { ...btn, padding: '4px 10px', fontSize: '12px' },
-            }, (caAdvanced ? '▾ ' : '▸ ') + 'Advanced solver settings'),
+              style: { ...btn, gap: '6px', padding: '4px 10px', fontSize: '12px' },
+            },
+              React.createElement('span', {
+                'aria-hidden': 'true',
+                style: { fontSize: '16px', lineHeight: 1 },
+              }, caAdvanced ? '▾' : '▸'),
+              'Advanced solver settings'),
             caAdvanced ? React.createElement('div', {
               style: { marginTop: '12px', marginLeft: '2px', paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '10px 14px' },
             }, CA_SOLVER_FIELDS.map((field) => renderCaSolverField(field))) : null,
@@ -3926,7 +3931,7 @@ return {
           // The control is part of the completion row itself, so it cannot be separated
           // from the line that tells the user the run finished.
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.8'),
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.9'),
             React.createElement('button', {
               onClick: () => setCaShowRaw(!caShowRaw),
               style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },

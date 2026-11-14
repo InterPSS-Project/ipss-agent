@@ -624,7 +624,7 @@ check('the CA result panel offers the same Show log info control as ACLF',
   && slice.indexOf('caResult.stdout') >= 0
   && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
   && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
-  && slice.indexOf('v0.8.8') >= 0);
+  && slice.indexOf('v0.8.9') >= 0);
 check('the workspace tab declares its sidebar/remote services and client inject packages',
   rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
   && [
@@ -1369,7 +1369,8 @@ check('the Run Contingency Analysis dialog gives its advanced options room',
   && slice.indexOf("marginTop: '20px', borderTop") >= 0
   && slice.indexOf("paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)', display: 'flex', flexDirection: 'column'") >= 0
   && slice.indexOf("Case: ' + caCase.displayName") < slice.indexOf("caSection('contingency'")
-  && slice.indexOf("caSection('monitored'") < slice.indexOf("'Advanced solver settings'"));
+  && slice.indexOf("caSection('monitored'") < slice.indexOf("'Advanced solver settings'")
+  && slice.indexOf("fontSize: '16px', lineHeight: 1") >= 0);
 
 const cfgDialog = renderTab(withState([
   ['caseInput', 'data/ieee/Ieee14Bus/ieee14.ieee'],
