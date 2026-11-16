@@ -3731,7 +3731,7 @@ module.exports = {
         const mode = caForm === null ? 'all' : (kind === 'contingency' ? caForm.contingencyMode : caForm.monitorMode)
         return React.createElement('label', {
           key: value,
-          style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 0', cursor: 'pointer', fontSize: '14px' },
+          style: { display: 'flex', alignItems: 'center', gap: '10px', padding: '5px 0', cursor: 'pointer', fontSize: '12px' },
         },
           React.createElement('input', {
             type: 'radio',
@@ -3786,14 +3786,14 @@ module.exports = {
           key: 'message',
           style: {
             marginTop: '6px',
-            fontSize: '12px',
+            fontSize: '11px',
             color: message === null || message.kind === 'hint' || message.kind === 'checking'
               ? 'var(--dsw-alias-label-secondary)'
               : (message.kind === 'ok' ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-state-error-primary)'),
           },
         }, message === null ? '' : message.text))
         return React.createElement('div', { key: kind },
-          React.createElement('div', { key: 'title', style: { fontWeight: 600, fontSize: '15px', marginBottom: '8px' } }, title),
+          React.createElement('div', { key: 'title', style: { fontWeight: 600, fontSize: '13px', marginBottom: '8px' } }, title),
           React.createElement('div', {
             key: 'body',
             style: { marginLeft: '2px', paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)', display: 'flex', flexDirection: 'column', gap: '2px' },
@@ -3813,7 +3813,7 @@ module.exports = {
             React.createElement('button', { onClick: cancelCaDialog, style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
           ),
           caForm !== null ? React.createElement('div', { style: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' } },
-            React.createElement('span', { style: { fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, 'Over Loading Threshold(%):'),
+            React.createElement('span', { style: { fontSize: '12px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, 'Over Loading Threshold(%):'),
             React.createElement('input', {
               type: 'number',
               min: 1,
@@ -3868,7 +3868,7 @@ module.exports = {
           style: { background: 'var(--dsw-alias-bg-overlay)', border: '1px solid var(--dsw-alias-border-l1)', borderRadius: '10px', padding: '16px', width: '100%', maxWidth: '760px', height: '70vh', display: 'flex', flexDirection: 'column' },
         },
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' } },
-            React.createElement('div', { style: { fontWeight: 600 } }, 'Run AC Loadflow'),
+            React.createElement('div', { style: { fontWeight: 600, fontSize: '16px' } }, 'Run AC Loadflow'),
             React.createElement('button', { onClick: () => setOptOpen(false), style: { ...btn, padding: '2px 9px', fontSize: '14px' } }, '✕'),
           ),
           optLoading ? React.createElement('div', { style: { color: 'var(--dsw-alias-label-secondary)' } }, 'Loading…') :
@@ -3960,7 +3960,7 @@ module.exports = {
           // The control is part of the completion row itself, so it cannot be separated
           // from the line that tells the user the run finished.
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.9'),
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.10'),
             React.createElement('button', {
               onClick: () => setCaShowRaw(!caShowRaw),
               style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },
@@ -4987,11 +4987,11 @@ module.exports = {
           bad ? React.createElement('div', { style: { fontSize: '12px', color: 'var(--dsw-alias-state-error-primary)', textAlign: 'right' } }, cfgErrors[field.key]) : null)
       }
       const cfgRow = (label, control) => React.createElement('label', {
-        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '2px 0', fontSize: '14px', color: 'var(--dsw-alias-label-primary)' },
+        style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', padding: '2px 0', fontSize: '12px', color: 'var(--dsw-alias-label-primary)' },
       }, React.createElement('span', null, label), control)
-      const cfgHintStyle = { fontSize: '12px', color: 'var(--dsw-alias-label-secondary)' }
+      const cfgHintStyle = { fontSize: '11px', color: 'var(--dsw-alias-label-secondary)' }
       const cfgSection = (title, fields) => React.createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: '10px' } },
-        React.createElement('div', { style: { fontSize: '15px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, title),
+        React.createElement('div', { style: { fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)' } }, title),
         React.createElement('div', {
           style: { display: 'flex', flexDirection: 'column', gap: '10px', marginLeft: '2px', paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)' },
         }, fields.map(cfgField)))

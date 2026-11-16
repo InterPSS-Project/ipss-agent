@@ -624,7 +624,7 @@ check('the CA result panel offers the same Show log info control as ACLF',
   && slice.indexOf('caResult.stdout') >= 0
   && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
   && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
-  && slice.indexOf('v0.8.9') >= 0);
+  && slice.indexOf('v0.8.10') >= 0);
 check('the workspace tab declares its sidebar/remote services and client inject packages',
   rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
   && [
@@ -1355,10 +1355,10 @@ check('the gear opens the config dialog and the save asks the Host to write the 
   slice.indexOf('onClick: openConfig') >= 0 && slice.indexOf("setDialog('config')") >= 0
   && slice.indexOf("callRemote('saveNetDiagramOptions'") >= 0
   && slice.indexOf("callRemote('getNetDiagramOptions'") >= 0);
-check('the diagram-config dialog uses the Run Contingency Analysis type scale',
+check('the config/CA dialogs share the Run AC Loadflow type scale',
   slice.indexOf("cfgDialogShell('One-line diagram config options'") >= 0
-  && slice.indexOf("fontSize: '15px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)'") >= 0
-  && slice.indexOf("fontSize: '14px', color: 'var(--dsw-alias-label-primary)'") >= 0
+  && slice.indexOf("fontSize: '13px', fontWeight: 600, color: 'var(--dsw-alias-label-primary)'") >= 0
+  && slice.indexOf("fontSize: '12px', color: 'var(--dsw-alias-label-primary)'") >= 0
   && slice.indexOf("padding: '6px 26px', borderColor: 'var(--dsw-alias-brand-primary)'") >= 0
   && slice.indexOf("paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)'") >= 0
   && slice.indexOf("padding: '22px'") >= 0);
@@ -1367,6 +1367,8 @@ check('the Run Contingency Analysis dialog gives its advanced options room',
   slice.indexOf("padding: '22px', width: '100%', maxWidth: '620px'") >= 0
   && slice.indexOf("marginTop: '12px', marginLeft: '2px', paddingLeft: '16px', borderLeft") >= 0
   && slice.indexOf("marginTop: '20px', borderTop") >= 0
+  && slice.indexOf("fontWeight: 600, fontSize: '16px' } }, 'Run AC Loadflow'") >= 0
+  && slice.indexOf("fontWeight: 600, fontSize: '13px', marginBottom: '8px'") >= 0
   && slice.indexOf("paddingLeft: '16px', borderLeft: '1px solid var(--dsw-alias-border-l1)', display: 'flex', flexDirection: 'column'") >= 0
   && slice.indexOf("Case: ' + caCase.displayName") < slice.indexOf("caSection('contingency'")
   && slice.indexOf("caSection('monitored'") < slice.indexOf("'Advanced solver settings'")
