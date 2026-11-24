@@ -59,6 +59,12 @@ re-reads the tree, and clicking a file opens it in the normal file viewer. Dotfi
 named `script` / `scripts` / `template` are hidden (**0.7.20+**). Nothing outside `wspace/` is shown;
 **Workspace files** itself is unchanged.
 
+With plugin **0.8.2+**, the tab also **follows the InterPSS tab's Simu Case**: on open, **Refresh**,
+or a live case change it expands the case's ancestors, scrolls the row into view and highlights it
+(hover background, brand text). **0.8.4+** resets the tree before revealing a new selection so the
+previous expansion does not linger. Clicking another file still opens it; the highlight stays on the
+current Simu Case.
+
 You can then run the power system simulation workflow or chat following the procedures below.
 
 ### Open the InterPSS tab
@@ -75,11 +81,12 @@ You can then run the power system simulation workflow or chat following the proc
 
 The tab bar reads **Chat · InterPSS · Diagram · Trajectory**. The **Diagram** tab draws the
 one-line diagram of whichever case the InterPSS tab has selected (from that case’s `diagram/`
-folder). Plugin **0.8.0** is the recommended install (Diagram line through 0.6.37; BPA Dat
-0.7.1+; CA solver knobs 0.7.2+; OptAdj chat tool 0.7.4+; OptAdj Diagram tooltip loadings
-0.7.7+; click-to-select 0.7.13+; gen/load symbols 0.7.14+; free-end edge preview 0.7.15+;
-settings-family dialogs 0.7.16+; InterPSS Workspace 0.7.18+; ACLF/CA log toggles 0.7.22–0.7.28;
-CA build stamp `v0.8.0`).
+folder). Plugin **0.8.12** is the recommended install (Diagram line through 0.6.37; BPA Dat
+0.7.1+; CA solver knobs 0.7.2+ / `woodburyMonitorBatchSize` 0.8.8+; OptAdj chat tool 0.7.4+;
+OptAdj Diagram tooltip loadings 0.7.7+; click-to-select 0.7.13+; gen/load symbols 0.7.14+;
+free-end edge preview 0.7.15+; settings-family dialogs 0.7.16+; InterPSS Workspace 0.7.18+ /
+Simu Case follow 0.8.2+; ACLF/CA log toggles 0.7.22–0.7.28; CA **Report** 0.8.11+;
+CA build stamp `v0.8.12`).
 
 On the tab you can:
 
@@ -284,21 +291,20 @@ For a custom pick:
 
 An out-of-range threshold blocks **OK** with `over loading threshold must be a percentage between 0 and 1000`.
 
-**Advanced solver settings (0.7.2+).** Below the threshold, the dialog has a **▸ Advanced solver
-settings** disclosure with the DC contingency solver's own knobs — they are the fields of the
-engine's `DclfContingencyConfig` (plus the worker count) and are copied onto the solver by the
-runner. Every one defaults to the value the runner used before the panel existed, so leaving the
-panel closed changes nothing.
+**Advanced solver settings (0.7.2+; layout 0.8.6–0.8.10).** The Case line sits under the threshold
+(**0.8.7+**). Below the branch sections, a **▸ Advanced solver settings** disclosure (**0.8.9+**
+uses a larger glyph) carries the DC contingency solver knobs — fields of the engine's
+`DclfContingencyConfig` (plus the worker count), copied onto the solver by the runner. Every one
+defaults to the value the runner used before the panel existed, so leaving the panel closed changes
+nothing. Dialog padding/type scale match the other run dialogs (**0.8.10+**).
 
 
 | Field                           | Default                       | Meaning                                                                                                                                                                                                                                         |
 | ------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Include losses (INC_LOSS)       | `true`                        | Whether the DC model includes losses                                                                                                                                                                                                            |
-| Screening pass                  | `false`                       | The engine's pre-screening pass (uses the two cutoffs below)                                                                                                                                                                                    |
-| DC loading cutoff (%)           | `100`                         | Screening cutoff; `0` means no cutoff                                                                                                                                                                                                           |
-| DC flow change cutoff (%)       | `200`                         | Screening cutoff on the flow change                                                                                                                                                                                                             |
 | Solution method                 | `SparseEqnSolve`              | `SparseEqnSolve` or `WoodburyMatrixUpdate`                                                                                                                                                                                                      |
 | KLU RHS batch size (0 = off)    | `0`                           | Batch size for the KLU right-hand-side solves                                                                                                                                                                                                   |
+| Woodbury monitor batch size (0 = off) | `0`                     | Batch size for Woodbury monitor updates (**0.8.8+**)                                                                                                                                                                                            |
 | Cache violation shift factors   | `false`                       | Reuse violated-pair shift factors between contingencies                                                                                                                                                                                         |
 | Islanding treatment             | `ANCHORED_COMPENSATE_ONE_BUS` | `SKIP`, `ANCHORED_COMPENSATE_ONE_BUS` or `FULL_DCLF_REPLAY`                                                                                                                                                                                     |
 | N-1 islanding replay            | `false`                       | Replay an islanding N-1 case with a full DCLF solve                                                                                                                                                                                             |
@@ -310,7 +316,9 @@ panel closed changes nothing.
 | Threads (0 = all cores)         | `0`                           | Worker count for the parallel scan                                                                                                                                                                                                              |
 
 
-An unusable value blocks **OK** with the field's own message (for example `Solution method must be SparseEqnSolve | WoodburyMatrixUpdate`); **OK** writes all twenty keys to `config/ca_run.json`.
+An unusable value blocks **OK** with the field's own message (for example `Solution method must be SparseEqnSolve | WoodburyMatrixUpdate`); **OK** writes the active keys to `config/ca_run.json`.
+Legacy `dclfScreening` / `dcLoadingCutoff` / `dcFlowChangeCutoff` keys in an older file are still
+accepted but are **not applied** and no longer appear in the dialog (**0.8.8+**).
 
 > **Overload detection needs branch ratings.** The check compares each post-contingency flow with a
 > branch rating (`LimMvaA`/`LimMvaB`/`LimMvaC`). A case whose branch table carries none — the
@@ -335,10 +343,10 @@ An unusable value blocks **OK** with the field's own message (for example `Solut
 
 On success:
 
-- `✓ Contingency analysis complete · v0.8.0` (build stamp since **0.7.24**; if the stamp is missing or still says `v0.7.28`, hard-reload / restart — the page is on an older bundle)
+- `✓ Contingency analysis complete · v0.8.12` (build stamp since **0.7.24**; if the stamp is missing or still says an older `v0.8.x`, hard-reload / restart — the page is on an older bundle)
 - **Show CA Log** on the same completion row (**0.7.23+**; label since **0.7.28**) for the CA run's stdout/stderr
 - Contingency result file name (typically `<stem>_DF_contingency.csv`)
-- A **Contingency** button to open that CSV in the explorer
+- Explorer row: **Contingency** to open that CSV, and **Report** (**0.8.11+**) for the NERC TPL-001-5 Markdown under `result/` (`NERC_TPL_001_5_Report.md`). A failed report names this card (`NERC TPL-001-5 report failed: …` — **0.8.12+**)
 
 When both ACLF and CA results are present, the result panel also carries **Show ACLF Log** (left) and
 **Show CA Log** (right) — each opens its own log block (**0.7.26+**).
@@ -352,9 +360,11 @@ CA requires a loaded case. You can run CA after Load even if you have not clicke
 ### Generate Reports
 
 1. Ensure result CSVs exist (run **ACLF**, and **CA** if you need a NERC-style report).
-2. Click **Report** when it is enabled (the tab checks that result files are available).
-
-Report type is chosen automatically:
+2. Click **Report** when it is enabled:
+   - On the **ACLF** card — AC Loadflow Markdown (`AC_Loadflow_Report.md`)
+   - On the **CA** card (**0.8.11+**, after **Contingency**) — always NERC TPL-001-5
+     (`NERC_TPL_001_5_Report.md`), labelled **NERC TPL-001-5**
+   - On the shared / top **Report** control — type is chosen automatically:
 
 
 | Condition                                 | Report                                                 |
@@ -569,7 +579,7 @@ To size load-Q changes from `dV/dQ` and move bus voltages into a band (IEEE14 Bu
 - OptAdj method and IEEE39 anchors — [gen_opt_adjustment.md](../gen_opt_adjustment.md)
 - Load-Q / OptAdj user workflows — [loadflow-adjustment-user-guide.md](loadflow-adjustment-user-guide.md)
 - InterPSS DSH Chat tools (developer reference) — [interpss-tools.md](../interpss-tools.md)
-- Release **0.8.0** (Workspace, logs, settings-family dialogs; trail since 0.7.15) — [Release-V0.8.0.md](../release_note/Release-V0.8.0.md)
+- Release **0.8.12** (Workspace↔case sync, CA knobs/Report; trail since 0.8.0) — [Release-V0.8.12.md](../release_note/Release-V0.8.12.md)
 - Batch Chat / `/ipss-sim` — [batch_chat_user_guide.md](batch_chat_user_guide.md)
 - Interactive HTML dashboards and NERC slide decks — see the README Reference table (nerc-report-html / nerc-report-slides skills)
 - Install or update the plugin — [InstallDSHPlugin.md](../../InstallDSHPlugin.md)
