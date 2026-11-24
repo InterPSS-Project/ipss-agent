@@ -12,8 +12,8 @@ contingency analysis and report what overloaded. In DeepSeek Harness this is a s
 agents use [Fallbacks](#fallbacks).
 
 The tool **bypasses the Contingency Analysis dialog**: nothing is prompted for, and the inputs come
-from the resolution order below. It writes the contingency CSV that the NERC TPL-001-5 report and the
-ACLF card's **Report** button consume — run it before generating either.
+from the resolution order below. It writes the contingency CSV that the NERC TPL-001-5 report consumes — generate that
+report with the CA card's own **Report** button; run CA before using it.
 
 ## Preferred path (DeepSeek Harness)
 
@@ -142,6 +142,13 @@ endpoint the tab's Contingency tab uses — and the tab's own table sorts the sa
 (0.4.3+), and every header is clickable to sort by that column — the whole file is sorted before a
 page is sliced, so the order survives scrolling. Point the user at it instead of pasting CSV rows — and use it
 yourself to rank the worst outages when a decision follows.
+
+With plugin 0.8.11+ that row also carries a **Report** button, immediately after **Contingency**. It
+generates the **NERC TPL-001-5** Markdown report from the run's CSVs (`NERC_TPL_001_5_Report.md`
+under the case's `result/`) and opens it in the file surface — the same Report control as the ACLF
+card, but this one includes the contingency section. It needs the contingency CSV this run wrote and
+the ACLF-side CSVs; run ACLF first if the voltage/thermal sections should be current. Point the user
+at the button rather than running the `report` CLI by hand.
 
 ### Replying after a run
 

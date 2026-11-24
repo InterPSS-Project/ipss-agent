@@ -619,12 +619,17 @@ check('the workspace tab lists wspace lazily and opens files through the resourc
 check('the Host runAclf service forwards the captured JVM stdio',
   rd(LIB_HOST).indexOf('stdout: parsed.stdout ||') >= 0
   && rd(LIB_HOST).indexOf('stderr: parsed.stderr ||') >= 0);
+check('the CA card offers the NERC report beside its Contingency result',
+  rd(LIB_CLIENT).indexOf("reportType: 'nerc'") >= 0
+  && rd(LIB_CLIENT).indexOf("showReport: true,") >= 0
+  && rd(LIB_CLIENT).indexOf("NERC_TPL_001_5_Report.md") >= 0
+  && rd(LIB_CLIENT).indexOf("'Generate the ' + reportLabel + ' report from this run'") >= 0);
 check('the CA result panel offers the same Show log info control as ACLF',
   slice.indexOf('caShowRaw') >= 0
   && slice.indexOf('caResult.stdout') >= 0
   && slice.indexOf("'Hide CA Log' : 'Show CA Log'") >= 0
   && slice.indexOf("'Hide ACLF Log' : 'Show ACLF Log'") >= 0
-  && slice.indexOf('v0.8.10') >= 0);
+  && slice.indexOf('v0.8.12') >= 0);
 check('the workspace tab declares its sidebar/remote services and client inject packages',
   rd(LIB_CLIENT).indexOf("inject: ['slots', 'sidebarRightTabs', 'remote', 'remote.workspaceFiles']") >= 0
   && [

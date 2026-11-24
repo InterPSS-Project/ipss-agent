@@ -3960,7 +3960,7 @@ module.exports = {
           // The control is part of the completion row itself, so it cannot be separated
           // from the line that tells the user the run finished.
           React.createElement('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px', marginBottom: '8px' } },
-            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.10'),
+            React.createElement('span', { style: { color: 'var(--dsw-alias-state-success-primary)', fontWeight: 600 } }, '✓ Contingency analysis complete · v0.8.12'),
             React.createElement('button', {
               onClick: () => setCaShowRaw(!caShowRaw),
               style: { ...btn, height: '28px', padding: '0 10px', fontSize: '12px' },
@@ -5386,7 +5386,8 @@ module.exports = {
         kinds: CA_EXPLORER_KINDS,
         rowLabel: 'Explore result',
         label: 'InterPSS contingency analysis',
-        showReport: false,
+        showReport: true,
+        reportType: 'nerc',
         // Overload rows are only useful worst-first; the header stays clickable to flip it.
         defaultSort: 'LoadingPercent',
         defaultSortDesc: true,
@@ -5541,6 +5542,12 @@ module.exports = {
       const rowLabel = typeof props.rowLabel === 'string' && props.rowLabel !== '' ? props.rowLabel : 'Explore results'
       const cardLabel = typeof props.label === 'string' && props.label !== '' ? props.label : 'InterPSS AC load flow'
       const showReport = props.showReport !== false
+      // The ACLF card asks for the load-flow report even when a contingency CSV is
+      // present; the CA card asks for the NERC TPL-001-5 report, whose sections need
+      // the contingency CSV this run just wrote.
+      const reportType = props.reportType === 'nerc' ? 'nerc' : 'aclf'
+      const reportLabel = reportType === 'nerc' ? 'NERC TPL-001-5' : 'AC Loadflow'
+      const reportFile = reportType === 'nerc' ? 'NERC_TPL_001_5_Report.md' : 'AC_Loadflow_Report.md'
       // The Host sorts before slicing the page, so an opened scope can start sorted (the
       // CA card opens worst-loading-first) and a header click re-reads page 0 sorted.
       const [sortColumn, setSortColumn] = React.useState(
@@ -5562,9 +5569,9 @@ module.exports = {
       // appending the same page twice.
       const loadingMoreRef = React.useRef(false)
 
-      // Generate the AC Loadflow Markdown report from this run's CSVs, then open
-      // it in the file surface. `reportType: 'aclf'` is explicit so a case that
-      // also has a contingency CSV still yields the load-flow report.
+      // Generate this card's Markdown report from the run's CSVs, then open it in the file
+      // surface. The requested type is explicit so a case that also has a contingency CSV
+      // still yields the load-flow report from the ACLF card, and vice versa from the CA card.
       function generateReport() {
         if (reportRunning || meta === null) return
         setReportRunning(true)
@@ -5572,18 +5579,19 @@ module.exports = {
         callRemote('runReport', {
           input: meta.case,
           displayName: aclfReportName(meta.case),
-          reportType: 'aclf',
+          reportType: reportType,
           sessionId: sessionId,
         }).then(
           (res) => {
             setReportRunning(false)
             if (res && res.ok) {
               if (typeof props.openFile === 'function') {
-                props.openFile('wspace/' + (res.resultDir || meta.resultDir) + '/AC_Loadflow_Report.md')
+                const file = res.reportType === 'nerc' ? 'NERC_TPL_001_5_Report.md' : reportFile
+                props.openFile('wspace/' + (res.resultDir || meta.resultDir) + '/' + file)
               }
               return
             }
-            setReportError(res && res.error ? res.error : 'failed to generate the AC Loadflow report')
+            setReportError(res && res.error ? res.error : 'failed to generate the ' + reportLabel + ' report')
           },
           (err) => { setReportRunning(false); setReportError(String(err && err.message ? err.message : err)) },
         )
@@ -5733,7 +5741,7 @@ module.exports = {
               key: 'report',
               onClick: generateReport,
               disabled: reportRunning,
-              title: 'Generate the AC Loadflow report from this run',
+              title: 'Generate the ' + reportLabel + ' report from this run',
               style: { ...smallBtn, opacity: reportRunning ? 0.6 : 1 },
             }, reportRunning ? 'Generating…' : 'Report'),
           )
@@ -5779,7 +5787,7 @@ module.exports = {
         children.push(React.createElement('div', {
           key: 'report-error',
           style: { ...mono, fontSize: '11px', marginTop: '6px', color: 'var(--dsw-alias-state-error-primary)' },
-        }, 'AC Loadflow report failed: ' + String(reportError)))
+        }, reportLabel + ' report failed: ' + String(reportError)))
       }
       return React.createElement('div', { style: { display: 'flex', flexDirection: 'column', margin: '4px 0 4px 4px' } }, children)
     }

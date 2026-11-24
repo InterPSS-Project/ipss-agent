@@ -6,7 +6,7 @@ This document covers what each tool accepts, what it returns, how its card rende
 the tools relate to the tab, the `/api` RPCs, and the agent skills.
 
 Reference implementation: `interpss-persistent/lib/index.js` (Host) and
-`interpss-persistent/lib/client.js` (Client). Current version: **0.8.10**.
+`interpss-persistent/lib/client.js` (Client). Current version: **0.8.12**.
 
 ## Tool surface
 
@@ -798,6 +798,8 @@ objects) so a card can render without re-deriving paths from the result text.
 | 0.8.8 | **ipss_runnable.jar refreshed (plugin core 1.4.7 / ipss.core.lib 1.4.9).** `DclfContingencyConfig` dropped `dclfScreening`/`dcLoadingCutoff`/`dcFlowChangeCutoff` (still read from legacy `ca_run.json`, never applied) and gained `woodburyMonitorBatchSize`. `CaRunConfig` carries the new key, `ContingencyRunner` copies it, and the CA dialog/tool/host offer it while the three retired knobs leave the dialog and `caConfig`. JKLU 2.0.2 is the only new transitive and was already bundled. Java tests cover the new knob and legacy keys. 415 checks |
 | 0.8.9 | **Bigger CA disclosure glyph.** The **▸ / ▾** on the Run CA dialog's **Advanced solver settings** button is now its own 16 px span (line-height 1) with a 6 px gap, instead of a 12 px text prefix, so the control reads clearly at the button's normal size. Client-only; 415 checks |
 | 0.8.10 | **One type scale for the three run dialogs.** Run AC Loadflow now states its 16 px title; the Run CA and One-line diagram dialogs drop to the same scale — 13 px/600 section titles, 12 px field/radio labels, 11 px hints — instead of 15/14/12. Layout, colours and behaviour are unchanged. Client-only; 415 checks |
+| 0.8.11 | **Report button on the CA result card.** The CA card's explorer row now carries **Report** immediately after **Contingency**. It calls the same `runReport` endpoint as the ACLF card but with `reportType: 'nerc'`, writes/opens `NERC_TPL_001_5_Report.md` under the case's `result/`, and labels the control `NERC TPL-001-5`. The `ipss-case-ca` skill documents the button. Client-only; 416 checks |
+| 0.8.12 | **Report failure names the right report.** The shared result panel's error line now uses the card's report name (`NERC TPL-001-5 report failed: …` on the CA card, `AC Loadflow report failed: …` on the ACLF card) instead of always saying AC Loadflow. 416 checks |
 
 ## Troubleshooting
 
